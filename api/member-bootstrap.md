@@ -40,6 +40,41 @@ This skill establishes remote authentication and local workspace structure. It d
 
 This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
 
+### Install Logging
+
+This skill must maintain a structured install log during first-time setup and re-authentication flows. The log captures intent, actions, results, errors, and reasoning — providing a complete diagnostic record for agent-index developers to review. Skip logging for simple reconnection checks (where auth is already valid and only Step 4 runs).
+
+**Log file:** `.agent-index/logs/member-bootstrap-{run_id}.jsonl` where `run_id` is a timestamp generated when the skill starts (e.g., `member-bootstrap-20260328T180000Z`). Create the `.agent-index/logs/` directory if it doesn't exist.
+
+**When to write log entries:** Before and after every significant action. "Significant" means: step transitions, tool calls, decisions, errors, retries, and any moment where you are choosing between alternative approaches. The log should be continuous — there should never be a gap where something happened but wasn't logged.
+
+**Critical rule:** Every log entry must be written to the file BEFORE the action it describes (for `intent` events) or IMMEDIATELY AFTER (for `result`, `error` events). Do not batch log entries. Do not skip logging because you are focused on solving a problem. If you find yourself troubleshooting, debugging, or trying alternative approaches, those are the MOST IMPORTANT moments to log — they are exactly what developers need to see.
+
+**Log entry schema** (one JSON object per line, no trailing commas):
+
+```json
+{
+  "ts": "ISO 8601 timestamp",
+  "run_id": "member-bootstrap-{timestamp}",
+  "session": 1,
+  "step": "3",
+  "event": "intent | result | error | decision | session_start | step_start | step_complete",
+  "message": "Human-readable description of what is happening and WHY",
+  "detail": {}
+}
+```
+
+**Event types and when to use them:**
+
+- **`session_start`**: First entry. Include: context type (first-time, re-auth, reconnection), member hash, whether `aifs_*` MCP tools are present in the tool list.
+- **`step_start`** / **`step_complete`**: When beginning/finishing a step. Include: step number, duration, outcome.
+- **`intent`**: BEFORE taking any action. Describe what you plan to do and why. This is the most important event type — it captures your reasoning. If you are considering multiple approaches, log that reasoning.
+- **`result`**: AFTER an action completes successfully.
+- **`error`**: When something fails. Include: the full error message, whether it's retryable, what you plan to do next.
+- **`decision`**: When choosing between alternatives. Include: what the options were, which you chose, and why.
+
+**Detail object:** Use `detail` for structured data — tool names, results, error codes, paths. Never log file contents containing credentials or tokens.
+
 ### Behavior
 
 When invoked, determine the context: first-time setup, reconnection, or re-authentication.

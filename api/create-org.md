@@ -784,6 +784,59 @@ This task uses the `agent-index-filesystem` MCP server for all remote filesystem
 
 **If MCP tools are not available:** This means the MCP server did not load. The most common causes are: (1) `.claude/settings.json` is missing or malformed, (2) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (3) the session needs to be restarted for settings changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools.
 
+### Install Logging
+
+This task must maintain a structured install log throughout its execution. The log captures intent, actions, results, errors, and reasoning — providing a complete diagnostic record for agent-index developers to review.
+
+**Log file:** `.agent-index/logs/create-org-{run_id}.jsonl` where `run_id` is a timestamp generated when the task first starts (e.g., `create-org-20260328T180000Z`). Store the `run_id` in the install state file so subsequent sessions append to the same log. Create the `.agent-index/logs/` directory if it doesn't exist.
+
+**When to write log entries:** Before and after every significant action. "Significant" means: step transitions, tool calls, file writes, decisions, errors, retries, and any moment where you are choosing between alternative approaches. The log should be continuous — there should never be a gap where something happened but wasn't logged.
+
+**Critical rule:** Every log entry must be written to the file BEFORE the action it describes (for `intent` events) or IMMEDIATELY AFTER (for `result`, `error` events). Do not batch log entries. Do not skip logging because you are focused on solving a problem. If you find yourself troubleshooting, debugging, or trying alternative approaches, those are the MOST IMPORTANT moments to log — they are exactly what developers need to see.
+
+**Log entry schema** (one JSON object per line, no trailing commas):
+
+```json
+{
+  "ts": "ISO 8601 timestamp",
+  "run_id": "create-org-{timestamp}",
+  "session": 1,
+  "step": "3c",
+  "event": "intent | result | error | decision | session_start | session_resume | step_start | step_complete",
+  "message": "Human-readable description of what is happening and WHY",
+  "detail": {}
+}
+```
+
+**Event types and when to use them:**
+
+- **`session_start`**: First entry in a new session. Include: session number, whether resuming from install state, tool list summary (specifically: are `aifs_*` MCP tools present in the tool list? list them).
+- **`session_resume`**: When resuming from install state. Include: the install state status, completed steps, next step.
+- **`step_start`**: When beginning a new step. Include: step number, brief description.
+- **`step_complete`**: When a step finishes. Include: step number, duration, outcome.
+- **`intent`**: BEFORE taking any action. Describe what you plan to do and why. This is the most important event type — it captures your reasoning. Examples:
+  - "Calling aifs_auth_status to check if member is already authenticated"
+  - "Writing .claude/settings.json with MCP server configuration"
+  - "Domain raw.githubusercontent.com is blocked — saving install state for resume"
+  - "aifs_write tool not found in tool list — checking .claude/settings.json for MCP server config"
+- **`result`**: AFTER an action completes successfully. Include what happened.
+- **`error`**: When something fails. Include: the full error message, whether it's retryable, what you plan to do next. In `detail`, include any error codes, stack traces, or diagnostic information available.
+- **`decision`**: When choosing between alternatives. Include: what the options were, which you chose, and why. This is critical for diagnosing cases where the wrong path was taken.
+
+**Detail object:** Use `detail` for structured data that supplements the message. Examples:
+
+```json
+{"detail": {"tool": "aifs_auth_status", "result": {"authenticated": false, "reason": "no_credential"}}}
+{"detail": {"tool": "aifs_write", "path": "/org-config.json", "size_bytes": 1234}}
+{"detail": {"blocked_domains": ["accounts.google.com"], "reachable_domains": ["raw.githubusercontent.com"]}}
+{"detail": {"options": ["use MCP tool", "build shell wrapper"], "chosen": "use MCP tool", "reason": "MCP tools are available in tool list"}}
+{"detail": {"error_code": "NETWORK_ERROR", "retryable": true, "retry_count": 1}}
+```
+
+**What NOT to log:** File contents (especially anything containing credentials, OAuth client secrets, or tokens). Log the path and size, not the content.
+
+**Session continuity:** When resuming from a previous session, read the existing log file and append to it. Increment the session number. The first entry should be `session_resume` with the install state context.
+
 ### Behavior
 
 This task is run by a technical or semi-technical org admin. It can assume a higher level of comfort with concepts like OAuth client IDs, S3 buckets, and Google Cloud Console than a typical member setup flow. Explanations should be clear but not over-simplified.
