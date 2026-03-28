@@ -451,7 +451,7 @@ To submit a collection to the marketplace:
 
 1. Ensure the collection meets all requirements in this document
 2. Host the collection in a publicly accessible Git repository
-3. Open an issue in the agent-index marketplace repository at `https://github.com/agent-index/marketplace` with the collection name, repository URL, and a brief description
+3. Open an issue in the agent-index resource listings repository at `https://github.com/agent-index/agent-index-resource-listings` with the collection name, repository URL, and a brief description
 4. The agent-index team will review for standards compliance and add the collection to `directory.json` upon approval
 
 ---

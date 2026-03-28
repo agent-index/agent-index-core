@@ -36,6 +36,10 @@ This skill establishes remote authentication and local workspace structure. It d
 
 ## Directives
 
+### MCP Tool Usage
+
+This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
+
 ### Behavior
 
 When invoked, determine the context: first-time setup, reconnection, or re-authentication.

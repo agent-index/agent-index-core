@@ -141,7 +141,7 @@ See `standards.md` in this directory for the full specification for building age
 
 The agent-index collection standard is open. Anyone can build a marketplace-eligible collection. See `standards.md` for the full specification.
 
-To submit a collection to the marketplace, open an issue at: https://github.com/agent-index/marketplace
+To submit a collection to the marketplace, open an issue at: https://github.com/agent-index/agent-index-resource-listings
 
 ---
 

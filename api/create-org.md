@@ -271,7 +271,7 @@ Place the files at their final locations:
 - Set `mcp_server.adapter_version` to the version from the adapter directory
 - Set `mcp_server.bundle_path` to `mcp-servers/filesystem/server.bundle.js`
 - Set `auth.method` to `per-member`
-- Set `auth.credential_store` to `~/.agent-index/credentials/`
+- Set `auth.credential_store` to `.agent-index/credentials/` (relative to project root — this ensures credentials persist across Cowork sessions since the project directory is mounted from the host)
 - Set `connection` to the collected config from Step 3
 
 **3. Write `.claude/settings.json`** with the MCP server configuration:
@@ -773,6 +773,16 @@ Present the final summary:
 ---
 
 ## Directives
+
+### MCP Tool Usage
+
+This task uses the `agent-index-filesystem` MCP server for all remote filesystem operations. The server is configured in `.claude/settings.json` and starts automatically when the Cowork session launches.
+
+**Tool invocation:** When this document says `aifs_read(path)`, `aifs_write(path, content)`, `aifs_auth_status()`, etc., these are MCP tool calls on the `agent-index-filesystem` server. Invoke them as MCP tools — they will appear in the tool list with names like `mcp__agent-index-filesystem__aifs_read`. They are NOT shell commands, JavaScript functions, or Python calls.
+
+**Critical prohibition:** NEVER invoke the MCP server binary (`server.bundle.js`) directly via bash, node, or any shell script. NEVER build wrapper scripts (bash, Python, Node.js, or otherwise) to pipe JSON-RPC messages to the server process. The MCP server is managed by the Cowork runtime — all interaction MUST go through the MCP tool interface. If an `aifs_*` tool call fails or the tool is not found in the tool list, diagnose the MCP configuration (check `.claude/settings.json`, verify the bundle path exists) and surface the problem to the admin. Do not attempt workarounds.
+
+**If MCP tools are not available:** This means the MCP server did not load. The most common causes are: (1) `.claude/settings.json` is missing or malformed, (2) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (3) the session needs to be restarted for settings changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools.
 
 ### Behavior
 

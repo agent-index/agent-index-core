@@ -232,6 +232,10 @@ Update-available notices (from Step 5) are only shown at `brief` and `detailed` 
 
 ## Directives
 
+### MCP Tool Usage
+
+This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
+
 ### Behavior
 
 Run this task automatically at the start of every session before any member interaction. Do not wait for the member to invoke it. Do not announce that you are running it unless a notice needs to be surfaced or the verbosity setting calls for a readiness confirmation.

@@ -140,6 +140,10 @@ If the member chooses to open the marketplace: invoke `run agent-index-marketpla
 
 ## Directives
 
+### MCP Tool Usage
+
+This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and halt.
+
 ### Behavior
 
 Keep this task efficient. Org admins using it know what they want. Present the current state clearly and act on the request.
