@@ -1,1 +1,150 @@
-# agent-index-core
+# Agent-Index Core
+
+The foundational collection for the agent-index system. Agent-index is an organizational knowledge and workflow layer built on top of Claude Cowork. It lets orgs define, share, and personalize AI-powered workflows — and lets members install those workflows into their own Cowork environment.
+
+This repository is the starting point for every agent-index deployment.
+
+---
+
+## What's Included
+
+**Infrastructure skills and tasks** (pre-installed for all members):
+- **Session Start** — runs automatically at the start of every session to load member context
+- **Member Bootstrap** — authenticates to the org's remote filesystem and creates the local member workspace
+- **Org Setup** — installs skills and tasks from the org's collections into a member's workspace
+- **Preferences Management** — manages session preferences and invocation aliases
+- **System Tutorial** — explains how agent-index works
+
+**Org management tasks**:
+- **Create Org** — first-time org configuration
+- **Edit Org** — manage admins and launch the marketplace
+
+---
+
+## Prerequisites
+
+- Claude Cowork (Teams plan or higher)
+- A remote storage backend for shared org files — Google Drive, Microsoft OneDrive, or Amazon S3
+- Git installed on the machine of the person doing org setup
+
+---
+
+## Getting Started: First-Time Org Setup
+
+This process is done once by an org admin. It takes about 10–15 minutes.
+
+### Step 1: Clone this repository
+
+Clone agent-index-core to a local directory (e.g., `~/agent-index/`).
+
+```bash
+mkdir ~/agent-index && cd ~/agent-index
+git clone https://github.com/agent-index/agent-index-core
+```
+
+After cloning, your local directory should look like this:
+
+```
+~/agent-index/
+  /agent-index-core/          ← just cloned
+    agent-index.json           ← root registry (inside agent-index-core)
+```
+
+### Step 2: Open Cowork and run org setup
+
+Open Claude Cowork. Set your working directory to `~/agent-index/`.
+
+Then say exactly this to Claude:
+
+> **"Set up my agent-index org"**
+
+Claude will read this README, find `agent-index.json`, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
+
+That's it. Claude takes it from there.
+
+---
+
+## Getting Started: Member Setup
+
+After an org admin has completed org setup, new members follow this process:
+
+1. Download the bootstrap zip from your org's shared storage (your org admin will provide download instructions specific to your storage backend)
+2. Unpack the zip to `~/agent-index/`
+3. Open Claude Cowork and set your working folder to `~/agent-index/`
+4. Say: **"set up my agent-index member workspace"**
+
+The bootstrap hook will detect you as a new member and guide you through authenticating to the org's remote storage and setting up your local workspace.
+
+---
+
+## Directory Structure
+
+Agent-index uses a two-tier filesystem: member files are local, org/shared files are on remote storage accessed via an MCP server.
+
+**Local (on member's machine at `~/agent-index/`):**
+```
+~/agent-index/
+  CLAUDE.md                           ← Claude context file (from bootstrap zip)
+  agent-index.json                    ← root registry (from bootstrap zip)
+  .claude/                            ← Cowork session config (from bootstrap zip)
+    settings.json
+  /agent-index-core/                  ← this repo (from bootstrap zip)
+    .claude/
+      hooks/
+        session-bootstrap.sh          ← bootstrap script (runs at session start)
+  /members/
+    /a7f3b2c1d4e5f698/               ← member workspace (hash of email)
+      member-index.json
+      /skills/
+      /tasks/
+      /profile/
+```
+
+**Remote (on org's shared storage, accessed via `aifs_*` MCP tools):**
+```
+/
+  org-config.json                     ← org configuration (written by create-org)
+  members-registry.json               ← hash-to-identity mapping
+  /agent-index-core/                  ← uploaded by create-org
+  /agent-index-marketplace/           ← uploaded by marketplace installer
+  /projects/                          ← example: installed marketplace collection
+  /shared/
+    /members/artifacts/               ← per-member shared artifact namespace
+    /marketplace-cache/
+    /bootstrap/
+      member-bootstrap.zip            ← bootstrap zip for new members
+```
+
+---
+
+## For Org Admins
+
+### Installing marketplace collections
+
+After org setup, say `@ai:marketplace` or "open marketplace" to browse and install collections for your org's members.
+
+### Managing org admins
+
+Say `@ai:edit-org` or "edit org" to add or remove org admins.
+
+### Managing org roles
+
+Say `@ai:edit-org` or "edit org" to define, edit, or remove org roles. Org roles determine which collections new members are prompted to install during onboarding.
+
+### Building your own collections
+
+See `standards.md` in this directory for the full specification for building agent-index collections. Any collection that meets the standard can be submitted to the marketplace.
+
+---
+
+## For Collection Authors
+
+The agent-index collection standard is open. Anyone can build a marketplace-eligible collection. See `standards.md` for the full specification.
+
+To submit a collection to the marketplace, open an issue at: https://github.com/agent-index/marketplace
+
+---
+
+## Version History
+
+See CHANGELOG.md.

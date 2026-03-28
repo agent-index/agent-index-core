@@ -1,0 +1,24 @@
+{
+  "name": "org-setup",
+  "type": "skill",
+  "display_name": "Org Setup",
+  "collection": "agent-index-core",
+  "collection_version": "2.0.0",
+  "version": "2.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": true,
+  "always_on_eligible": false,
+  "setup_template": "org-setup-setup.md",
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {},
+  "dependencies": {
+    "skills": [
+      "member-bootstrap",
+      "preferences-management"
+    ],
+    "tasks": []
+  },
+  "external_dependencies": []
+}

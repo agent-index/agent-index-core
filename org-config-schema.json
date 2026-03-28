@@ -1,0 +1,60 @@
+{
+  "org_name": "Acme Corp",
+  "org_id": "acme-corp",
+  "agent_index_version": "2.0.0",
+  "created": "2026-03-17",
+  "last_updated": "2026-03-24",
+  "remote_filesystem": {
+    "backend": "gdrive",
+    "mcp_server": {
+      "adapter": "gdrive",
+      "adapter_version": "1.0.0",
+      "bundle_path": "mcp-servers/filesystem/server.bundle.js"
+    },
+    "auth": {
+      "method": "per-member"
+    },
+    "connection": {
+      "drive_id": "0ABcDeFgHiJkLmNoPq",
+      "root_folder_id": "1a2B3c4D5e6F7g8H9i",
+      "client_id": "123456789-abcdefg.apps.googleusercontent.com",
+      "client_secret": "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  "paths": {
+    "library_root": "/",
+    "shared_root": "/shared/",
+    "shared_artifacts_root": "/shared/members/artifacts/",
+    "members_registry_path": "/members-registry.json",
+    "marketplace_cache_path": "/shared/marketplace-cache/",
+    "bootstrap_zip_path": "/shared/bootstrap/member-bootstrap.zip"
+  },
+  "admins": [
+    {
+      "member_hash": "a7f3b2c1d4e5f698",
+      "display_name": "Bill Salak",
+      "email": "bill@agent-index.ai",
+      "granted_by": "system",
+      "granted_date": "2026-03-17"
+    }
+  ],
+  "org_roles": [
+    {
+      "role_id": "engineer",
+      "display_name": "Engineer",
+      "description": "Software engineers and developers",
+      "default_collections": ["projects"],
+      "created_date": "2026-03-17",
+      "created_by": "a7f3b2c1d4e5f698"
+    }
+  ],
+  "installed_collections": [
+    {
+      "name": "agent-index-core",
+      "version": "2.0.0",
+      "installed_date": "2026-03-24",
+      "repo_url": "https://github.com/agent-index/agent-index-core",
+      "status": "installed"
+    }
+  ]
+}

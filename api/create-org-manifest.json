@@ -1,0 +1,27 @@
+{
+  "name": "create-org",
+  "type": "task",
+  "display_name": "Create Org",
+  "collection": "agent-index-core",
+  "collection_version": "2.0.0",
+  "version": "2.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": true,
+  "produces_artifacts": false,
+  "produces_shared_artifacts": false,
+  "setup_template": "create-org-setup.md",
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {},
+  "dependencies": {
+    "skills": [
+      "member-bootstrap",
+      "org-setup"
+    ],
+    "tasks": []
+  },
+  "external_dependencies": [],
+  "reads_from": null,
+  "writes_to": null
+}

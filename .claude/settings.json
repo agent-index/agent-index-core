@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/agent-index-core/.claude/hooks/session-bootstrap.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "edit-org",
+  "type": "task",
+  "display_name": "Edit Org",
+  "collection": "agent-index-core",
+  "collection_version": "1.0.0",
+  "version": "1.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": false,
+  "produces_artifacts": false,
+  "produces_shared_artifacts": false,
+  "setup_template": "edit-org-setup.md",
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {},
+  "dependencies": {
+    "skills": [],
+    "tasks": []
+  },
+  "external_dependencies": [],
+  "reads_from": null,
+  "writes_to": null
+}

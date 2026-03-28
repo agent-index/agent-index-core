@@ -1,0 +1,21 @@
+{
+  "name": "preferences-management",
+  "type": "skill",
+  "display_name": "Preferences Management",
+  "collection": "agent-index-core",
+  "collection_version": "1.0.0",
+  "version": "1.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": true,
+  "always_on_eligible": false,
+  "setup_template": "preferences-management-setup.md",
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {},
+  "dependencies": {
+    "skills": [],
+    "tasks": []
+  },
+  "external_dependencies": []
+}
