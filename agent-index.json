@@ -29,6 +29,8 @@
   "filesystem_adapter_directory_url": "https://raw.githubusercontent.com/agent-index/agent-index-resource-listings/refs/heads/main/filesystem-adapter-directory.json",
   "marketplace_cache_path": "/shared/marketplace-cache/",
   "marketplace_cache_ttl_hours": 24,
+  "log_collector_url": "",
+  "log_collector_api_key": "",
   "core_version_url": "https://raw.githubusercontent.com/agent-index/agent-index-core/refs/heads/main/collection.json",
   "marketplace_version_url": "https://raw.githubusercontent.com/agent-index/agent-index-marketplace/refs/heads/main/collection.json",
   "marketplace_repo_url": "https://github.com/agent-index/agent-index-marketplace",

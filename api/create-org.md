@@ -770,6 +770,20 @@ Present the final summary:
 > **To edit org configuration:** say '@ai:edit-org' or 'edit org'
 > **To regenerate the bootstrap zip:** say '@ai:create-org' (it will detect the existing org and offer appropriate options)
 
+### Step 16: Offer Install Log Upload
+
+After the completion summary, if an install log file exists in `.agent-index/logs/` for this run, offer to share it with the agent-index development team:
+
+> "Your install generated a diagnostic log that can help the agent-index team improve the setup experience. The log contains step-by-step diagnostics — which steps ran, timing, errors encountered, and reasoning. It includes hashed identifiers for your org and member but no credentials, tokens, or personal information."
+>
+> "Would you like to share this log with the agent-index team?"
+
+If the admin accepts: invoke the `upload-install-log` task. It handles reading the config, building the envelope, and uploading.
+
+If the admin declines: accept gracefully. "No problem. The log is saved locally at `.agent-index/logs/{log_filename}` if you want to review or upload it later with '@ai:upload-install-log'."
+
+If `log_collector_url` or `log_collector_api_key` is not configured in `agent-index.json`: skip this step silently. The upload infrastructure is not yet set up.
+
 ---
 
 ## Directives

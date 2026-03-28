@@ -260,6 +260,12 @@ Confirm to the member that bootstrap is complete:
 
 > "You're all set up and connected to {org_name}. Next, I'll help you configure your preferences and install your org's skills and tasks."
 
+**Offer install log upload:** If an install log file exists in `.agent-index/logs/` for this run and `log_collector_url` is configured in `agent-index.json`, offer to share it:
+
+> "Your setup generated a diagnostic log that can help the agent-index team improve the experience. It contains step-level diagnostics with hashed identifiers — no credentials or personal information. Would you like to share it?"
+
+If the member accepts: invoke the `upload-install-log` task. If they decline: "No problem. The log is at `.agent-index/logs/{log_filename}` if you change your mind." If `log_collector_url` is not configured: skip silently.
+
 Hand off to the preferences-management skill for the initial setup interview, then to org-setup for capability selection and installation.
 
 If the member declines to continue: accept, and tell them they can say '@ai:prefs' for preferences or '@ai:setup' for capability setup anytime.
