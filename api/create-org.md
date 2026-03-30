@@ -481,9 +481,11 @@ Wait for explicit confirmation.
 
 On confirmation, execute the following writes. All remote writes use MCP tools. All local writes use Claude's native file tools.
 
+**Important: sequential remote writes.** When writing multiple files to the remote filesystem, write them ONE AT A TIME — wait for each `aifs_write` to complete before starting the next one. Do NOT issue parallel writes. Google Drive allows duplicate folder names, so parallel writes that create intermediate directories (e.g., two files both targeting `/email-triage/`) will each independently create the folder, resulting in duplicates. The adapter serializes folder creation internally, but sequential writes from the caller eliminate the risk entirely.
+
 **Remote writes (via MCP):**
 
-1. Initialize the remote directory structure using `aifs_write` to create placeholder files in each directory (Google Drive requires at least one file to "create" a folder path):
+1. Initialize the remote directory structure using `aifs_write` to create placeholder files in each directory (Google Drive requires at least one file to "create" a folder path). Write these sequentially, one at a time:
 
 ```
 /shared/bootstrap/.gitkeep
@@ -599,7 +601,7 @@ Confirm: "Your org '{org_name}' is configured. Org config and directory structur
 
 Upload `agent-index-core/` to the remote filesystem so that members can read collection definitions via MCP during their setup.
 
-Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. Skip `node_modules/`, `.git/`, and other non-essential directories.
+Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. Skip `node_modules/`, `.git/`, and other non-essential directories. **Upload files sequentially** — one `aifs_write` at a time, waiting for each to complete before the next. See the sequential write note in Step 8.
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 
