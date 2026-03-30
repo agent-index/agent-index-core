@@ -178,6 +178,11 @@ Before proceeding, verify that ALL domains needed for setup are reachable from t
 
 Determine the actual infrastructure domains by inspecting the `filesystem_adapter_directory_url` in `agent-index.json` and the chosen adapter's `zip_url` from the adapter directory. At minimum, test `raw.githubusercontent.com`.
 
+**Telemetry domains** (needed for optional install log upload in Step 16):
+- Parse the hostname from `log_collector_url` in `agent-index.json` (e.g., `v1.logs.agent-index.ai`). If `log_collector_url` is empty, skip this group.
+
+These domains are not required for the install to succeed — log upload is optional. Include them in the allowlist instructions so the admin doesn't need a third session, but do not block the install if only telemetry domains are unreachable.
+
 **Backend domains** (needed for authentication and filesystem access in Phase 3):
 
 Read the `required_domains` field from the chosen adapter's `adapter.json` (available in the adapter directory or the downloaded adapter repo).
@@ -213,7 +218,8 @@ Test ALL domains from both groups for network reachability (see Step 0 for the t
   },
   "required_domains": {
     "infrastructure": ["raw.githubusercontent.com"],
-    "backend": ["{domain1}", "{domain2}", "..."]
+    "backend": ["{domain1}", "{domain2}", "..."],
+    "telemetry": ["{log_collector_hostname, if configured}"]
   },
   "blocked_domains": ["{domain1}", "..."],
   "resume_prompt": "continue the agent-index org setup"
@@ -236,10 +242,14 @@ Test ALL domains from both groups for network reachability (see Step 0 for the t
 > {for each blocked backend domain, on its own line:}
 > - `{domain}`
 >
+> {if telemetry domain is configured and blocked:}
+> **For install diagnostics (optional):**
+> - `{telemetry domain}`
+>
 > **To fix this:**
 > 1. Go to **claude.ai** → **Admin Settings** → **Capabilities** → **Network access**
 > 2. Add ALL of the following domains to the allowlist:
->    {comma-separated list of all required domains from both groups}
+>    {comma-separated list of all required domains from all groups}
 > 3. Save the changes
 > 4. Start a **new Cowork session** (allowlist changes require a new session to take effect)
 > 5. Open the same project folder and say: **"continue the agent-index org setup"**
@@ -325,7 +335,8 @@ Place the files at their final locations:
   },
   "required_domains": {
     "infrastructure": ["raw.githubusercontent.com"],
-    "backend": ["{domain1}", "{domain2}", "..."]
+    "backend": ["{domain1}", "{domain2}", "..."],
+    "telemetry": ["{log_collector_hostname, if configured}"]
   },
   "bundle": {
     "adapter_version": "{version}",
