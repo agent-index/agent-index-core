@@ -655,7 +655,7 @@ Create a temporary directory and populate it with:
 agent-index/
 ├── agent-index.json                    # The local copy (with remote_filesystem configured)
 ├── .claude/
-│   └── settings.json                   # SessionStart hook + MCP server config
+│   └── settings.json                   # SessionStart hook + MCP server config (CLI only)
 ├── mcp-servers/
 │   └── filesystem/
 │       ├── server.bundle.js            # Pre-built MCP server bundle
@@ -664,6 +664,7 @@ agent-index/
 │   └── .claude/
 │       └── hooks/
 │           └── session-bootstrap.sh    # Bootstrap script
+├── agent-index-filesystem.plugin       # Cowork plugin for MCP server (Cowork only)
 └── CLAUDE.md                           # Claude context
 ```
 
@@ -673,7 +674,17 @@ The adapter bundle (`server.bundle.js` and `adapter.json`) was already downloade
 
 The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. It does NOT include any credentials.
 
-The `.claude/settings.json` includes both the session hook and the MCP server configuration for the chosen backend. The MCP server command points to the bundled path: `node ${CLAUDE_PROJECT_DIR}/mcp-servers/filesystem/server.bundle.js`.
+The `.claude/settings.json` includes both the session hook and the MCP server configuration for the chosen backend. The MCP server command points to the bundled path: `node ${CLAUDE_PROJECT_DIR}/mcp-servers/filesystem/server.bundle.js`. This is used by Claude Code CLI — Cowork does not read MCP server definitions from settings.json.
+
+**Include the Cowork plugin:**
+
+Build the `agent-index-filesystem.plugin` file from `agent-index-core/cowork-plugin/`. The `.plugin` file is a zip archive of the plugin directory contents:
+
+```bash
+cd {project_dir}/agent-index-core/cowork-plugin && zip -r {temp_directory}/agent-index/agent-index-filesystem.plugin .claude-plugin/ .mcp.json scripts/ README.md
+```
+
+This plugin is what enables the MCP server in Cowork sessions. It discovers the workspace at runtime (by scanning `$HOME/mnt/*/` for `agent-index.json`) and starts the server — no org-specific configuration needed. Cowork members must install this plugin during their first-time setup; the member-bootstrap skill guides them through it.
 
 The `session-bootstrap.sh` is copied from the local `agent-index-core/.claude/hooks/`.
 
@@ -710,12 +721,15 @@ Surface a ready-to-send text block that the admin can copy and send to members:
 > 1. Download the bootstrap zip from: {download location/instructions}
 > 2. Unzip it into your home directory: `unzip member-bootstrap.zip -d ~/`
 >    (This creates `~/agent-index/`)
-> 3. Open Cowork (Claude desktop app)
-> 4. Set your working folder to `~/agent-index/`
-> 5. Say: **"set up my agent-index member workspace"**
-> 6. You'll be guided through authenticating to {backend display name} — have your {backend} account credentials ready.
+> 3. Open the `agent-index-filesystem.plugin` file inside `~/agent-index/` and confirm the install prompt in Cowork. (This connects Cowork to your org's shared storage.)
+> 4. Open Cowork (Claude desktop app)
+> 5. Set your working folder to `~/agent-index/`
+> 6. Say: **"set up my agent-index member workspace"**
+> 7. You'll be guided through authenticating to {backend display name} — have your {backend} account credentials ready.
 >
 > That's it. The setup process will handle everything else.
+>
+> *(If you use Claude Code CLI instead of Cowork, skip step 3 — the CLI reads the server config from `.claude/settings.json` automatically.)*
 
 **On success:** Proceed to Step 13.
 
@@ -807,9 +821,9 @@ This task uses the `agent-index-filesystem` MCP server for all remote filesystem
 
 **Tool invocation:** When this document says `aifs_read(path)`, `aifs_write(path, content)`, `aifs_auth_status()`, etc., these are MCP tool calls on the `agent-index-filesystem` server. Invoke them as MCP tools — they will appear in the tool list with names like `mcp__agent-index-filesystem__aifs_read`. They are NOT shell commands, JavaScript functions, or Python calls.
 
-**Critical prohibition:** NEVER invoke the MCP server binary (`server.bundle.js`) directly via bash, node, or any shell script. NEVER build wrapper scripts (bash, Python, Node.js, or otherwise) to pipe JSON-RPC messages to the server process. The MCP server is managed by the Cowork runtime — all interaction MUST go through the MCP tool interface. If an `aifs_*` tool call fails or the tool is not found in the tool list, diagnose the MCP configuration (check `.claude/settings.json`, verify the bundle path exists) and surface the problem to the admin. Do not attempt workarounds.
+**Critical prohibition:** NEVER invoke the MCP server binary (`server.bundle.js`) directly via bash, node, or any shell script. NEVER build wrapper scripts (bash, Python, Node.js, or otherwise) to pipe JSON-RPC messages to the server process. The MCP server is managed by the runtime — all interaction MUST go through the MCP tool interface. If an `aifs_*` tool call fails or the tool is not found in the tool list, diagnose the MCP configuration and surface the problem to the admin. Do not attempt workarounds.
 
-**If MCP tools are not available:** This means the MCP server did not load. The most common causes are: (1) `.claude/settings.json` is missing or malformed, (2) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (3) the session needs to be restarted for settings changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools.
+**If MCP tools are not available:** This means the MCP server did not start. The cause depends on the runtime: in Cowork, the `agent-index-filesystem` plugin may not be installed — guide the admin to install it and restart; in Claude Code CLI, check `.claude/settings.json` and verify the bundle path exists. Other common causes: (1) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (2) the session needs to be restarted for config changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools.
 
 ### Install Logging
 

@@ -391,6 +391,26 @@ Mark a dependency as `required: true` only if the collection is non-functional w
 
 Most external dependencies are MCP servers. Name them by their function ("Gmail MCP", "Slack MCP"), not by their package name. The setup template's Pre-Setup Checks section should validate that required MCP servers are connected before proceeding.
 
+### MCP server launch: dual-path (CLI vs. Cowork)
+
+Agent-index runs in two runtime environments that start MCP servers differently. Any collection that depends on an MCP server (including `agent-index-filesystem`) must account for both paths:
+
+**Claude Code CLI** reads MCP server definitions from `.claude/settings.json` and starts them as child processes. This is the traditional path — declare the server in settings.json with its command and environment variables, and the CLI handles the rest.
+
+**Cowork** does not read MCP server definitions from `.claude/settings.json`. All MCP servers in Cowork are delivered through its plugin system. A Cowork plugin declares MCP servers in a `.mcp.json` file, and Cowork launches them natively. The `${CLAUDE_PLUGIN_ROOT}` variable is available for path resolution within plugins.
+
+For agent-index-core, the `agent-index-filesystem` MCP server uses both paths: `.claude/settings.json` for CLI users, and the `agent-index-filesystem.plugin` (built from `agent-index-core/cowork-plugin/`) for Cowork users. The plugin is included in the bootstrap zip.
+
+**What this means for collection authors:** if your collection bundles its own MCP server (rare — most collections use `aifs_*` or third-party MCP servers), you need to provide both a settings.json entry and a Cowork plugin. If your collection depends on a third-party MCP server (Gmail, Slack, etc.), those are typically already available in both environments — just validate tool availability in your setup template's Pre-Setup Checks.
+
+**Detecting the runtime environment:** check whether expected MCP tools are in the tool list. If tools are absent, guide the member based on context: in Cowork, suggest installing the relevant plugin; in CLI, suggest checking settings.json. The `session-start` and `member-bootstrap` specs in agent-index-core demonstrate this pattern.
+
+**Key Cowork conventions for plugin MCP servers:**
+- The user's selected workspace folder is mounted under `$HOME/mnt/{folder-name}/` in the Cowork sandbox
+- `$HOME` always resolves to the session root, making `$HOME/mnt/*/` a stable discovery pattern
+- Session names change between sessions, so never hardcode a mount path — scan for a known marker file (e.g., `agent-index.json`)
+- After plugin installation, the member must restart the Cowork session for the MCP server to start
+
 ---
 
 ## Upgrade Design

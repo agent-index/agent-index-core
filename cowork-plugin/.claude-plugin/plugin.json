@@ -1,0 +1,5 @@
+{
+  "name": "agent-index-filesystem",
+  "version": "1.0.0",
+  "description": "Connects Cowork sessions to the org's remote filesystem via the agent-index MCP server. Discovers the workspace automatically and starts the server."
+}

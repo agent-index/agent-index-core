@@ -11,12 +11,14 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be configured in .claude/settings.json. It is included in the bootstrap zip and starts automatically with the Cowork session.
+    description: The agent-index-filesystem MCP server must be running. In Claude Code CLI, it is started by .claude/settings.json. In Cowork, it is started by the agent-index-filesystem plugin (included in the bootstrap zip as agent-index-filesystem.plugin). If aifs_* tools are not in the tool list, the server did not start — guide the member to install the plugin (Cowork) or check settings.json (CLI).
 ---
 
 ## About This Skill
 
-When a new member unpacks the bootstrap zip and opens Cowork pointed at their `~/agent-index/` directory, they need to authenticate to the org's remote filesystem, verify connectivity, create their local workspace, and register themselves with the org. The Member Bootstrap Skill handles this entire flow.
+When a new member unpacks the bootstrap zip and opens Cowork (or Claude Code CLI) pointed at their `~/agent-index/` directory, they need to authenticate to the org's remote filesystem, verify connectivity, create their local workspace, and register themselves with the org. The Member Bootstrap Skill handles this entire flow.
+
+**Runtime environment note:** The MCP server starts differently depending on the runtime. In Claude Code CLI, `.claude/settings.json` starts the server automatically. In Cowork, the server is delivered through the `agent-index-filesystem` plugin (included in the bootstrap zip as `agent-index-filesystem.plugin`). This skill detects which environment is active and guides accordingly.
 
 This skill replaces the previous Filesystem Setup Skill. The old skill scanned for local cloud-sync mount points (Google Drive, OneDrive, Dropbox) and verified local directory access. The new model is different: the org's shared files live on a remote filesystem accessed through an MCP server, and member files live locally. This skill bridges the two — it gets the member authenticated to the remote side and creates the local workspace structure.
 
@@ -38,7 +40,13 @@ This skill establishes remote authentication and local workspace structure. It d
 
 ### MCP Tool Usage
 
-This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
+This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`.
+
+If an `aifs_*` tool is not found in the tool list, the MCP server did not start. The cause depends on the runtime environment:
+
+- **Cowork:** The MCP server is delivered through the `agent-index-filesystem` plugin. If tools are missing, the plugin is not installed. Guide the member: "The remote filesystem tools aren't available. You need to install the agent-index-filesystem plugin to connect to your org's shared storage. You should find `agent-index-filesystem.plugin` in your workspace folder — open it and confirm the install in Cowork, then let me know when it's done." After the member confirms installation, they must restart the Cowork session for the plugin's MCP server to start.
+
+- **Claude Code CLI:** The MCP server is started by `.claude/settings.json`. If tools are missing, guide the member to check that file and restart the session.
 
 ### Install Logging
 
@@ -319,7 +327,7 @@ If `members-registry.json` cannot be read from remote (e.g., file doesn't exist)
 
 If the remote `org-config.json` version is newer than the local `agent-index.json` version: surface as an advisory notice. The bootstrap zip may be outdated. The member can still proceed, but they should request an updated bootstrap zip from their admin.
 
-If the MCP server fails to start or is not configured in `.claude/settings.json`: surface: "The remote filesystem connector isn't configured. Make sure you've unpacked the complete bootstrap zip. If this problem persists, contact your org admin for a new bootstrap zip."
+If the MCP server fails to start (no `aifs_*` tools in the tool list): determine the runtime environment and surface the appropriate guidance. In Cowork: "The remote filesystem tools aren't available. The agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, open it to install, then restart this Cowork session." In Claude Code CLI: "The remote filesystem connector isn't configured. Make sure you've unpacked the complete bootstrap zip and that `.claude/settings.json` includes the MCP server configuration." In either case: "If this problem persists, contact your org admin for a new bootstrap zip."
 
 If the member workspace already exists locally but member-index.json does not: this is a partial prior setup. Create member-index.json without recreating the directory structure. Proceed normally.
 

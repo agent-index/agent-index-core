@@ -46,7 +46,7 @@ This skill manages capability installation and lifecycle. It does not manage pre
 
 ### MCP Tool Usage
 
-This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
+This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not start — in Cowork, the `agent-index-filesystem` plugin may not be installed (guide the member to install it and restart); in Claude Code CLI, check `.claude/settings.json` and restart the session.
 
 ### Behavior
 

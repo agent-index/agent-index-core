@@ -12,7 +12,7 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be running for remote connectivity checks, org config reads, and update checks. It is started automatically by .claude/settings.json.
+    description: The agent-index-filesystem MCP server must be running for remote connectivity checks, org config reads, and update checks. In Claude Code CLI it is started by .claude/settings.json. In Cowork it is started by the agent-index-filesystem plugin.
 reads_from: null
 writes_to: null
 ---
@@ -59,7 +59,19 @@ Do not proceed with any further steps. Do not attempt to infer installed capabil
 
 ### Step 2: Check Remote Filesystem Connectivity
 
-Verify that the remote filesystem is accessible by calling `aifs_auth_status()`.
+First, check whether `aifs_*` tools are available in the tool list. If they are not present at all, the MCP server did not start. This is a different condition from "server running but not authenticated" — it means the server launch mechanism is not configured for this runtime.
+
+**If `aifs_*` tools are not in the tool list:** Proceed to Step 3 with a tool-availability notice queued for Step 8. The member can still use locally installed capabilities, but all remote operations will be unavailable. The notice should reflect the runtime environment:
+
+In Cowork:
+> "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, install it, and restart this Cowork session. You can still use your installed skills and tasks this session. Say '@ai:member-bootstrap' if you need help."
+
+In Claude Code CLI:
+> "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. Check that `.claude/settings.json` includes the MCP server configuration and restart the session, or say '@ai:member-bootstrap' to troubleshoot."
+
+Skip the `aifs_auth_status()` call and all subsequent remote operations (Steps 5 and 7 depend on remote access and will be skipped per their existing remote-unavailable handling).
+
+**If `aifs_*` tools are available:** call `aifs_auth_status()` to verify authentication.
 
 **If `authenticated: true`:** Confirm connectivity by calling `aifs_exists("/org-config.json")`. If the file exists, remote connectivity is confirmed. Proceed to Step 3.
 
@@ -71,9 +83,9 @@ Verify that the remote filesystem is accessible by calling `aifs_auth_status()`.
 
 > "Your remote filesystem credentials have expired. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to reconnect."
 
-**If `aifs_auth_status()` itself errors (MCP server not running):** Proceed to Step 3 with a connectivity failure notice queued for Step 8:
+**If `aifs_auth_status()` itself errors (MCP server running but unresponsive):** Proceed to Step 3 with a connectivity failure notice queued for Step 8:
 
-> "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. If this persists, make sure the bootstrap zip was unpacked correctly or say '@ai:member-bootstrap' to troubleshoot."
+> "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. If this persists, say '@ai:member-bootstrap' to troubleshoot."
 
 ---
 
@@ -234,7 +246,13 @@ Update-available notices (from Step 5) are only shown at `brief` and `detailed` 
 
 ### MCP Tool Usage
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not load — surface the issue and guide the member to check `.claude/settings.json` and restart the session.
+This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`.
+
+If `aifs_*` tools are not found in the tool list, the MCP server did not start. This is distinct from authentication failure (where the tools exist but return `authenticated: false`). When tools are entirely absent, the cause depends on the runtime environment, and the notice queued for Step 8 should reflect this:
+
+- **Cowork:** The plugin is not installed. Queue: "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, install it, and restart this Cowork session. Say '@ai:member-bootstrap' if you need help."
+
+- **Claude Code CLI:** The settings.json config is missing or the server failed to start. Queue: "The remote filesystem connector isn't responding. Check that `.claude/settings.json` includes the MCP server configuration and restart the session. Say '@ai:member-bootstrap' to troubleshoot."
 
 ### Behavior
 

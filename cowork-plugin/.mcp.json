@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent-index-filesystem": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/start-server.sh"]
+    }
+  }
+}
