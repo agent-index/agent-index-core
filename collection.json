@@ -1,7 +1,7 @@
 {
   "name": "agent-index-core",
   "display_name": "Agent-Index Core",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial.",
   "author": "agent-index",
   "license": "proprietary",

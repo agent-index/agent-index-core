@@ -6,6 +6,23 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [2.0.2] — 2026-03-31
+
+### Added
+- New section in `collection-authoring-guide.md` (v1.1.0): "Specifying Storage Access in Workflows" — guidance on explicitly naming tool families (native Read/Write vs. `aifs_*`) alongside storage paths, local-first design defaults, and common patterns. Motivated by a bug in the Capture collection where ambiguous paths caused agents to store local data on the remote filesystem.
+
+---
+
+## [2.0.1] — 2026-03-31
+
+### Changed
+- Auth failures now trigger automatic re-authentication instead of prompting users to say `@ai:member-bootstrap`. Session-start invokes the member-bootstrap re-auth flow inline when `aifs_auth_status()` returns `authenticated: false`. Manual `@ai:member-bootstrap` is now a fallback only.
+- Updated `standards.md` guidance so new collections follow the auto-re-auth pattern
+- Updated `create-org.md` CLAUDE.md template to describe auto-re-auth behavior
+- Updated `edit-org.md` and `preferences-management.md` error handling to attempt auto-re-auth before suggesting manual intervention
+
+---
+
 ## [2.0.0] — 2026-03-24
 
 ### Changed

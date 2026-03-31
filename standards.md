@@ -346,7 +346,7 @@ Files on the org's remote storage are accessed through the `aifs_*` tool family 
 Remote connectivity may be unavailable (expired credentials, MCP server not running, network issues). Collections should handle this gracefully:
 
 - If the capability only needs local data: proceed normally
-- If the capability needs remote data: surface a clear notice that remote connectivity is required and suggest `@ai:member-bootstrap` to reconnect
+- If the capability needs remote data and `aifs_auth_status()` returns `authenticated: false`: attempt automatic re-authentication by invoking the `aifs_authenticate` flow inline. If re-authentication succeeds, proceed normally. If it fails, surface a clear notice that remote connectivity is required and suggest `@ai:member-bootstrap` as a manual fallback
 - Never halt silently — always inform the member what failed and why
 
 ---

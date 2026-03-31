@@ -176,6 +176,6 @@ If a member asks to set an alias to the full `run agent-index` syntax (e.g., "ma
 
 If the member's requested alias value contains spaces, path separators, or quotes: explain that aliases must be single tokens without spaces or special characters (other than `:` and `~` which are conventional). Suggest a corrected form.
 
-If `member-index.json` cannot be read during alias management: surface the error, explain that alias management is unavailable until the file is accessible, and suggest '@ai:member-bootstrap' if this appears to be a workspace or connectivity issue.
+If `member-index.json` cannot be read during alias management: check `aifs_auth_status()`. If `authenticated: false`, attempt automatic re-authentication via `aifs_authenticate` and retry. If re-auth fails or the file is still unreadable: surface the error, explain that alias management is unavailable until the file is accessible, and suggest '@ai:member-bootstrap' to troubleshoot if this appears to be a workspace or connectivity issue.
 
 If a member asks to manage preferences for another member: this skill manages the current member's preferences only. Org-wide defaults are managed through collection setup, not through this skill.

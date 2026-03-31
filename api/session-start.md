@@ -79,9 +79,9 @@ Skip the `aifs_auth_status()` call and all subsequent remote operations (Steps 5
 
 > "The remote filesystem is authenticated but the org configuration could not be read. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until connectivity is restored. Say '@ai:member-bootstrap' if you'd like to troubleshoot."
 
-**If `authenticated: false`:** Proceed to Step 3 with an authentication failure notice queued for Step 8. Do not halt — the member index was already loaded in Step 1 and the session can proceed with locally installed capabilities. Queue the following notice for Step 8:
+**If `authenticated: false`:** Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
 
-> "Your remote filesystem credentials have expired. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to reconnect."
+> "I wasn't able to restore your remote filesystem connection. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to try again."
 
 **If `aifs_auth_status()` itself errors (MCP server running but unresponsive):** Proceed to Step 3 with a connectivity failure notice queued for Step 8:
 

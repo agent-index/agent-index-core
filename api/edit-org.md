@@ -39,7 +39,7 @@ The org admin describes what they want to change, or invokes the marketplace flo
 
 Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`.
 
-If `org-config.json` does not exist or cannot be read (authentication failure, connectivity issue): surface "Your org configuration couldn't be loaded. This could mean the org hasn't been configured yet (say '@ai:create-org' to get started) or your remote connection needs to be refreshed (say '@ai:member-bootstrap' to reconnect)." Halt.
+If `org-config.json` does not exist or cannot be read (authentication failure, connectivity issue): check `aifs_auth_status()`. If `authenticated: false`, attempt automatic re-authentication via `aifs_authenticate` and retry the read. If re-auth succeeds and the file exists, proceed normally. If the file does not exist: surface "Your org configuration couldn't be loaded. This could mean the org hasn't been configured yet — say '@ai:create-org' to get started." Halt. If re-auth fails: surface "Your org configuration couldn't be loaded and I wasn't able to restore your remote connection. Try '@ai:member-bootstrap' to troubleshoot." Halt.
 
 Compute the current member's hash: SHA256(lowercase email from session context), take the first 16 hex characters. Check whether this hash matches any entry in `admins[].member_hash` in org-config.json.
 

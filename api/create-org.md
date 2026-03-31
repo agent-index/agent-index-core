@@ -575,7 +575,7 @@ Include entries for ALL admins defined in Step 7.
    - The **Bootstrap Protocol** section: how to handle each `AGENT_INDEX_BOOTSTRAP` signal
    - The **Handling Member Requests** routing table
    - The **Key Files** section: paths to `agent-index.json` (local), `org-config.json` (remote), `members-registry.json` (remote), `member-index.json` (local), `preferences.md` (local), `filesystem.md` (local)
-   - The **Two-Tier Filesystem** section: local files via native tools, remote files via `aifs_*` MCP tools. Explain that `NOT_AUTHENTICATED` errors mean re-auth via `@ai:member-bootstrap`.
+   - The **Two-Tier Filesystem** section: local files via native tools, remote files via `aifs_*` MCP tools. Explain that `NOT_AUTHENTICATED` errors trigger automatic re-authentication — the system will attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
    - The **Identity Resolution** section: SHA256 of lowercase email, first 16 hex characters
    - The **Important Constraints** section: never modify collection directories on remote, never write outside the current member's local workspace and `/shared/` on remote, always read skill/task definitions before executing, always get member confirmation before changes
 

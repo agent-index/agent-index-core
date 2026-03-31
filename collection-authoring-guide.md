@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.0.0
-**Last Updated:** 2026-03-26
+**Version:** 1.1.0
+**Last Updated:** 2026-03-31
 
 ---
 
@@ -234,6 +234,59 @@ python {apps_path}/gmail-labeler/label_emails.py \
 ```
 
 Document every variable you use. If `{apps_path}` appears in your workflow, it must be defined in the setup template as a parameter.
+
+---
+
+## Specifying Storage Access in Workflows
+
+Agent-index's two-tier filesystem (see `standards.md`) means every data-access step in a task must answer two questions: **where** does the data live, and **how** does the agent access it? Getting either one wrong causes real problems — the Capture collection shipped v1.0 with paths like `/members/{member_hash}/capture/` in its workflows without specifying the tool family, and agents consistently used `aifs_*` (remote) instead of native file tools (local), storing personal capture items on the shared Google Drive.
+
+### Always state the tool family
+
+When a workflow step reads or writes data, explicitly name the tool family:
+
+**Good:**
+```markdown
+Read `items.json` from the member's **local** capture directory: `members/{member_hash}/capture/`.
+Use native file tools (Read/Write), not `aifs_*` — capture data is local-first.
+```
+
+**Bad:**
+```markdown
+Read `items.json` from `/members/{member_hash}/capture/`.
+```
+
+The bad version is ambiguous — the leading slash suggests a remote path, but even without it, an agent might default to whichever tool family it tried first in the session. Be explicit.
+
+### Path conventions as a signal, not a guarantee
+
+The convention is: relative paths (`members/{hash}/...`) are local, absolute paths with a leading slash (`/shared/...`, `/org-config.json`) are remote. But conventions alone aren't enough. Agents don't always infer the tool family from path syntax, especially when context from other tools in the session creates momentum toward one tool family. The path convention helps humans reading the spec; the explicit tool-family instruction is what actually controls agent behavior.
+
+### Local-first as a design default
+
+Unless a collection's data is inherently shared (like org config or cross-member project files), default to local storage. Member-specific working data — capture items, draft strategies, personal preferences — should live on the member's machine. This is faster (no remote round-trips), works offline, and respects the privacy boundary described in `standards.md`. If data needs to be shared later, provide an explicit "promote to shared" workflow rather than starting on the remote filesystem.
+
+### Common patterns
+
+**Local-only data** (capture items, drafts, personal state):
+```markdown
+Read `items.json` from the member's local directory: `members/{member_hash}/capture/`.
+Use native file tools (Read/Write).
+```
+
+**Remote shared data** (org config, shared projects):
+```markdown
+Read `project.md` from `{shared_projects_path}/{project_slug}/` using `aifs_read`.
+```
+
+**Mixed** (strategy collection — starts local, promoted to shared):
+```markdown
+Tool selection: Operations on the member's private workspace (`members/{member_hash}/strategies/`)
+use native Read/Write tools. Operations on the shared strategies path (`{shared_strategies_path}`)
+use `aifs_*` MCP tools.
+```
+
+The mixed pattern is the most complex and the most important to get right. State the tool selection rule once at the top of the workflow, then reference it in each step where it matters.
 
 ---
 
