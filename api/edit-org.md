@@ -64,7 +64,8 @@ If the member invoked generally: present the management options:
 > What would you like to do?
 > 1. Add or remove an org admin
 > 2. Add, edit, or remove org roles
-> 3. Open the marketplace
+> 3. Update adapter bundle and regenerate bootstrap zip
+> 4. Open the marketplace
 
 ---
 
@@ -132,7 +133,69 @@ Present the current `org_roles` list with `display_name`, `description`, and `de
 
 ---
 
-### Step 5: Marketplace Launch
+### Step 5: Update Adapter Bundle and Regenerate Bootstrap Zip
+
+This step downloads the latest adapter bundle and regenerates the member bootstrap zip so new and existing members receive the updated MCP server.
+
+**1. Check current adapter version:**
+
+Read the local `mcp-servers/filesystem/adapter.json`. Note the current `version` and `bundle_built_at`.
+
+**2. Download the latest adapter bundle:**
+
+Read `filesystem-adapter-directory.json` (fetch from `filesystem_adapter_directory_url` in `agent-index.json` if not cached). Find the entry matching the org's configured backend (`remote_filesystem.backend` in `agent-index.json`). Download the adapter repo via its `zip_url`. Extract `dist/server.bundle.js` and `adapter.json` from the downloaded zip.
+
+Verify bundle integrity: compute SHA-256 of `server.bundle.js` and compare against `bundle_checksum` in the downloaded `adapter.json`. If mismatch, report the error and halt.
+
+Compare the downloaded `adapter.json` version against the local version. If the downloaded version is not newer: surface "Your adapter bundle is already up to date (version {version}, built {bundle_built_at})." and offer to regenerate the bootstrap zip anyway (the admin may want to regenerate for other reasons, e.g. updated CLAUDE.md or settings).
+
+**3. Replace the local bundle:**
+
+Overwrite `mcp-servers/filesystem/server.bundle.js` and `mcp-servers/filesystem/adapter.json` with the downloaded files.
+
+Surface: "Adapter bundle updated from version {old_version} (built {old_date}) to version {new_version} (built {new_date})."
+
+**4. Halt for session restart:**
+
+The MCP server is running the old bundle in this session's process. The new bundle will load on the next session start.
+
+Surface:
+
+> "The adapter bundle has been updated locally. **Please start a new session** so the updated MCP server loads. In the new session, say '@ai:edit-org' and I'll pick up from here to regenerate and redistribute the bootstrap zip."
+
+Write an install state file at `.agent-index/install-state/edit-org-bundle-update.json`:
+
+```json
+{
+  "status": "awaiting-session-restart",
+  "next_action": "regenerate-bootstrap-zip",
+  "adapter_version": "{new_version}",
+  "updated_at": "{ISO timestamp}"
+}
+```
+
+Halt. Do not proceed to bootstrap zip generation in this session — the admin needs to restart so the new MCP server loads and the bootstrap zip is generated with a working, verified server.
+
+**5. Resume after restart (detected via install state):**
+
+On the next session, if `edit-org` is invoked and `.agent-index/install-state/edit-org-bundle-update.json` exists with `status: "awaiting-session-restart"`:
+
+- Verify the running adapter version matches the updated version (read local `adapter.json`)
+- Regenerate the bootstrap zip following the same procedure as create-org Step 12 (assemble zip contents, include updated bundle, include current CLAUDE.md and settings.json, create zip, upload to remote at `/shared/bootstrap/member-bootstrap.zip`)
+- Delete the install state file
+- Surface the member distribution instructions (same format as create-org Step 12):
+
+> "The bootstrap zip has been regenerated with the updated adapter bundle and uploaded to your remote filesystem."
+>
+> **For existing members:** They need to download the new bootstrap zip and replace their local `mcp-servers/filesystem/` directory with the updated files. Send them:
+>
+> "An updated filesystem adapter is available. Download the latest bootstrap zip from {download location} and replace `mcp-servers/filesystem/server.bundle.js` in your `~/agent-index/` directory, then restart your session."
+>
+> **For new members:** The bootstrap zip at the download location is already updated — no action needed.
+
+---
+
+### Step 6: Marketplace Launch
 
 If the member chooses to open the marketplace: invoke `run agent-index-marketplace task list-marketplace-collections`. The marketplace flow takes over.
 

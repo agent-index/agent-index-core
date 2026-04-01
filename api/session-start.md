@@ -157,6 +157,12 @@ Queue notices for Step 8 based on results:
 - If capability upgrades are available (member's version behind collection version):
   > "{N} of your installed capabilities can be upgraded. Say '@ai:setup' to upgrade, or '@ai:check-updates' for details."
 
+**Adapter bundle check:** If `aifs_*` tools are available, read the local `adapter.json` from `mcp-servers/filesystem/adapter.json` in the project directory. Compare `bundle_built_at` against the remote adapter directory entry's `current_version` by reading the remote adapter's `adapter.json` from the adapter directory (fetched via the `filesystem_adapter_directory_url` in `agent-index.json`, or from a cached copy). If the local adapter version is behind the directory version, or if `bundle_built_at` is more than 30 days old and cannot be compared: queue a notice for admins only (check whether the current member is in the `admins` list from org-config):
+
+> "A newer version of the filesystem adapter is available. The current bundle was built on {bundle_built_at date}. Say '@ai:edit-org' and choose 'Update adapter bundle' to download the latest version and regenerate the bootstrap zip for your members."
+
+If the member is not an admin, skip this notice — only admins can act on it.
+
 These notices are advisory. They surface at the same priority level as role-based collection suggestions — below deprecation warnings and hard failures.
 
 If any check encounters an error (file unreadable, missing cache): skip silently. Update notices are informational and must never delay or disrupt session start.

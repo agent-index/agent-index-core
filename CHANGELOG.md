@@ -6,6 +6,14 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [2.0.3] — 2026-04-01
+
+### Added
+- `edit-org` now supports "Update adapter bundle and regenerate bootstrap zip" — admins can download the latest adapter bundle, update their local install, and regenerate the bootstrap zip for member distribution
+- `session-start` Step 5 now checks whether the local adapter bundle is outdated and surfaces an admin-only notice when an update is available
+
+---
+
 ## [2.0.2] — 2026-03-31
 
 ### Added
