@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.1.0
-**Last Updated:** 2026-03-31
+**Version:** 1.2.0
+**Last Updated:** 2026-04-01
 
 ---
 
@@ -265,6 +265,24 @@ The convention is: relative paths (`members/{hash}/...`) are local, absolute pat
 ### Local-first as a design default
 
 Unless a collection's data is inherently shared (like org config or cross-member project files), default to local storage. Member-specific working data — capture items, draft strategies, personal preferences — should live on the member's machine. This is faster (no remote round-trips), works offline, and respects the privacy boundary described in `standards.md`. If data needs to be shared later, provide an explicit "promote to shared" workflow rather than starting on the remote filesystem.
+
+### The "bare Read" anti-pattern
+
+The most common mistake is writing `Read \`projects-manifest.json\`` without specifying the tool. This looks clear to a human reader, but agents interpret "Read" as "use whatever file tool is available" — which defaults to native local file tools. If the file lives on the remote filesystem, the agent reads locally, finds nothing, and tells the member they have no data.
+
+**Bad:**
+```markdown
+Read `projects-manifest.json` and find the matching project.
+```
+
+**Good:**
+```markdown
+Read `projects-manifest.json` via `aifs_read` and find the matching project.
+```
+
+This applies to every read and write in a workflow — not just the first one. If Step 1 says `aifs_read` but Step 3 says "Read the project's `current-state.md`" without the tool qualifier, the agent may revert to local reads in Step 3. Be explicit every time.
+
+The Projects collection v3.0.0 shipped with this bug in 7 of 12 task files — the newer tasks (manage-ideas, project-decide, project-pulse, share-idea) included the tool qualifier, but the older tasks (archive-project, edit-project, update-project, etc.) were missed during the migration. This caused agents to report "no projects found" even when the remote filesystem had data, because they only checked locally.
 
 ### Common patterns
 
@@ -628,6 +646,7 @@ Use this checklist before submitting a collection to the marketplace:
 - [ ] All `{variable}` references in workflows are defined in setup templates
 - [ ] Manifest `parameter_provenance` covers every parameter in the setup template
 - [ ] Manifest and frontmatter metadata are in sync
+- [ ] Every workflow read/write on shared data explicitly names the tool (`aifs_read`, `aifs_write`) — no bare "Read" instructions for remote files
 
 ### Setup
 - [ ] Every parameter has an explicit provenance tier annotation
