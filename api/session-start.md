@@ -138,7 +138,19 @@ Deprecation warnings are always surfaced in Step 6 regardless of the member's `s
 
 Check the member's preferences to determine if `session_start_update_notices` is enabled (default: true). If disabled, skip this step entirely and proceed to Step 6.
 
-If enabled, perform a lightweight update check. This is not a full `check-updates` run — it uses locally available information only and makes at most one network request (marketplace cache refresh).
+If enabled, perform a lightweight update check. This step uses two mechanisms: the update instruction system (primary) and direct version comparisons (fallback).
+
+**Update instruction check (primary):** If Step 2 confirmed remote connectivity, read `/shared/updates/latest.json` from the remote filesystem via `aifs_read("/shared/updates/latest.json")`. If the file exists, compare its `latest_id` against the member's `last_applied_update` field in the local `member-index.json`.
+
+- If `last_applied_update` is null or absent, or `latest_id` > `last_applied_update`: queue a notice for Step 8:
+  > "Org updates are available. Say '@ai:update' to apply them."
+- If they match: the member is current. No notice needed.
+- If the file does not exist or cannot be read: fall through to the direct version checks below.
+
+Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists, the member has an interrupted update from a previous session. Queue a higher-priority notice:
+  > "You have a pending update that was interrupted last session. Say '@ai:update' to finish applying it."
+
+**Direct version checks (fallback):** These checks run when the update instruction system has no data (no `latest.json`, or the admin has not yet published any updates). They provide backward-compatible update awareness for orgs that haven't adopted the publish-updates workflow.
 
 **Infrastructure check:** If Step 2 confirmed remote connectivity, read the remote `agent-index-core/collection.json` and `agent-index-marketplace/collection.json` versions via `aifs_read`. If `check-updates` has been run before and cached its results in the remote marketplace cache at `/shared/marketplace-cache/last-update-check.json` (via `aifs_read`), compare against those cached results. If no cached results exist, skip infrastructure version comparison (a full `check-updates` will establish the baseline). If remote connectivity failed in Step 2, skip this check entirely.
 
@@ -146,7 +158,7 @@ If enabled, perform a lightweight update check. This is not a full `check-update
 
 **Capability check:** Compare the member's installed capability versions from their local `member-index.json` against the collection versions on the remote filesystem (via `aifs_read("/{collection}/collection.json")` for each collection the member has capabilities from). If remote connectivity is unavailable, skip this check — it requires remote access to compare against current collection versions.
 
-Queue notices for Step 8 based on results:
+Queue notices for Step 8 based on fallback results (only if the update instruction check did not already produce a notice):
 
 - If infrastructure updates are available (from cached check-updates results):
   > "Agent-index infrastructure updates are available. Say '@ai:check-updates' for details."

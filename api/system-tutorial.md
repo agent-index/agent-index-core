@@ -103,9 +103,25 @@ Show the member their current alias list from `member-index.json`. Explain that 
 
 Explain that the marketplace is how the org gets new collections. Org admins browse available collections, install them (which uploads the collection's code to the org's remote filesystem), configure them for the org, and make them available for members to install.
 
-Collections are versioned. When a collection publishes a new version, members will see a deprecation warning in their session start if their installed version is approaching end of life. They can upgrade through the Org Setup Skill. The upgrade flow migrates their prior setup responses where possible so they do not have to reconfigure from scratch.
+Collections are versioned. When a collection publishes a new version, members will see a deprecation warning in their session start if their installed version is approaching end of life.
 
-After Topic 7, offer to go deeper on any topic or to answer specific questions. If the member seems curious about the two-tier architecture, the MCP server, or how remote connectivity works, explain at whatever depth they want — but do not front-load these infrastructure details unless asked.
+**Topic 8: Applying updates**
+
+Explain the update instruction system — how org changes reach members:
+
+When an admin makes org-level changes (installs a collection, upgrades infrastructure, updates CLAUDE.md, refreshes the adapter bundle), they publish update instructions by saying `@ai:publish-updates`. This captures what changed and writes structured instructions to the org's remote filesystem.
+
+At the start of each session, Claude checks whether any update instructions are pending for the member. If there are, the member sees a notice: "Org updates are available. Say '@ai:update' to apply them."
+
+When the member says `@ai:update`, Claude reads the pending instructions, merges them into one update plan (even if the member has missed several rounds of updates), and walks them through applying everything. Some updates apply silently (CLAUDE.md refreshes, infrastructure updates). Others may require the member's input — for example, if a collection was upgraded with new configuration options, Claude will ask about those during the update.
+
+The key points to convey:
+- Members do not need to track what changed — `@ai:update` handles everything
+- It is safe to miss updates — the system merges everything into one plan regardless of how far behind the member is
+- New collections offered by the admin are presented as optional — the member chooses whether to install them
+- The member can also run `@ai:check-updates` at any time as a diagnostic to see everything that is out of date and why
+
+After Topic 8, offer to go deeper on any topic or to answer specific questions. If the member seems curious about the two-tier architecture, the MCP server, or how remote connectivity works, explain at whatever depth they want — but do not front-load these infrastructure details unless asked.
 
 Also surface the shortcut: "If you ever have a specific question about how something works, just ask me directly — you do not need to invoke the tutorial formally."
 

@@ -15,9 +15,13 @@ This repository is the starting point for every agent-index deployment.
 - **Preferences Management** — manages session preferences and invocation aliases
 - **System Tutorial** — explains how agent-index works
 
+**Update management tasks**:
+- **Publish Updates** — (admin) generates update instructions from org changes and publishes them for members
+- **Apply Updates** — (member) reads pending update instructions and applies them locally
+
 **Org management tasks**:
 - **Create Org** — first-time org configuration
-- **Edit Org** — manage admins and launch the marketplace
+- **Edit Org** — manage admins, roles, adapter bundle, and launch the marketplace
 
 ---
 
@@ -113,6 +117,10 @@ Agent-index uses a two-tier filesystem: member files are local, org/shared files
     /marketplace-cache/
     /bootstrap/
       member-bootstrap.zip            ← bootstrap zip for new members
+    /updates/
+      update-log.json                 ← published update instructions for members
+      published-state.json            ← snapshot of org state at last publish
+      latest.json                     ← lightweight pointer to latest update ID
 ```
 
 ---
@@ -130,6 +138,10 @@ Say `@ai:edit-org` or "edit org" to add or remove org admins.
 ### Managing org roles
 
 Say `@ai:edit-org` or "edit org" to define, edit, or remove org roles. Org roles determine which collections new members are prompted to install during onboarding.
+
+### Publishing updates for members
+
+After installing or upgrading collections, updating the adapter bundle, or making other org-level changes, run `@ai:publish-updates` to generate update instructions. This writes structured instructions to the remote filesystem that members can consume by saying `@ai:update`. Members see an update-available notice at the start of their next session.
 
 ### Building your own collections
 

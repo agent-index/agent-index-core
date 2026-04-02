@@ -40,6 +40,8 @@ This skill orchestrates other skills' setup flows. When it installs a skill or t
 
 This skill manages capability installation and lifecycle. It does not manage preferences or aliases — those are the Preferences Management Skill's domain. It does not install new collections at the org level — that is the marketplace. It does not manage the org's collection authoring — that is the Org Authoring Skill (not an infrastructure component; installed separately for org authors). It does not cover troubleshooting remote filesystem connectivity or member authentication — that is the Member Bootstrap Skill.
 
+**Relationship to `@ai:update`:** The `apply-updates` task uses this skill as its execution engine for capability-level operations. When a member runs `@ai:update`, the update system reads published instructions, builds a plan, and delegates collection upgrades and new installs to this skill's existing upgrade and install flows. Members can also invoke this skill directly for manual capability management outside the update instruction system.
+
 ---
 
 ## Directives

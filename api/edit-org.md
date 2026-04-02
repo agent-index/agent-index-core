@@ -21,6 +21,8 @@ writes_to: null
 
 Edit-org is the ongoing management interface for org-level configuration. It handles three things: managing the org admin list, managing org roles, and launching the marketplace flow to install or manage collections.
 
+After making org-level changes through this task (or through the marketplace), admins should run `@ai:publish-updates` to generate update instructions that members can apply via `@ai:update`. Without publishing, members will see version-mismatch notices but won't have a prescribed resolution path.
+
 Only org admins can run this task effectively — non-admins can invoke it but will be informed they lack the authority to make changes.
 
 ### Inputs
@@ -66,6 +68,7 @@ If the member invoked generally: present the management options:
 > 2. Add, edit, or remove org roles
 > 3. Update adapter bundle and regenerate bootstrap zip
 > 4. Open the marketplace
+> 5. Publish updates for members
 
 ---
 
@@ -198,6 +201,14 @@ On the next session, if `edit-org` is invoked and `.agent-index/install-state/ed
 ### Step 6: Marketplace Launch
 
 If the member chooses to open the marketplace: invoke `run agent-index-marketplace task list-marketplace-collections`. The marketplace flow takes over.
+
+---
+
+### Step 7: Publish Updates for Members
+
+If the member chooses to publish updates: invoke `run agent-index-core task publish-updates`. The publish-updates task takes over — it will diff the current org state against the last published state, present the draft, and publish update instructions for members.
+
+After the marketplace flow completes (if the admin installed or upgraded collections), suggest: "Would you like to publish these changes so members can apply them? Say '@ai:publish-updates' or choose option 5."
 
 ---
 

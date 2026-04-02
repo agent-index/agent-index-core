@@ -795,6 +795,7 @@ Present the final summary:
 > **To onboard new members:** send them the instructions from Step 12. They download the bootstrap zip, unzip to `~/agent-index/`, open Cowork, and say "set up my agent-index member workspace."
 >
 > **To edit org configuration:** say '@ai:edit-org' or 'edit org'
+> **To publish updates for members:** after making org changes, say '@ai:publish-updates' to generate update instructions that members can apply with '@ai:update'
 > **To regenerate the bootstrap zip:** say '@ai:create-org' (it will detect the existing org and offer appropriate options)
 
 ### Step 16: Offer Install Log Upload

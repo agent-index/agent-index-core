@@ -315,6 +315,157 @@ Collections that support editing (like `edit-project`) should provide a way to r
 
 ---
 
+## Update Instructions
+
+Agent-index uses a publish-apply update model. Org admins publish structured update instructions to the remote filesystem after making org-level changes. Members consume those instructions on demand to bring their local installations current. This decouples the admin's change-making workflow from the member's update-applying workflow and ensures members always have a prescribed path to the current org state.
+
+### Update Log
+
+The update log is an append-only ordered list of update entries stored at `/shared/updates/update-log.json` on the remote filesystem. Each entry records a batch of org-level changes published by an admin.
+
+```json
+{
+  "version": "1.0.0",
+  "entries": [
+    {
+      "id": "001",
+      "published": "2026-03-15T14:30:00Z",
+      "published_by": "a7f3b2c1d4e5f698",
+      "summary": "Initial collection rollout",
+      "operations": [ ... ]
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | string | Schema version for the update log format |
+| `entries` | array | Ordered list of update entries, oldest first |
+
+Each entry:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Zero-padded sequential identifier (e.g., `"001"`, `"002"`). Used as the member's update cursor. |
+| `published` | string | ISO 8601 timestamp of when the entry was published |
+| `published_by` | string | `member_hash` of the admin who published |
+| `summary` | string | Human-readable annotation describing the purpose of this update batch |
+| `operations` | array | List of typed operations describing what changed |
+
+### Operation Types
+
+Each operation in an entry has a `type` field and type-specific fields:
+
+**`core-update`** — agent-index-core was updated.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"core-update"` |
+| `target_version` | string | The new core version |
+| `from_version` | string | The core version at time of publish (informational — members use their own installed version) |
+
+**`marketplace-update`** — agent-index-marketplace was updated. Same schema as `core-update`.
+
+**`collection-update`** — An installed collection was upgraded.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"collection-update"` |
+| `collection` | string | Collection name |
+| `target_version` | string | The new collection version |
+| `from_version` | string | The collection version at time of publish |
+| `has_migration` | boolean | True if the update crosses a MAJOR version boundary |
+| `api_changes` | object or null | `{"added": [...], "removed": [...]}` if API members changed |
+
+**`collection-install`** — A new collection was added to the org.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"collection-install"` |
+| `collection` | string | Collection name |
+| `version` | string | The installed version |
+| `category` | string | Collection category |
+
+**`collection-remove`** — A collection was removed from the org.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"collection-remove"` |
+| `collection` | string | Collection name |
+| `last_version` | string | The last installed version before removal |
+
+**`claude-md-update`** — CLAUDE.md was regenerated.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"claude-md-update"` |
+| `hash` | string | SHA-256 hex hash of the new CLAUDE.md content |
+
+**`adapter-bundle-update`** — The MCP server adapter bundle was updated.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"adapter-bundle-update"` |
+| `target_version` | string | The new adapter version |
+| `from_version` | string | The adapter version at time of publish |
+
+**`org-config-update`** — Org configuration was changed (roles, admin list, etc.).
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"org-config-update"` |
+| `changes` | array | Array of human-readable change descriptions |
+
+### Member Update Cursor
+
+Each member's `member-index.json` includes a `last_applied_update` field that tracks the ID of the last update entry the member successfully processed:
+
+```json
+{
+  "member_hash": "a7f3b2c1d4e5f698",
+  "last_applied_update": "004",
+  "installed": { ... }
+}
+```
+
+When `last_applied_update` is null or absent, the member has never applied an update. All entries in the update log are considered pending.
+
+### Published State Snapshot
+
+After publishing, the admin's current org state is captured in `/shared/updates/published-state.json`. This snapshot is the baseline for the next `publish-updates` run — the task diffs current state against this snapshot to determine what changed.
+
+### Latest Pointer
+
+A lightweight file at `/shared/updates/latest.json` contains only the latest entry ID and publish timestamp. This allows session-start to check for pending updates with a single small file read instead of loading the full update log.
+
+```json
+{
+  "latest_id": "006",
+  "published": "2026-04-01T14:30:00Z"
+}
+```
+
+### Merge Semantics
+
+When a member has multiple pending entries, they are merged into a single net update plan before execution. The merge rules:
+
+- For singleton targets (core, marketplace, CLAUDE.md, adapter bundle): the latest operation supersedes all earlier ones
+- For collections: later operations supersede earlier ones for the same collection. Install-then-remove cancels out. Install-then-update becomes install-at-latest. Update-then-remove becomes remove.
+- The `from_version` in merged operations is always recalculated from the member's actual current installed version, not from the operation's original `from_version`
+- The cursor advances to the last processed entry ID regardless of which individual operations were applied or declined
+
+### Remote Filesystem Layout for Updates
+
+```
+/shared/updates/
+  update-log.json            ← append-only log of all published entries
+  published-state.json       ← snapshot of org state at last publish
+  latest.json                ← lightweight pointer to latest entry ID
+```
+
+---
+
 ## Two-Tier Filesystem
 
 Agent-index uses a two-tier filesystem model. Member-specific files live on the member's local machine. Org-wide shared files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through the agent-index-filesystem MCP server.
@@ -337,7 +488,7 @@ Files on the org's remote storage are accessed through the `aifs_*` tool family 
 - `org-config.json` — org configuration
 - `members-registry.json` — member hash-to-identity mapping
 - Collection directories (`/{collection}/`) — skill and task definitions, setup templates, manifests
-- `/shared/` — shared artifacts, marketplace cache, bootstrap zip
+- `/shared/` — shared artifacts, marketplace cache, bootstrap zip, update instructions
 
 **Collections must use `aifs_read` and `aifs_write` for all remote file access.** Never use native file tools (Read/Write/Edit) for paths under the remote filesystem root.
 

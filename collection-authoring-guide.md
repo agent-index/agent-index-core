@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.2.0
-**Last Updated:** 2026-04-01
+**Version:** 1.4.0
+**Last Updated:** 2026-04-02
 
 ---
 
@@ -76,7 +76,7 @@ No default exists — the member must provide this value. Use for inherently per
 
 **Test:** Is there literally no sensible default because the value is unique to each person? If yes, it's member-defined.
 
-**Examples:** `slack_user_id`, `credentials_path`, `vip_senders` (email-triage)
+**Examples:** `slack_user_id`, `token_dir`, `vip_senders` (email-triage)
 
 ### Common mistake: Over-using `org-mandated`
 
@@ -229,7 +229,8 @@ When your workflow includes shell commands, use `{variable}` syntax for values t
 ```bash
 python {apps_path}/gmail-labeler/label_emails.py \
     --label "{label}" \
-    --credentials-dir "{credentials_path}" \
+    --credentials-file "{token_dir}/credentials.json" \
+    --token-dir "{token_dir}" \
     --message-id <ID> [--message-id <ID> ...]
 ```
 
@@ -355,7 +356,7 @@ Every skill should end with explicit guardrails — things the skill must never 
 ```markdown
 ### Guardrails
 
-- Never modify the `delivery_method`, `slack_user_id`, or `credentials_path`
+- Never modify the `delivery_method`, `slack_user_id`, or `token_dir`
 - Never delete the member's `triage-corrections.json` or `triage-run-log.json`
 - Always confirm destructive operations before executing
 ```
@@ -424,16 +425,38 @@ Every bundled script should:
 
 1. **Have a shebang line** (`#!/usr/bin/env python3`)
 2. **Check dependencies on import** and print a clear install command if missing
-3. **Accept a `--credentials-dir` flag** — never hardcode credential paths
+3. **Accept credential path flags** — never hardcode credential paths. For OAuth scripts, prefer `--credentials-file` and `--token-dir` (see "The OAuth credential split pattern" below). Support `--credentials-dir` as a legacy convenience flag.
 4. **Support `--dry-run`** — let the agent (and the member) preview actions before committing
 5. **Use clear exit codes** — `0` for success, `1` for errors
 6. **Print structured output** — the agent reads stdout to determine what happened
 
 ### Credential handling
 
-Never store credentials inside the collection directory. Scripts should accept a `--credentials-dir` argument pointing to wherever the member stored their credentials during setup. The setup template defines the default path.
+Never store credentials inside the collection directory. Scripts should accept credential path arguments pointing to wherever credentials are stored at runtime. The setup template defines the default paths.
 
 If your script needs OAuth, document the first-run flow explicitly. OAuth flows that open a browser won't work in headless agent environments — the member must run the initial authorization manually.
+
+### The OAuth credential split pattern
+
+When a collection needs OAuth2 access to an external service (Gmail, Google Drive, etc.), there are two distinct artifacts: the **app identity** (`credentials.json` — a Google Cloud project artifact) and the **user authorization** (`token.json` — a per-user token). These have different owners:
+
+**App identity (`credentials.json`) → org admin, at collection install time.**
+Creating an OAuth app requires Google Cloud Console access, billing awareness, and org-level decisions about consent screen branding. This is an `[org-mandated]` parameter set in `collection-setup.md` and stored on the remote filesystem (e.g., `org-config/apps/gmail-credentials/credentials.json` via `aifs_write`).
+
+**User token (`token.json`) → each member, at member setup time.**
+The member authorizes their own account against the org's OAuth app by clicking "Allow" in a browser. The resulting `token.json` is stored in their local member workspace (e.g., `{member_workspace}/apps/gmail-credentials/`). This is a `[member-defined]` artifact.
+
+**Script design for the split model:**
+Scripts should accept separate flags for the two artifacts:
+- `--credentials-file` — path to `credentials.json` (the org-provided app identity)
+- `--token-dir` — directory where the member's `token.json` is read/written
+- `--credentials-dir` — (legacy/convenience) directory containing both files, for backwards compatibility
+
+During member setup, `credentials.json` is copied from the remote filesystem to the member's local token directory. This local copy supports both the initial browser auth flow and any future token refresh.
+
+**Why this matters:** Without this split, members end up in a confusing loop where the agent asks them to create a Google Cloud project, enable APIs, and configure OAuth consent screens — none of which they should ever need to do. The admin handles that once; members just click "Allow."
+
+This pattern generalizes to any OAuth2 service where the "app" is an org-level decision but the "user authorization" is per-member. Slack OAuth, Google Drive, Microsoft Graph, and similar APIs all follow this shape.
 
 ### Dependency management
 
@@ -619,6 +642,37 @@ A roadmap is not marketing material. It should be frank about limitations and re
 
 ---
 
+## How Collections Interact with the Update System
+
+Agent-index uses a publish-apply model for distributing org changes to members. When an admin installs or upgrades a collection, they run `@ai:publish-updates` to generate update instructions. Members then run `@ai:update` to apply those instructions locally. Understanding this flow matters for collection authors because your upgrade scripts and setup templates are the execution engine that the update system calls into.
+
+### What happens when your collection is upgraded
+
+When an admin upgrades your collection on the remote filesystem and publishes update instructions, each member who has capabilities from your collection installed will go through the upgrade flow during `@ai:update`. The update system:
+
+1. Determines the member's current installed version and the target version
+2. Looks for upgrade scripts in your collection's `/upgrade/` directory
+3. For cross-MAJOR upgrades: reads and chains upgrade scripts (e.g., `1-to-2.md` then `2-to-3.md`)
+4. Delegates to `org-setup`'s upgrade flow — which reads your setup template's Upgrade Behavior section, migrates preserved responses, resets what needs resetting, and presents "Requires Member Attention" items to the member
+
+This means your Upgrade Behavior section in setup templates is not just documentation — it is an executable contract that runs during member updates. If it says a parameter is preserved, the update system carries it forward silently. If it says a parameter is reset, the member is prompted for input.
+
+### What this means for setup template design
+
+**Mark Upgrade Behavior accurately.** The `Preserved Responses`, `Reset on Upgrade`, and `Requires Member Attention` subsections directly control what members experience during `@ai:update`. If you mark a parameter as preserved but the schema changed, the member ends up with stale data. If you mark something as reset unnecessarily, the member has to re-answer questions they already answered.
+
+**Write upgrade scripts for every MAJOR boundary.** The update system supports members jumping multiple MAJOR versions in a single `@ai:update` run (e.g., v1 → v3). It chains upgrade scripts in order. If the v2-to-v3 script is missing, the system treats it as a MINOR upgrade and carries all responses forward — which may be wrong if the schema actually changed.
+
+**Keep your `collection.json` API list current.** The update system generates `collection-install` and `collection-update` operations that include `api_changes` (skills/tasks added or removed). This is computed by comparing the API list in `collection.json` before and after the upgrade. If your API list is stale, the instructions will underreport what changed.
+
+### What happens when your collection is newly installed
+
+When an admin installs your collection for the first time and publishes update instructions, the `@ai:update` flow presents it to members as optional: "The {your collection} collection is newly available. Would you like to install capabilities from it?" If the member accepts, the update system delegates to `org-setup`'s install flow — which reads your setup templates and runs the full setup interview.
+
+This means your setup templates should work well in the context of a batch update where the member may be installing multiple new capabilities in sequence. Keep setup interviews focused and progressive. A member who is installing three new capabilities in one `@ai:update` run should not feel like they are filling out a 45-minute form.
+
+---
+
 ## Checklist Before Publishing
 
 Use this checklist before submitting a collection to the marketplace:
@@ -658,7 +712,7 @@ Use this checklist before submitting a collection to the marketplace:
 - [ ] External dependencies in `collection.json` use the standard schema (`system`, `access_required`, `contact`, `required`)
 - [ ] Required vs. optional is accurately declared
 - [ ] Bundled scripts have dependency files (`requirements.txt` or equivalent)
-- [ ] Scripts support `--dry-run` and `--credentials-dir`
+- [ ] Scripts support `--dry-run` and credential path flags (`--credentials-file`/`--token-dir` for OAuth, or `--credentials-dir` for legacy)
 
 ### Safety
 - [ ] `.gitignore` excludes credential files (`credentials.json`, `token.json`)
