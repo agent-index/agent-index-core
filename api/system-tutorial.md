@@ -1,7 +1,7 @@
 ---
 name: system-tutorial
 type: skill
-version: 2.0.0
+version: 2.0.3
 collection: agent-index-core
 description: Explains the agent-index system to members — its concepts, structure, invocation model, and how to get the most out of it — through a guided tour or targeted answers to specific questions.
 stateful: false
@@ -76,9 +76,9 @@ Skills are often used by tasks — a task might require a writing-style skill to
 
 **Topic 4: Installing and personalizing**
 
-Explain that the org makes skills and tasks available, but each member installs and configures their own version. At install time, Claude runs a setup interview that personalizes the skill or task — some settings are fixed by the org, some are suggested based on the member's role, and some are entirely up to the member.
+Explain that the org makes skills and tasks available, but each member installs and configures their own version. When you need to install something, you use `@ai:setup` — this is the capability management interface where you install new skills and tasks, and where Claude runs the setup interview that personalizes each one. At install time, some settings are fixed by the org, some are suggested based on your role, and some are entirely up to you.
 
-The result is that two members using the same task may have substantially different configurations — different schedules, different defaults, different tone — while both honoring whatever the org has locked in. The member's personalized version lives locally on their own machine and is theirs to use and evolve — it is never uploaded to the shared remote storage.
+The result is that two members using the same task may have substantially different configurations — different schedules, different defaults, different tone — while both honoring whatever the org has locked in. Your personalized version lives locally on your own machine and is yours to use and evolve — it is never uploaded to the shared remote storage.
 
 **Topic 5: Sessions and state**
 
@@ -86,9 +86,9 @@ Explain that Claude has no memory between sessions by default — each session s
 
 The first is the member index: at the start of every session, Claude reads the local `member-index.json` to know what the member has installed and how to invoke it. This is why Claude knows about a member's skills and tasks without being told.
 
-The second is task state: stateful tasks write a `current-state.md` file at the end of every session. When the member returns to that task, Claude reads this file to reconstruct context — what was done last session, what is in progress, what decisions were made. The member does not have to re-brief Claude each time.
+The second is task state: stateful tasks write a `current-state.md` file when you work with them. When you return to that task, Claude reads this file to pick up where you left off — reconstructing what was done last session, what is in progress, what decisions were made. This only happens for whichever task is active in your session. You do not have to re-brief Claude each time.
 
-Both of these — the member index and task state — live locally on the member's machine. They are fast to read and private. Session start also checks connectivity to the remote filesystem (via the MCP server) so that shared org resources are available when needed.
+Both of these — the member index and task state — live locally on your machine. They are fast to read and private. Session start also checks connectivity to the remote filesystem (via the MCP server) so that shared org resources are available when needed.
 
 **Topic 6: Invocation and aliases**
 
@@ -124,6 +124,10 @@ The key points to convey:
 After Topic 8, offer to go deeper on any topic or to answer specific questions. If the member seems curious about the two-tier architecture, the MCP server, or how remote connectivity works, explain at whatever depth they want — but do not front-load these infrastructure details unless asked.
 
 Also surface the shortcut: "If you ever have a specific question about how something works, just ask me directly — you do not need to invoke the tutorial formally."
+
+### Troubleshooting: Member Bootstrap
+
+If remote connectivity ever fails at session start — if the MCP server loses contact with the org's shared filesystem — I'll suggest `@ai:member-bootstrap`. This is the troubleshooting tool that re-establishes your connection and gets you back online. It is rarely needed, but when it is, it is the right tool.
 
 ### Answering Specific Questions
 
