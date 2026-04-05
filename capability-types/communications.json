@@ -1,0 +1,213 @@
+{
+  "capability": "communications",
+  "version": "1.0.0",
+  "description": "Send messages, manage channels, and read message history on a team communication platform.",
+  "operations": [
+    {
+      "name": "send-notification",
+      "description": "Send a message to one or more recipients or a channel.",
+      "required": true,
+      "parameters": {
+        "recipients": {
+          "type": "array",
+          "items": "member_reference",
+          "required": false,
+          "description": "One or more member references (member_hash + display_name). At least one recipient or channel must be specified."
+        },
+        "channel": {
+          "type": "string | null",
+          "required": false,
+          "description": "Channel identifier (e.g., channel name or ID). If provided, message is sent to the channel. If null, sent as direct message to recipients."
+        },
+        "message": {
+          "type": "string",
+          "required": true,
+          "description": "The message content. Plain text. The provider may format for its platform."
+        },
+        "urgency": {
+          "type": "string",
+          "enum": ["low", "normal", "high"],
+          "default": "normal",
+          "required": false,
+          "description": "Hint to the provider about delivery priority. Interpretation is provider-specific (e.g., high may trigger a direct message instead of a channel post)."
+        }
+      },
+      "returns": {
+        "sent": {
+          "type": "boolean",
+          "description": "Whether the message was successfully sent."
+        },
+        "message_id": {
+          "type": "string | null",
+          "description": "Platform-specific message identifier, if available."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if sent is false."
+        }
+      }
+    },
+    {
+      "name": "create-channel",
+      "description": "Create a named channel and optionally invite members.",
+      "required": false,
+      "parameters": {
+        "channel_name": {
+          "type": "string",
+          "required": true,
+          "description": "Desired channel name. Provider may normalize (e.g., lowercase, replace spaces with hyphens)."
+        },
+        "purpose": {
+          "type": "string | null",
+          "required": false,
+          "description": "Channel purpose or description."
+        },
+        "members": {
+          "type": "array",
+          "items": "member_reference",
+          "required": false,
+          "description": "Members to invite to the channel after creation."
+        },
+        "private": {
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Whether the channel should be private (visible only to invited members)."
+        }
+      },
+      "returns": {
+        "created": {
+          "type": "boolean",
+          "description": "Whether the channel was successfully created."
+        },
+        "channel_id": {
+          "type": "string | null",
+          "description": "Platform-specific channel identifier."
+        },
+        "channel_name": {
+          "type": "string | null",
+          "description": "The actual channel name as created (may differ from requested name due to normalization)."
+        },
+        "members_invited": {
+          "type": "integer",
+          "description": "Number of members successfully invited."
+        },
+        "members_failed": {
+          "type": "array",
+          "description": "Array of { member_hash, display_name, reason } for members who could not be invited."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if created is false."
+        }
+      }
+    },
+    {
+      "name": "archive-channel",
+      "description": "Archive an existing channel, making it read-only.",
+      "required": false,
+      "parameters": {
+        "channel_id": {
+          "type": "string",
+          "required": true,
+          "description": "Platform-specific channel identifier to archive."
+        }
+      },
+      "returns": {
+        "archived": {
+          "type": "boolean",
+          "description": "Whether the channel was successfully archived."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if archived is false."
+        }
+      }
+    },
+    {
+      "name": "restore-channel",
+      "description": "Unarchive a previously archived channel, restoring it to active use.",
+      "required": false,
+      "parameters": {
+        "channel_id": {
+          "type": "string",
+          "required": true,
+          "description": "Platform-specific channel identifier to restore."
+        }
+      },
+      "returns": {
+        "restored": {
+          "type": "boolean",
+          "description": "Whether the channel was successfully restored."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if restored is false."
+        }
+      }
+    },
+    {
+      "name": "read-channel-history",
+      "description": "Read messages from a channel since a given timestamp.",
+      "required": false,
+      "parameters": {
+        "channel_id": {
+          "type": "string",
+          "required": true,
+          "description": "Platform-specific channel identifier to read from."
+        },
+        "since": {
+          "type": "string | null",
+          "required": false,
+          "description": "ISO 8601 timestamp. Returns messages after this time. If null, returns recent messages (provider-defined window, typically last 24 hours or last 100 messages)."
+        }
+      },
+      "returns": {
+        "messages": {
+          "type": "array",
+          "description": "Array of { author, timestamp, content, message_id } objects, ordered chronologically."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "Whether more messages exist beyond what was returned."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if messages could not be retrieved."
+        }
+      }
+    },
+    {
+      "name": "invite-to-channel",
+      "description": "Invite one or more members to an existing channel.",
+      "required": false,
+      "parameters": {
+        "channel_id": {
+          "type": "string",
+          "required": true,
+          "description": "Platform-specific channel identifier."
+        },
+        "members": {
+          "type": "array",
+          "items": "member_reference",
+          "required": true,
+          "description": "Members to invite to the channel."
+        }
+      },
+      "returns": {
+        "invited": {
+          "type": "integer",
+          "description": "Number of members successfully invited."
+        },
+        "failed": {
+          "type": "array",
+          "description": "Array of { member_hash, display_name, reason } for members who could not be invited."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if the operation failed entirely."
+        }
+      }
+    }
+  ]
+}

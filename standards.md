@@ -1,9 +1,9 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.0.0
+**Version:** 2.1.0
 **Maintained by:** agent-index
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-04-02
 
 ---
 
@@ -54,6 +54,15 @@ All fields listed below are required. No field may be omitted.
 | `eol_date` | string or null | ISO date string or null |
 | `marketplace_url` | string | URL of the collection's Git repository |
 | `support_url` | string | URL for support or documentation |
+
+### `collection.json` Optional Fields
+
+The following fields are optional. If omitted, the collection is assumed to neither provide nor require any capability types.
+
+| Field | Type | Description |
+|---|---|---|
+| `provides` | array | Capability types this collection implements. Each entry declares a capability type, version, and operation-to-skill mapping. Empty array or absent if none. See Capability Provider Requirements below. |
+| `requires` | array | Capability types this collection needs from other providers. Each entry declares a capability type, required version range, operations needed, and fallback behavior. Empty array or absent if none. See Capability Provider Requirements below. |
 
 ---
 
@@ -417,6 +426,27 @@ Each operation in an entry has a `type` field and type-specific fields:
 | `type` | string | `"org-config-update"` |
 | `changes` | array | Array of human-readable change descriptions |
 
+**`provider-register`** — A capability provider was registered.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"provider-register"` |
+| `capability` | string | Capability type name |
+| `provider_collection` | string | Collection registered as provider |
+| `capability_version` | string | Version of the capability contract |
+| `provider_count` | integer | Total number of providers now registered for this capability type |
+
+**`provider-deregister`** — A capability provider was deregistered.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | `"provider-deregister"` |
+| `capability` | string | Capability type name |
+| `provider_collection` | string | Collection that was deregistered |
+| `reason` | string | `"collection-removed"` or `"manual"` |
+| `provider_count` | integer | Total number of providers remaining for this capability type |
+| `affected_bindings` | array | List of `{ consumer_collection, binding_name }` objects for bindings that referenced this provider |
+
 ### Member Update Cursor
 
 Each member's `member-index.json` includes a `last_applied_update` field that tracks the ID of the last update entry the member successfully processed:
@@ -551,6 +581,88 @@ Tasks that aggregate data from the remote shared filesystem (reporting dashboard
 - Never write to `org-config.json` or `members-registry.json` except through the specific admin workflows (`edit-org`, `create-org`, `member-bootstrap`, `org-setup`)
 - Always confirm destructive shared writes (overwrite, delete) with the member before executing
 - Use `aifs_delete` with caution — shared deletions affect all members
+
+---
+
+## Capability Provider Requirements
+
+Collections may declare that they provide or require abstract capability types. This enables loose coupling between collections: a consumer collection codes against a capability interface, and the org chooses which provider collection fulfills it.
+
+### Capability Type Registry
+
+Well-known capability types are maintained in `agent-index-core/capability-types/`. Each type is a JSON file defining a set of operations with parameters and return values. New types may be proposed via the agent-index GitHub repository, following the same process as category additions.
+
+Collections may also define custom capability types in a `/capability-types/` directory within the collection. Custom types are namespaced as `{collection-name}:{capability-name}` to avoid collisions with well-known types.
+
+### Provider Declarations (`provides`)
+
+Collections that implement a capability type declare this in the `provides` array of `collection.json`. Each entry must include:
+
+| Field | Type | Description |
+|---|---|---|
+| `capability` | string | The capability type being provided. Must reference a well-known type or a custom type (namespaced). |
+| `capability_version` | string | The version of the capability contract this provider implements. |
+| `operations` | object | Map of operation names to implementation references. Each entry must have `implemented_by` (name of an API member) and `type` (`"skill"` or `"task"`). |
+
+Every `implemented_by` value must reference a name listed in the collection's `api` array. The implementing skill or task must accept at minimum the parameters defined in the capability type's operation spec.
+
+All operations marked `required: true` in the capability type definition must be present in the provider's `operations` map. Optional operations may be omitted.
+
+### Consumer Declarations (`requires`)
+
+Collections that need a capability type declare this in the `requires` array of `collection.json`. Each entry must include:
+
+| Field | Type | Description |
+|---|---|---|
+| `capability` | string | The capability type being required. |
+| `capability_version` | string | SemVer range (e.g., `">=1.0.0"`, `"^1.0.0"`). |
+| `required_operations` | array | Operations the consumer must be able to call. At least one provider must implement all of these. |
+| `optional_operations` | array | Operations the consumer will use if available. |
+| `required` | boolean | If `true`, the collection cannot function without this capability. If `false`, reduced mode is acceptable. |
+| `fallback` | string | Behavior when no provider is registered: `"skip_with_notice"`, `"prompt_manual"`, or `"error"`. |
+
+### Capability Bindings
+
+Consumer collections define named capability bindings — specific use cases that map to registered providers. Bindings are stored in a dedicated `capability-bindings.json` file in the member's local workspace:
+
+**Path:** `members/{member_hash}/collections/{collection_name}/capability-bindings.json`
+
+| Field | Type | Description |
+|---|---|---|
+| `version` | string | Schema version for the bindings file format. |
+| `collection` | string | The consumer collection these bindings belong to. |
+| `last_updated` | string | ISO date when bindings were last modified. |
+| `bindings` | object | Map of binding names to binding configurations. |
+
+Each binding entry:
+
+| Field | Type | Description |
+|---|---|---|
+| `capability` | string | The capability type this binding draws from. |
+| `provider_collection` | string | The registered provider collection bound to this use case. |
+| `operation_subset` | array | Which operations this binding uses. |
+| `provenance` | string | The provenance tier that governed this binding's configuration. |
+
+Bindings are configured during the consumer collection's setup interview. When only one provider is registered for a capability type, bindings are auto-assigned without prompting. When multiple providers are registered, the setup interview presents binding choices using standard provenance tiers.
+
+### Provider Registry in `org-config.json`
+
+Registered providers are stored in `org-config.json` under `capability_providers`. Each capability type maps to an array of provider entries:
+
+| Field | Type | Description |
+|---|---|---|
+| `provider_collection` | string | Name of the installed collection providing this capability. |
+| `capability_version` | string | The capability type version the provider implements. |
+| `registered_date` | string | ISO date when the provider was registered. |
+| `registered_by` | string | `member_hash` of the admin who registered the provider. |
+| `operations_available` | array | List of operations the provider implements. |
+| `provider_config` | object | Provider-specific configuration set during registration. |
+
+### Capability Type Versioning
+
+Capability types follow semantic versioning. MAJOR bumps for removing required operations or breaking parameter signatures. MINOR bumps for adding operations or optional parameters. PATCH bumps for documentation changes only.
+
+For the full capability provider specification including runtime resolution, install-time validation, and migration guidance, see `capability-provider-spec.md`.
 
 ---
 

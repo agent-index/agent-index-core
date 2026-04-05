@@ -1,7 +1,7 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.4.0
+**Version:** 1.5.0
 **Last Updated:** 2026-04-02
 
 ---
@@ -38,7 +38,7 @@ The practical difference: tasks typically have a `Workflow` section with numbere
 
 If your task has a "configure settings" sub-flow that members will want to invoke independently, split it into a separate skill. Email Triage did this: the core triage *task* scans the inbox, but category management is a separate *skill* (`email-triage-config`) because members adjust categories at different times than when they run triage.
 
-If two capabilities share the same state file (like `setup-responses.md`), that's fine — skills and tasks within a collection can read and write the same files. Just document which files each one touches.
+If two capabilities share the same state file (like `setup-responses.md`), that's fine — skills and tasks within a collection can read and write the same files. Just document which files each one touches. Note: capability bindings are stored in their own dedicated file (`capability-bindings.json`), separate from `setup-responses.md` — see "Designing for Capability Providers" below.
 
 ---
 
@@ -504,6 +504,91 @@ For agent-index-core, the `agent-index-filesystem` MCP server uses both paths: `
 - `$HOME` always resolves to the session root, making `$HOME/mnt/*/` a stable discovery pattern
 - Session names change between sessions, so never hardcode a mount path — scan for a known marker file (e.g., `agent-index.json`)
 - After plugin installation, the member must restart the Cowork session for the MCP server to start
+
+---
+
+## Designing for Capability Providers
+
+The capability provider model lets collections depend on abstract services rather than specific implementations. Before you decide whether your collection should provide or consume capabilities, read `capability-provider-spec.md` for the full specification. This section covers the practical design decisions.
+
+### When to consume a capability
+
+If your collection needs to send messages, store documents, look up employees, or interact with a platform that varies by org, declare a `requires` entry in `collection.json` rather than hardcoding the integration. The test: if you find yourself asking "which platform does this org use for X?" in your setup interview, you probably want a capability requirement instead.
+
+**Before (hardcoded):** Projects asks "Which comms platform? Slack / Teams / Discord?" and then branches on the answer in every task that sends a notification.
+
+**After (capability-based):** Projects declares `requires: [{ capability: "communications", ... }]` and delegates messaging to whatever provider the org has registered.
+
+The benefit compounds across collections: when the org adds a second collection that also needs to send messages, it works immediately with whatever communications provider is already registered.
+
+### When to provide a capability
+
+If your collection wraps a specific platform (Slack, Gmail, Google Drive, etc.) and other collections would benefit from using that platform through your collection's skills, declare a `provides` entry. The implementing skills should accept the standard parameters from the capability type definition and may accept additional provider-specific parameters.
+
+### Defining capability bindings in setup templates
+
+Consumer collections define named bindings — specific use cases that map to registered providers. Bindings are declared as parameters in the collection's setup template:
+
+```markdown
+### Capability Bindings: Communications
+
+These settings control how this collection sends notifications. They only
+appear if at least one communications provider is registered.
+
+**member-alert-provider** [org-mandated]
+- Description: Which communications provider to use for member alerts.
+- Ask: "Which provider should be used to alert project members?"
+- Available: {list registered communications providers}
+- Default: {first registered provider}
+
+**stakeholder-notification-provider** [member-overridable]
+- Description: Which communications provider for stakeholder notifications.
+- Ask: "Which provider should be used for stakeholder notifications?"
+- Available: {list registered communications providers that implement send-notification}
+- Default: {org default, or first registered provider}
+```
+
+**Progressive disclosure applies:** if only one provider is registered for a capability type, no binding question is asked — the single provider is auto-bound. Binding questions only appear when there are multiple providers and a genuine choice to make.
+
+Bindings are written to `capability-bindings.json` (not to `setup-responses.md`). See `standards.md` for the file schema. The setup completion section of your setup template should list this file:
+
+```markdown
+## Setup Completion
+
+After all questions are answered, write:
+- `setup-responses.md` in the member's local workspace (all non-binding parameters)
+- `capability-bindings.json` in the member's local workspace (all bindings)
+```
+
+### Writing resolution instructions in skills and tasks
+
+When a task needs to invoke a capability operation, it follows a standard resolution pattern. Rather than repeating this in every skill and task, create an internal helper:
+
+```
+/{collection-name}/
+  /internal/
+    resolve-capability.md    ← shared resolution instructions
+```
+
+Then reference it from your skills and tasks: "Follow the resolution steps in `/internal/resolve-capability.md` for binding `member-alert-provider`, operation `send-notification`."
+
+A template for `resolve-capability.md` is available in `agent-index-core/templates/resolve-capability.md`.
+
+### Designing fallback behavior
+
+Every consumer `requires` entry includes a `fallback` field. Choose wisely:
+
+- `"skip_with_notice"`: The operation is silently skipped, with a note in the output. Best for truly optional enhancements (project creation still works without a Slack notification).
+- `"prompt_manual"`: The task asks the member to perform the action manually ("Please notify the stakeholders that the milestone is complete"). Best when the action matters but isn't automatable without a provider.
+- `"error"`: The task halts with a clear error. Best when the capability is genuinely required and the collection can't function without it. Use sparingly — most capabilities should degrade gracefully.
+
+### Common mistakes
+
+**Mixing capability operations with direct tool calls.** If your collection consumes the `communications` capability for sending notifications, don't also directly call `slack_send_message` in other parts of the same collection. This creates an inconsistency where some messages go through the provider and others bypass it.
+
+**Over-binding.** Not every use case needs its own binding. If your collection sends notifications in three different contexts but they should all go through the same provider, use one binding (e.g., `notification-provider`) rather than three. Only create separate bindings when the org would plausibly want different providers for different use cases (e.g., internal team alerts vs. external stakeholder notifications).
+
+**Forgetting to validate stale bindings.** A provider can be deregistered after bindings are configured. Your resolution instructions must check that the bound provider is still in the registry and handle the stale-binding case gracefully.
 
 ---
 

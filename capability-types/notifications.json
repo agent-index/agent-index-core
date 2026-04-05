@@ -1,0 +1,51 @@
+{
+  "capability": "notifications",
+  "version": "1.0.0",
+  "description": "Send one-way messages to members. A lightweight capability type for collections that only need to deliver alerts and updates without channel management or message history.",
+  "operations": [
+    {
+      "name": "send-notification",
+      "description": "Send a message to one or more recipients. This is the same operation contract as communications.send-notification, allowing providers to implement both types with the same skill.",
+      "required": true,
+      "parameters": {
+        "recipients": {
+          "type": "array",
+          "items": "member_reference",
+          "required": true,
+          "description": "One or more member references (member_hash + display_name) to notify."
+        },
+        "message": {
+          "type": "string",
+          "required": true,
+          "description": "The notification content. Plain text. The provider may format for its platform."
+        },
+        "urgency": {
+          "type": "string",
+          "enum": ["low", "normal", "high"],
+          "default": "normal",
+          "required": false,
+          "description": "Hint to the provider about delivery priority. Interpretation is provider-specific."
+        },
+        "context": {
+          "type": "object | null",
+          "required": false,
+          "description": "Optional structured context about what triggered the notification. Providers may use this to enrich the message (e.g., link to a project, include a summary). Schema is not prescribed — providers handle unknown fields gracefully."
+        }
+      },
+      "returns": {
+        "sent": {
+          "type": "boolean",
+          "description": "Whether the notification was successfully delivered."
+        },
+        "message_id": {
+          "type": "string | null",
+          "description": "Platform-specific message identifier, if available."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if sent is false."
+        }
+      }
+    }
+  ]
+}
