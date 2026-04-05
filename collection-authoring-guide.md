@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.5.0
-**Last Updated:** 2026-04-02
+**Version:** 1.5.2
+**Last Updated:** 2026-04-05
 
 ---
 
@@ -701,6 +701,38 @@ The pattern across existing collections is: **surface a clear message, suggest a
 
 ---
 
+## Parallel Writes and Directory Creation Races
+
+When a task writes multiple files to the remote filesystem, the calling agent may issue `aifs_write` calls in parallel for efficiency. This is fine when writing to directories that already exist, or when writing to completely separate directory trees. But it causes a real problem when parallel writes each need to create the same parent directory that doesn't exist yet.
+
+### The problem
+
+Google Drive (and potentially other backends with explicit directory objects) allows multiple folders with the same name under the same parent. If three parallel `aifs_write` calls all target `/shared/ideas/my-idea/state/file1.txt`, `file2.txt`, and `file3.txt`, and `/shared/ideas/my-idea/state/` doesn't exist yet, each call independently creates a `state` folder. The result is three sibling folders named `state`, each containing one file — instead of one folder with three files.
+
+This gets worse when the parallel writes target different leaf directories that share a common ancestor. Two writes to `/idea/state/a/file1.txt` and `/idea/state/b/file2.txt` would each independently create the `state` intermediate directory, since the locks for `state/a` and `state/b` are different.
+
+### The fix is in the adapter, not the collection
+
+The Google Drive adapter handles this with two layers of locking: an in-memory lock for same-process races and a local filesystem lock (using atomic `O_EXCL` file creation in `.agent-index/credentials/locks/`) for cross-process races. Collection authors don't need to implement their own locking.
+
+However, collection authors should be aware that this protection serializes directory creation. If your workflow writes 20 files to a brand-new deeply nested directory, the first write creates the directory tree while the rest wait. Subsequent writes are fast because the directories already exist.
+
+### What this means for task design
+
+**You don't need to worry about parallel writes to existing directories.** If the directory tree already exists (which is the common case after first run), parallel `aifs_write` calls are fully concurrent.
+
+**You don't need to serialize writes yourself.** The adapter handles the race. Writing "issue these writes sequentially to avoid duplicate folders" in your workflow is unnecessary and slower.
+
+**Be aware of first-run performance.** The first time a task writes to a new directory tree on the remote filesystem, parallel writes will be partially serialized while the directory is created. This is a one-time cost. If first-run performance matters, consider creating the directory structure in a single initial write before issuing the parallel writes.
+
+### Local filesystem locks as cross-process shared state
+
+The adapter's cross-process lock uses the local `.agent-index/` directory as shared state between all processes on the same machine. This is a general pattern: when multiple adapter instances (e.g. spawned by parallel callers like Cowork subagents) need to coordinate, the local agent-index install is the one thing they all share. Lock files are created atomically with `O_EXCL`, include a PID and timestamp for stale detection (locks older than 30 seconds are considered abandoned), and are cleaned up on release.
+
+This pattern could apply to other cross-process coordination needs beyond directory creation. If you encounter a similar race condition in a different context, consider whether a local filesystem lock in `.agent-index/` is the right tool.
+
+---
+
 ## ROADMAP.md — Known Bugs, Wishlist, and Future Direction
 
 Every collection should include a `ROADMAP.md` at its root. This file serves three audiences: the collection's developers (what to work on next), other collection authors (what integration points are planned), and the agent itself (what's known to be incomplete or imprecise, so it can set expectations with members).
@@ -804,6 +836,10 @@ Use this checklist before submitting a collection to the marketplace:
 - [ ] No hardcoded credential paths in scripts
 - [ ] Task directives prevent destructive actions (deleting data, marking as read, etc.)
 - [ ] Skill guardrails prevent modifying setup-level configuration
+
+### Marketplace Directory
+- [ ] `marketplace-directory.json` in `agent-index-resource-listings` has been updated to reflect the new `current_version`
+- [ ] `last_updated` date in `marketplace-directory.json` has been set to the publish date
 
 ---
 
