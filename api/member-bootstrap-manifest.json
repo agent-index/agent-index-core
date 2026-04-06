@@ -1,15 +1,15 @@
 {
-  "name": "filesystem-setup",
+  "name": "member-bootstrap",
   "type": "skill",
-  "display_name": "Filesystem Setup",
+  "display_name": "Member Bootstrap",
   "collection": "agent-index-core",
-  "collection_version": "1.0.0",
-  "version": "1.0.0",
+  "collection_version": "2.1.0",
+  "version": "2.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": true,
   "always_on_eligible": false,
-  "setup_template": "filesystem-setup-setup.md",
+  "setup_template": "member-bootstrap-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
@@ -17,5 +17,7 @@
     "skills": [],
     "tasks": []
   },
-  "external_dependencies": []
+  "external_dependencies": [
+    "Remote filesystem MCP server"
+  ]
 }

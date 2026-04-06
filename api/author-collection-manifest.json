@@ -1,12 +1,27 @@
 {
   "name": "author-collection",
   "type": "task",
-  "version": "1.0.0",
+  "display_name": "Author Collection",
   "collection": "agent-index-core",
-  "parameters": {
-    "default_output_path": {
-      "level": "member-overridable",
-      "default": null
-    }
-  }
+  "collection_version": "2.1.0",
+  "version": "2.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": false,
+  "produces_artifacts": true,
+  "produces_shared_artifacts": false,
+  "setup_template": "author-collection-setup.md",
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {
+    "default_output_path": "member-overridable"
+  },
+  "dependencies": {
+    "skills": [],
+    "tasks": []
+  },
+  "external_dependencies": [],
+  "optional_external_dependencies": [],
+  "reads_from": null,
+  "writes_to": null
 }

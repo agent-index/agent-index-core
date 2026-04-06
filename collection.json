@@ -18,7 +18,8 @@
     "publish-updates",
     "apply-updates",
     "author-collection",
-    "validate-collection"
+    "validate-collection",
+    "upload-install-log"
   ],
   "dependencies": [],
   "external_dependencies": [],

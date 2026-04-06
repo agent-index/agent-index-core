@@ -1,7 +1,7 @@
 ---
 name: agent-index-core-collection-setup
 type: collection-setup
-version: 1.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Org-admin setup for agent-index-core — run automatically as part of create-org
 upgrade_compatible: true
@@ -43,6 +43,9 @@ N/A.
 
 ### Requires Admin Attention
 Any structural changes to `agent-index.json` or `org-config.json` schemas in a new version will be documented here with migration instructions.
+
+### Requires Member Attention
+None for PATCH/MINOR upgrades. MAJOR version upgrades will document required member actions here.
 
 ### Migration Notes
 - v1.0 → future versions: migration notes will be added here as new versions are published.

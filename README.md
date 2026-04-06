@@ -22,6 +22,11 @@ This repository is the starting point for every agent-index deployment.
 **Org management tasks**:
 - **Create Org** — first-time org configuration
 - **Edit Org** — manage admins, roles, adapter bundle, and launch the marketplace
+- **Upload Install Log** — uploads local install state to the remote filesystem for admin visibility
+
+**Collection authoring tools**:
+- **Author Collection** — guided workflow for building a new marketplace-eligible collection
+- **Validate Collection** — checks a collection against the marketplace standards and reports compliance issues
 
 ---
 

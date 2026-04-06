@@ -1,8 +1,8 @@
 # Capability Provider Specification
 
-**Status:** Draft
-**Version:** 0.1.0
-**Last Updated:** 2026-04-02
+**Status:** Released
+**Version:** 1.0.0
+**Last Updated:** 2026-04-05
 
 ---
 
@@ -1072,10 +1072,10 @@ Lightweight consumers (like a collection that only needs to send alerts) declare
 
 ## Integration Notes
 
-When this spec is finalized:
+This specification has been integrated into the following documents:
 
-1. **`standards.md`** gains: `provides` and `requires` as optional `collection.json` fields, the two new update log operation types (`provider-register`, `provider-deregister`), and a "Capability Provider Requirements" section covering validation rules.
-2. **`collection-authoring-guide.md`** gains: a "Designing for Capability Providers" section covering when to consume vs. provide, writing capability bindings in setup templates, the resolution helper pattern, and migration guidance.
+1. **`standards.md`** (v2.1.0): `provides` and `requires` as optional `collection.json` fields, the two new update log operation types (`provider-register`, `provider-deregister`), and a "Capability Provider Requirements" section covering validation rules.
+2. **`collection-authoring-guide.md`** (v1.5.2): a "Designing for Capability Providers" section covering when to consume vs. provide, writing capability bindings in setup templates, the resolution helper pattern, and migration guidance.
 3. **`collection.json` schema**: `provides` and `requires` are optional arrays (empty array or absent means "no capabilities provided/required"). Existing collections remain valid without them.
 
-*This specification is a draft companion to `standards.md`. When finalized, the normative requirements will be integrated into `standards.md` and the guidance patterns into `collection-authoring-guide.md`.*
+*This specification is the authoritative reference for the capability provider system. Normative requirements are also captured in `standards.md` and practical guidance in `collection-authoring-guide.md`.*

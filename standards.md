@@ -80,7 +80,7 @@ Every name listed in `collection.json` `api` array must have a corresponding `.m
 
 ## Skill and Task File Requirements
 
-All skill and task definition files (in both `/api/` and `/internal/`) must conform to the agent-index file format standards defined in `agent-index-core/file-format-standards.md`.
+All skill and task definition files (in both `/api/` and `/internal/`) must conform to the agent-index file format standards defined in `agent-index-meta-docs/agent-index-file-format-standards.md`.
 
 Required frontmatter fields for skills:
 
@@ -209,7 +209,7 @@ Collections must declare one of the following categories. New categories may be 
 - Collection names: kebab-case, lowercase, no special characters except hyphens
 - Collection names must not start with `agent-index-` (reserved for official agent-index collections)
 - Collection names must be globally unique within the marketplace
-- Collection directory name must match the `name` field in `collection.json`
+- Collection directory name must match the `name` field in `collection.json`. For marketplace collections distributed via Git, the repository name may use a prefix (e.g., `agent-index-marketplace-{name}`), but the collection directory on the remote filesystem and the `name` field must match.
 - Skill and task names within a collection: kebab-case, globally unique within the collection
 
 ---

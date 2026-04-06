@@ -1,26 +1,29 @@
 {
-  "name": "org-setup",
-  "type": "skill",
-  "display_name": "Org Setup",
+  "name": "apply-updates",
+  "type": "task",
+  "display_name": "Apply Updates",
   "collection": "agent-index-core",
   "collection_version": "2.1.0",
   "version": "2.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": true,
-  "always_on_eligible": false,
-  "setup_template": "org-setup-setup.md",
+  "produces_artifacts": false,
+  "produces_shared_artifacts": false,
+  "setup_template": "apply-updates-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
   "dependencies": {
     "skills": [
-      "member-bootstrap",
-      "preferences-management"
+      "org-setup"
     ],
     "tasks": []
   },
   "external_dependencies": [
     "Remote filesystem MCP server"
-  ]
+  ],
+  "optional_external_dependencies": [],
+  "reads_from": "/shared/updates/",
+  "writes_to": null
 }
