@@ -1,7 +1,7 @@
 ---
 name: system-tutorial-setup
 type: setup
-version: 2.0.3
+version: 2.1.0
 collection: agent-index-core
 description: Setup for the system-tutorial skill
 target: system-tutorial

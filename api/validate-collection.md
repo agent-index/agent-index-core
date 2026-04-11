@@ -1,7 +1,7 @@
 ---
 name: validate-collection
 type: task
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Validates an existing collection against agent-index standards — checks file structure, frontmatter, cross-references, naming conventions, and marketplace eligibility.
 stateful: false

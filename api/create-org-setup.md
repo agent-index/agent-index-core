@@ -1,7 +1,7 @@
 ---
 name: create-org-setup
 type: setup
-version: 1.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Setup for the create-org task
 target: create-org

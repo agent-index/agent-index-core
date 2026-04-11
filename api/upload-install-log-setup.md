@@ -1,7 +1,7 @@
 ---
 name: upload-install-log-setup
 type: setup
-version: 1.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Setup for the upload-install-log task
 target: upload-install-log
