@@ -11,7 +11,7 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be running. In Claude Code CLI, it is started by .claude/settings.json. In Cowork, it is started by the agent-index-filesystem plugin (included in the bootstrap zip as agent-index-filesystem.plugin). If aifs_* tools are not in the tool list, the server did not start — guide the member to install the plugin (Cowork) or check settings.json (CLI).
+    description: The agent-index-filesystem MCP server must be running. In Claude Code CLI, it is started by .claude/settings.json. In Cowork, it is started by the agent-index-filesystem plugin (included in the bootstrap zip as agent-index-filesystem.plugin). If aifs_* tools are not in the tool list, first attempt the aifs-bridge fallback (agent-index-core/tools/aifs-bridge/) which manages the server as an independent subprocess. If the bridge also fails, guide the member to install the plugin (Cowork) or check settings.json (CLI).
 ---
 
 ## About This Skill
@@ -40,11 +40,15 @@ This skill establishes remote authentication and local workspace structure. It d
 
 ### MCP Tool Usage
 
-This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`.
+This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. There are two ways to invoke these tools:
 
-If an `aifs_*` tool is not found in the tool list, the MCP server did not start. The cause depends on the runtime environment:
+1. **Native MCP tools (primary):** The `aifs_*` tools appear directly in the tool list. Invoke them through the MCP tool interface as normal.
 
-- **Cowork:** The MCP server is delivered through the `agent-index-filesystem` plugin. If tools are missing, the plugin is not installed. Guide the member: "The remote filesystem tools aren't available. You need to install the agent-index-filesystem plugin to connect to your org's shared storage. You should find `agent-index-filesystem.plugin` in your workspace folder — open it and confirm the install in Cowork, then let me know when it's done." After the member confirms installation, they must restart the Cowork session for the plugin's MCP server to start.
+2. **Bridge HTTP fallback (Cowork only):** If the native tools are not available, the aifs-bridge daemon can provide the same tools over HTTP. Check whether the bridge is running: `curl -s --max-time 2 http://127.0.0.1:7819/health`. If it returns a response, the bridge is active. Call tools via: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge is not running, start it: `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`.
+
+If neither native tools nor the bridge are available, the MCP server did not start. The cause depends on the runtime environment:
+
+- **Cowork:** The MCP server is delivered through the `agent-index-filesystem` plugin. If tools are missing, first attempt to start the bridge fallback (see above). If the bridge also fails to start (server bundle not found), the plugin is not installed. Guide the member: "The remote filesystem tools aren't available. You need to install the agent-index-filesystem plugin to connect to your org's shared storage. You should find `agent-index-filesystem.plugin` in your workspace folder — open it and confirm the install in Cowork, then let me know when it's done." After the member confirms installation, they must restart the Cowork session for the plugin's MCP server to start.
 
 - **Claude Code CLI:** The MCP server is started by `.claude/settings.json`. If tools are missing, guide the member to check that file and restart the session.
 
@@ -327,7 +331,7 @@ If `members-registry.json` cannot be read from remote (e.g., file doesn't exist)
 
 If the remote `org-config.json` version is newer than the local `agent-index.json` version: surface as an advisory notice. The bootstrap zip may be outdated. The member can still proceed, but they should request an updated bootstrap zip from their admin.
 
-If the MCP server fails to start (no `aifs_*` tools in the tool list): determine the runtime environment and surface the appropriate guidance. In Cowork: "The remote filesystem tools aren't available. The agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, open it to install, then restart this Cowork session." In Claude Code CLI: "The remote filesystem connector isn't configured. Make sure you've unpacked the complete bootstrap zip and that `.claude/settings.json` includes the MCP server configuration." In either case: "If this problem persists, contact your org admin for a new bootstrap zip."
+If the MCP server fails to start (no `aifs_*` tools in the tool list): first attempt the bridge fallback as described in the MCP Tool Usage section above. If the bridge starts successfully, proceed with bootstrap using the bridge for all `aifs_*` calls. If the bridge also fails, determine the runtime environment and surface the appropriate guidance. In Cowork: "The remote filesystem tools aren't available. The agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, open it to install, then restart this Cowork session." In Claude Code CLI: "The remote filesystem connector isn't configured. Make sure you've unpacked the complete bootstrap zip and that `.claude/settings.json` includes the MCP server configuration." In either case: "If this problem persists, contact your org admin for a new bootstrap zip."
 
 If the member workspace already exists locally but member-index.json does not: this is a partial prior setup. Create member-index.json without recreating the directory structure. Proceed normally.
 

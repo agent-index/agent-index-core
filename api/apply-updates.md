@@ -249,7 +249,7 @@ After all phases complete (or after the member has declined all optional items):
 
 ### MCP Tool Usage
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`. If an `aifs_*` tool is not found in the tool list, the MCP server did not start — in Cowork, the `agent-index-filesystem` plugin may not be installed (guide the member to install it and restart); in Claude Code CLI, check `.claude/settings.json` and restart the session.
+This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface when available. If `aifs_*` tools are not found in the tool list, the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback: check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge also fails, guide the member to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and restart the session.
 
 ### Behavior
 

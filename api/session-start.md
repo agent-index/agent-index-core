@@ -12,7 +12,7 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be running for remote connectivity checks, org config reads, and update checks. In Claude Code CLI it is started by .claude/settings.json. In Cowork it is started by the agent-index-filesystem plugin.
+    description: The agent-index-filesystem MCP server must be running for remote connectivity checks, org config reads, and update checks. In Claude Code CLI it is started by .claude/settings.json. In Cowork it is started by the agent-index-filesystem plugin. If the plugin's server is terminated mid-session, the aifs-bridge fallback (agent-index-core/tools/aifs-bridge/) is attempted automatically in Step 2.
 reads_from: null
 writes_to: null
 ---
@@ -61,12 +61,23 @@ Do not proceed with any further steps. Do not attempt to infer installed capabil
 
 First, check whether `aifs_*` tools are available in the tool list. If they are not present at all, the MCP server did not start. This is a different condition from "server running but not authenticated" — it means the server launch mechanism is not configured for this runtime.
 
-**If `aifs_*` tools are not in the tool list:** Proceed to Step 3 with a tool-availability notice queued for Step 8. The member can still use locally installed capabilities, but all remote operations will be unavailable. The notice should reflect the runtime environment:
+**If `aifs_*` tools are not in the tool list (Cowork):** Before surfacing a notice to the member, attempt to recover using the aifs-bridge fallback. The bridge is an HTTP daemon that spawns the MCP server as a subprocess outside of Cowork's plugin lifecycle, making it resilient to the platform killing the plugin's server process.
+
+Recovery procedure:
+
+1. Check whether the bridge is already running: `curl -s --max-time 2 http://127.0.0.1:7819/health`
+2. If not running, start it: `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`
+3. If the bridge starts successfully, verify by calling `aifs_auth_status` through the bridge: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"aifs_auth_status","args":{}}'`
+
+If bridge recovery succeeds: proceed with all remote operations in this session using the bridge HTTP interface instead of native MCP tools. For each `aifs_*` tool call in subsequent steps, use: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'` and parse the `content[0].text` field from the response. Do not surface a notice to the member — the recovery was transparent.
+
+If bridge recovery fails (bridge script not found, server bundle not found, startup timeout, or auth check fails): proceed to Step 3 with a tool-availability notice queued for Step 8:
 
 In Cowork:
-> "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, install it, and restart this Cowork session. You can still use your installed skills and tasks this session. Say '@ai:member-bootstrap' if you need help."
+> "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be running. I tried to recover using the backup connector but it also failed. You can still use your installed skills and tasks this session. Try restarting this Cowork session, or say '@ai:member-bootstrap' if you need help."
 
-In Claude Code CLI:
+**If `aifs_*` tools are not in the tool list (Claude Code CLI):** The bridge is not needed — CLI users should check `.claude/settings.json`. Proceed to Step 3 with a notice queued for Step 8:
+
 > "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. Check that `.claude/settings.json` includes the MCP server configuration and restart the session, or say '@ai:member-bootstrap' to troubleshoot."
 
 Skip the `aifs_auth_status()` call and all subsequent remote operations (Steps 5 and 7 depend on remote access and will be skipped per their existing remote-unavailable handling).
@@ -264,13 +275,15 @@ Update-available notices (from Step 5) are only shown at `brief` and `detailed` 
 
 ### MCP Tool Usage
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface, never via shell scripts or direct invocation of `server.bundle.js`.
+This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. There are two ways these tools may be available:
 
-If `aifs_*` tools are not found in the tool list, the MCP server did not start. This is distinct from authentication failure (where the tools exist but return `authenticated: false`). When tools are entirely absent, the cause depends on the runtime environment, and the notice queued for Step 8 should reflect this:
+1. **Native MCP tools (primary):** The `aifs_*` tools appear directly in the tool list. This is the normal case when the Cowork plugin or CLI settings.json is working. Invoke them through the MCP tool interface as normal.
 
-- **Cowork:** The plugin is not installed. Queue: "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, install it, and restart this Cowork session. Say '@ai:member-bootstrap' if you need help."
+2. **Bridge HTTP fallback (Cowork only):** If the native tools disappear mid-session (a known Cowork platform issue where the plugin's MCP server process is terminated), the aifs-bridge daemon can be started as a recovery mechanism. When operating through the bridge, tool calls are made via HTTP: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. The response contains `content[0].text` with the tool result, matching the same format as native MCP tool responses.
 
-- **Claude Code CLI:** The settings.json config is missing or the server failed to start. Queue: "The remote filesystem connector isn't responding. Check that `.claude/settings.json` includes the MCP server configuration and restart the session. Say '@ai:member-bootstrap' to troubleshoot."
+The bridge fallback is attempted automatically in Step 2 when native tools are absent. If the bridge is running (from Step 2 recovery or a manual start), use it for all `aifs_*` operations in the session.
+
+If neither native tools nor the bridge are available, the MCP server did not start. This is distinct from authentication failure (where the tools exist but return `authenticated: false`). When tools are entirely absent, the cause depends on the runtime environment — see Step 2 for the specific notices.
 
 ### Behavior
 

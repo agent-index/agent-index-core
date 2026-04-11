@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.5.2
-**Last Updated:** 2026-04-05
+**Version:** 1.5.3
+**Last Updated:** 2026-04-09
 
 ---
 
@@ -313,6 +313,26 @@ The mixed pattern is the most complex and the most important to get right. State
 
 Skills use a `Directives` section instead of numbered workflow steps. The structure is different because skills are reactive — they respond to whatever the member asks for.
 
+### The Behavior subsection is required and comes first
+
+The file format standards require a `### Behavior` subsection as the first heading under `## Directives`. This is easy to miss when your skill has complex internal structure — invocation patterns, supported operations, topic lists — but it must be present. The Behavior subsection captures the core behavioral rules that apply throughout the entire skill, before any skill-specific subsections.
+
+Write it as a concise paragraph (2-4 sentences) describing the skill's overall operating posture: how it approaches work, what it prioritizes, and how it interacts with the member. Then add your skill-specific subsections (Invocation, Supported Operations, etc.) after it.
+
+```markdown
+### Behavior
+
+Operate as an interactive configuration partner. Read the member's current setup
+before taking action. Confirm all destructive changes before executing. Keep
+modifications scoped to the specific parameter or setting the member asked about.
+
+### Invocation
+
+When the member invokes this skill, begin by reading their current setup...
+```
+
+This pattern — Behavior first, then skill-specific subsections — prevents the common mistake of jumping straight into invocation patterns or operation lists and forgetting the structural requirement entirely.
+
 ### Start with the invocation pattern
 
 Every skill should begin by describing what happens when it's first invoked:
@@ -417,7 +437,73 @@ This is an optional design pattern (not required by `standards.md`) used by seve
 
 ## Bundling Scripts and Apps
 
-If your collection needs to run code beyond what the agent can do natively (API calls with auth, data transformations, etc.), bundle scripts in an `/apps/` directory.
+Scripts serve two purposes in agent-index collections: extending what the agent can do (API calls with auth, data transformations) and **avoiding token waste on work the agent doesn't need to reason about**.
+
+The second purpose is the more important design consideration. Task workflows contain judgment steps (where Claude's reasoning is the point) and mechanical steps (where Claude re-derives the same deterministic logic every run). Mechanical steps should be parameterized scripts that Claude calls, not inline instructions that Claude reasons through.
+
+### When to extract a script
+
+A workflow step is a candidate for script extraction when it meets all three criteria:
+
+1. **Inputs are fully determined** — by configuration or prior step outputs. No member judgment is needed at runtime.
+2. **Logic is identical every run** — no conditional reasoning based on content semantics. The same inputs always produce the same outputs.
+3. **Output format is fixed** — structured data, not natural language.
+
+Common mechanical steps: reading and parsing a config file, validating data against a schema, computing hashes or checksums, writing structured output to a known path, checking MCP connectivity, listing and filtering files, performing date arithmetic, merging data from multiple sources.
+
+Not mechanical: classifying content, writing summaries, interpreting member input, making decisions under ambiguity, evaluating quality.
+
+### Script-first design
+
+When designing a new collection, identify mechanical steps during workflow design — before writing any files. For each mechanical step, design a parameterized script with:
+
+- CLI arguments mapped from workflow configuration values
+- Structured JSON output to stdout (with `status` and `data` fields)
+- `--dry-run` support for preview
+- Clear exit codes (`0` success, `1` expected error, `2` unexpected error)
+
+Then write the workflow step as a script invocation rather than inline reasoning. This avoids the common pattern of building collections with inline mechanical logic and optimizing it out later.
+
+**Example — before (inline):**
+```markdown
+### Step 2: Load Project Manifest
+
+Read `projects-manifest.json` via `aifs_read`. Parse the JSON. Find the entry
+matching the project slug. Extract the project title, status, owner, and
+created date. If no entry matches, inform the member.
+```
+
+**Example — after (script call):**
+```markdown
+### Step 2: Load Project Manifest
+
+Run the project manifest loader:
+
+\`\`\`bash
+python {apps_path}/projects-load-manifest.py \
+    --manifest-path "{shared_projects_path}/projects-manifest.json" \
+    --project-slug "{project_slug}" \
+    --format json
+\`\`\`
+
+Parse the JSON output. The `data` field contains the project metadata.
+If exit code is 1, the project was not found — inform the member and offer
+alternatives.
+```
+
+The second version costs ~50 tokens (the script invocation and output parsing) instead of ~400 (Claude reasoning through JSON parsing, field extraction, and error handling). Over hundreds of runs, this compounds.
+
+### Consolidation
+
+If multiple tasks perform similar mechanical work (e.g., three tasks all start by loading and parsing the project manifest), extract one shared script rather than three separate ones. Use CLI flags to control which fields are extracted or what format is returned. Fewer, more capable scripts are easier to maintain than many single-purpose ones.
+
+### Optimizing existing collections
+
+For collections already built with inline mechanical logic, the Developer collection's `optimize` task can audit workflows, classify steps, estimate token savings, and generate script replacements. Run it when a collection's workflows are stable and token efficiency matters.
+
+### Script conventions
+
+Bundle scripts in an `/apps/` directory. Every bundled script should:
 
 ### Script conventions
 
@@ -504,6 +590,22 @@ For agent-index-core, the `agent-index-filesystem` MCP server uses both paths: `
 - `$HOME` always resolves to the session root, making `$HOME/mnt/*/` a stable discovery pattern
 - Session names change between sessions, so never hardcode a mount path — scan for a known marker file (e.g., `agent-index.json`)
 - After plugin installation, the member must restart the Cowork session for the MCP server to start
+
+### MCP server resilience: the HTTP bridge pattern
+
+Cowork's plugin system manages MCP server processes and can terminate them mid-session. This is a known platform behavior — the server code is not at fault, and there is no plugin-side configuration to prevent it. When the process dies, the native MCP tools disappear from the session with no automatic recovery.
+
+The `aifs-bridge` tool (`agent-index-core/tools/aifs-bridge/`) addresses this by running the MCP server as a child process of an HTTP daemon that Claude controls directly, outside the plugin lifecycle. The bridge spawns the server bundle, completes the MCP initialization handshake over stdio, and proxies tool calls via HTTP. If the server process exits, the next tool call transparently restarts it.
+
+**When to use this pattern:** Any Cowork plugin MCP server that (a) members depend on for session-critical operations and (b) cannot tolerate mid-session termination. The bridge is a workaround for a platform limitation, not an architectural preference — native MCP tools are better UX when they work.
+
+**How it integrates:** The `session-start` task automatically attempts bridge recovery when it detects that native `aifs_*` tools are missing from the tool list. If the bridge starts successfully, the session proceeds transparently — all `aifs_*` calls route through `http://127.0.0.1:7819` instead of native MCP tools. The member never sees the difference. See `session-start.md` Step 2 and `member-bootstrap.md` MCP Tool Usage for the implementation.
+
+**Generalizing for other servers:** The bridge accepts a `--bundle` flag for any MCP server bundle, not just the agent-index filesystem adapter. If your collection bundles its own MCP server and experiences the same mid-session termination, you can reuse the bridge: `node aifs-bridge.mjs --bundle /path/to/your/server.js --port 7821 --env YOUR_CONFIG_VAR=value`. Use a different port to avoid conflicts with the filesystem bridge.
+
+**What collection authors don't need to do:** Individual collection files (setup templates, API tasks, tutorials) do not need to reference the bridge directly. The `session-start` task handles bridge recovery transparently before any collection code runs. When `aifs_*` tools are available (whether natively or via bridge), collection tasks use them identically. When tools are completely unavailable (bridge also failed), collection setup templates should route the member to `@ai:member-bootstrap` for troubleshooting — that flow already includes bridge recovery as part of its diagnostic steps.
+
+**What collection authors should do:** In your `collection-setup.md` Pre-Setup Checks, validate `aifs_*` connectivity early — call `aifs_auth_status()` or attempt a lightweight read before doing any writes. If the call fails, don't tell the member to "restart the session." Instead, direct them to `@ai:member-bootstrap`, which will attempt bridge recovery, re-authentication, and plugin diagnostics in the correct order. This keeps recovery logic centralized rather than duplicated across collections.
 
 ---
 

@@ -374,7 +374,7 @@ Now that the MCP server is loaded (from `.claude/settings.json` written in Step 
 
 This step runs in the new session (Phase 3). The `agent-index.json` and `.claude/settings.json` files were already written in Step 3c. The MCP server should have started automatically when this session launched.
 
-1. Verify the MCP server is available by calling `aifs_auth_status()`. If the tool is not found, the session may not have loaded settings.json correctly — surface: "The filesystem MCP server doesn't appear to be running. Check that `.claude/settings.json` is present and contains the `agent-index-filesystem` server entry, then restart the session."
+1. Verify the MCP server is available by calling `aifs_auth_status()`. If the tool is not found, first attempt the aifs-bridge fallback (see MCP Tool Usage directives). If the bridge also fails, surface: "The filesystem MCP server doesn't appear to be running. Check that `.claude/settings.json` is present and contains the `agent-index-filesystem` server entry, then restart the session."
 
 2. If `aifs_auth_status()` returns `authenticated: false`, call `aifs_authenticate(action="start")` to initiate the auth flow. The response will include an `auth_url` and a `status` field indicating how the callback will be handled:
 
@@ -661,9 +661,13 @@ agent-index/
 │       ├── server.bundle.js            # Pre-built MCP server bundle
 │       └── adapter.json                # Adapter metadata (version, checksum, build timestamp)
 ├── agent-index-core/
-│   └── .claude/
-│       └── hooks/
-│           └── session-bootstrap.sh    # Bootstrap script
+│   ├── .claude/
+│   │   └── hooks/
+│   │       └── session-bootstrap.sh    # Bootstrap script
+│   └── tools/
+│       └── aifs-bridge/
+│           ├── aifs-bridge.mjs         # MCP server bridge daemon (Cowork fallback)
+│           └── aifs-call.sh            # CLI wrapper for bridge
 ├── agent-index-filesystem.plugin       # Cowork plugin for MCP server (Cowork only)
 └── CLAUDE.md                           # Claude context
 ```
@@ -685,6 +689,10 @@ cd {project_dir}/agent-index-core/cowork-plugin && zip -r {temp_directory}/agent
 ```
 
 This plugin is what enables the MCP server in Cowork sessions. It discovers the workspace at runtime (by scanning `$HOME/mnt/*/` for `agent-index.json`) and starts the server — no org-specific configuration needed. Cowork members must install this plugin during their first-time setup; the member-bootstrap skill guides them through it.
+
+**Include the aifs-bridge tools:**
+
+Copy the bridge directory from `agent-index-core/tools/aifs-bridge/` into the zip at `agent-index-core/tools/aifs-bridge/`. This includes `aifs-bridge.mjs` and `aifs-call.sh`. The bridge is a fallback mechanism for Cowork sessions where the plugin's MCP server process is terminated mid-session by the platform. It spawns the same server bundle as a subprocess under Claude's control and exposes tool calls over HTTP. The session-start task and member-bootstrap skill automatically attempt bridge recovery when native MCP tools are unavailable.
 
 The `session-bootstrap.sh` is copied from the local `agent-index-core/.claude/hooks/`.
 
@@ -822,9 +830,9 @@ This task uses the `agent-index-filesystem` MCP server for all remote filesystem
 
 **Tool invocation:** When this document says `aifs_read(path)`, `aifs_write(path, content)`, `aifs_auth_status()`, etc., these are MCP tool calls on the `agent-index-filesystem` server. Invoke them as MCP tools — they will appear in the tool list with names like `mcp__agent-index-filesystem__aifs_read`. They are NOT shell commands, JavaScript functions, or Python calls.
 
-**Critical prohibition:** NEVER invoke the MCP server binary (`server.bundle.js`) directly via bash, node, or any shell script. NEVER build wrapper scripts (bash, Python, Node.js, or otherwise) to pipe JSON-RPC messages to the server process. The MCP server is managed by the runtime — all interaction MUST go through the MCP tool interface. If an `aifs_*` tool call fails or the tool is not found in the tool list, diagnose the MCP configuration and surface the problem to the admin. Do not attempt workarounds.
+**Primary mode:** Always prefer native MCP tool calls when the tools are present in the tool list. Do not build ad-hoc wrapper scripts or directly invoke `server.bundle.js` for one-off operations.
 
-**If MCP tools are not available:** This means the MCP server did not start. The cause depends on the runtime: in Cowork, the `agent-index-filesystem` plugin may not be installed — guide the admin to install it and restart; in Claude Code CLI, check `.claude/settings.json` and verify the bundle path exists. Other common causes: (1) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (2) the session needs to be restarted for config changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools.
+**If MCP tools are not available:** This means the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback — the bridge is an approved recovery mechanism that spawns the server as a managed subprocess and exposes tool calls over HTTP. Check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'` and proceed normally. If the bridge also fails, guide the admin to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and verify the bundle path exists. Other common causes: (1) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (2) the session needs to be restarted for config changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools (native or bridge).
 
 ### Install Logging
 
