@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true

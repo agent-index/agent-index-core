@@ -1,7 +1,7 @@
 ---
 name: upload-install-log
 type: task
-version: 1.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Upload install diagnostic logs to the agent-index development team for analysis and improvement.
 stateful: false

@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false

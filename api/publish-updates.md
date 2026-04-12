@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false

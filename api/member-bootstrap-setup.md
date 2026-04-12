@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap-setup
 type: setup
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Setup for the member-bootstrap skill
 target: member-bootstrap

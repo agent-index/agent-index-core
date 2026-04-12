@@ -1,7 +1,7 @@
 ---
 name: validate-collection-setup
 type: setup
-version: 1.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Setup interview for validate-collection
 target: validate-collection

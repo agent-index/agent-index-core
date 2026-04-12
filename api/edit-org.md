@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: Edit org configuration — update the admin list or launch the marketplace to install or manage collections.
 stateful: false

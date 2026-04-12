@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 2.0.0
+version: 2.1.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
