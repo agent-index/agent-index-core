@@ -1,0 +1,110 @@
+{
+  "capability": "bug-reporting",
+  "version": "1.0.0",
+  "description": "Submit, view, and manage bug reports within the org.",
+  "operations": [
+    {
+      "name": "report-bug",
+      "description": "Walk a member through submitting a structured bug report.",
+      "required": true,
+      "parameters": {
+        "collection": {
+          "type": "string | null",
+          "required": false,
+          "description": "The collection the bug was encountered in. If null, the reporter specifies during the interview."
+        },
+        "title": {
+          "type": "string | null",
+          "required": false,
+          "description": "Short summary of the bug. If null, collected during the interview."
+        },
+        "severity": {
+          "type": "string | null",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ],
+          "required": false,
+          "description": "Bug severity. If null, collected during the interview."
+        },
+        "context": {
+          "type": "object | null",
+          "required": false,
+          "description": "Additional context from the calling collection (e.g., task name, session details)."
+        }
+      },
+      "returns": {
+        "reported": {
+          "type": "boolean",
+          "description": "Whether the bug report was successfully submitted."
+        },
+        "bug_id": {
+          "type": "string | null",
+          "description": "The assigned bug ID, if successfully reported."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if reported is false."
+        }
+      }
+    },
+    {
+      "name": "view-bugs",
+      "description": "List and filter submitted bug reports.",
+      "required": false,
+      "parameters": {
+        "collection": {
+          "type": "string | null",
+          "required": false,
+          "description": "Filter bugs by collection name. If null, show all."
+        },
+        "status": {
+          "type": "string | null",
+          "enum": [
+            "open",
+            "triaged",
+            "forwarded",
+            "resolved",
+            "closed"
+          ],
+          "required": false,
+          "description": "Filter by bug status. If null, show all statuses."
+        }
+      },
+      "returns": {
+        "bugs": {
+          "type": "array",
+          "description": "Array of bug report summaries."
+        },
+        "count": {
+          "type": "integer",
+          "description": "Total number of bugs matching the filter."
+        }
+      }
+    },
+    {
+      "name": "forward-bug",
+      "description": "Forward a triaged bug report to an external system or collection server.",
+      "required": false,
+      "parameters": {
+        "bug_id": {
+          "type": "string",
+          "required": true,
+          "description": "The bug ID to forward."
+        }
+      },
+      "returns": {
+        "forwarded": {
+          "type": "boolean",
+          "description": "Whether the bug was successfully forwarded."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description if forwarded is false."
+        }
+      }
+    }
+  ]
+}
