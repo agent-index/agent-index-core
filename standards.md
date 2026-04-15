@@ -411,7 +411,7 @@ Each operation in an entry has a `type` field and type-specific fields:
 | `type` | string | `"claude-md-update"` |
 | `hash` | string | SHA-256 hex hash of the new CLAUDE.md content |
 
-**`adapter-bundle-update`** — The MCP server adapter bundle was updated.
+**`adapter-bundle-update`** — The filesystem adapter exec bundle was updated.
 
 | Field | Type | Description |
 |---|---|---|
@@ -498,7 +498,7 @@ When a member has multiple pending entries, they are merged into a single net up
 
 ## Two-Tier Filesystem
 
-Agent-index uses a two-tier filesystem model. Member-specific files live on the member's local machine. Org-wide shared files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through the agent-index-filesystem MCP server.
+Agent-index uses a two-tier filesystem model. Member-specific files live on the member's local machine. Org-wide shared files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through `aifs_*` tools running in exec mode.
 
 ### Local Files (native Read/Write/Edit)
 
@@ -511,9 +511,9 @@ Files under the member's local workspace — `members/{member_hash}/` — are ac
 
 Local files are private to the member. No other member can access them.
 
-### Remote Files (aifs_* MCP tools)
+### Remote Files (aifs_* tools in exec mode)
 
-Files on the org's remote storage are accessed through the `aifs_*` tool family provided by the agent-index-filesystem MCP server. This includes:
+Files on the org's remote storage are accessed through the `aifs_*` tool family running in exec mode. This includes:
 
 - `org-config.json` — org configuration
 - `members-registry.json` — member hash-to-identity mapping
@@ -524,7 +524,7 @@ Files on the org's remote storage are accessed through the `aifs_*` tool family 
 
 ### Remote Access Failure Handling
 
-Remote connectivity may be unavailable (expired credentials, MCP server not running, network issues). Collections should handle this gracefully:
+Remote connectivity may be unavailable (expired credentials, exec bundle missing, network issues). Collections should handle this gracefully:
 
 - If the capability only needs local data: proceed normally
 - If the capability needs remote data and `aifs_auth_status()` returns `authenticated: false`: attempt automatic re-authentication by invoking the `aifs_authenticate` flow inline. If re-authentication succeeds, proceed normally. If it fails, surface a clear notice that remote connectivity is required and suggest `@ai:member-bootstrap` as a manual fallback

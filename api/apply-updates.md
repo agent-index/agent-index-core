@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -12,8 +12,8 @@ dependencies:
     - org-setup
   tasks: []
 external_dependencies:
-  - name: Remote filesystem MCP server
-    description: Reads update instructions and collection definitions from the remote filesystem via the agent-index-filesystem MCP server (aifs_* tools).
+  - name: Remote filesystem exec bundle
+    description: Reads update instructions and collection definitions from the remote filesystem via the on-demand executor (aifs-exec.bundle.js).
 reads_from: "/shared/updates/"
 writes_to: null
 ---
@@ -180,10 +180,10 @@ If `claude-md-update` is present:
 
 If `adapter-bundle-update` is present:
 1. Read `/shared/bootstrap/member-bootstrap.zip` from the remote filesystem (or the adapter bundle files directly if the admin has published them to a known location)
-2. Extract and overwrite `mcp-servers/filesystem/server.bundle.js` and `adapter.json`
+2. Extract and overwrite `mcp-servers/filesystem/aifs-exec.bundle.js` and `aifs-exec.sh` and `adapter.json`
 3. Write a pending plan file at `.agent-index/install-state/pending-update-plan.json` containing the remaining operations (collection upgrades, installs, etc.) and the `target_cursor`
-4. Surface: "Adapter bundle updated to {target_version}. **Please restart your session** to load the new MCP server. When you come back, say '@ai:update' and I'll finish the remaining updates."
-5. Halt. Do not continue to Phase 4 in this session.
+4. Surface: "Adapter bundle updated to {target_version}. The new executor bundle is ready to use immediately. Say '@ai:update' and I'll continue with the remaining updates."
+5. Continue to Phase 4 in this session.
 
 **Phase 4 — Collection upgrades (already-installed collections)**
 
@@ -247,9 +247,9 @@ After all phases complete (or after the member has declined all optional items):
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface when available. If `aifs_*` tools are not found in the tool list, the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback: check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge also fails, guide the member to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and restart the session.
+All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
 ### Behavior
 

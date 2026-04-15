@@ -1,7 +1,7 @@
 ---
 name: system-tutorial
 type: skill
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Explains the agent-index system to members — its concepts, structure, invocation model, and how to get the most out of it — through a guided tour or targeted answers to specific questions.
 stateful: false
@@ -28,7 +28,7 @@ This skill does not perform any system operations. It does not install anything,
 
 ### What This Skill Does Not Cover
 
-This skill covers agent-index system concepts and behavior. It does not cover the content of specific skills and tasks installed by the member's org — each of those has its own `About` section that Claude draws on when members ask about them. It does not cover external systems connected through collections (Gmail, Salesforce, etc.) — those are documented by their respective collections. It does not provide troubleshooting for installation failures, remote filesystem connectivity, or MCP server issues — those are handled by the Member Bootstrap Skill and the Org Setup Skill.
+This skill covers agent-index system concepts and behavior. It does not cover the content of specific skills and tasks installed by the member's org — each of those has its own `About` section that Claude draws on when members ask about them. It does not cover external systems connected through collections (Gmail, Salesforce, etc.) — those are documented by their respective collections. It does not provide troubleshooting for installation failures or remote filesystem connectivity — those are handled by the Member Bootstrap Skill and the Org Setup Skill.
 
 ---
 
@@ -52,11 +52,11 @@ The guided tour covers seven topics in order. After each topic, check in: "Does 
 
 **Topic 1: What agent-index is**
 
-Explain that agent-index is a layer on top of Claude Cowork that gives orgs a way to define, share, and personalize AI-powered workflows. It is built out of files — markdown documents and structured JSON — with a two-tier architecture: member-specific files live locally on the member's machine, while shared org files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through a lightweight MCP server that runs in the background.
+Explain that agent-index is a layer on top of Claude Cowork that gives orgs a way to define, share, and personalize AI-powered workflows. It is built out of files — markdown documents and structured JSON — with a two-tier architecture: member-specific files live locally on the member's machine, while shared org files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through a lightweight connector that runs on demand when needed.
 
 The key idea: instead of every member re-explaining their workflows to Claude from scratch in every session, agent-index lets the org define those workflows once and make them available to everyone. Members install and configure the workflows that are relevant to their role, and Claude starts every session already knowing what they need.
 
-The two-tier split means the member's personal configuration is always fast and local, while shared resources are accessed seamlessly through the MCP server — the member does not need to think about which tier a file lives on.
+The two-tier split means the member's personal configuration is always fast and local, while shared resources are accessed seamlessly from the remote filesystem — the member does not need to think about which tier a file lives on.
 
 **Topic 2: Collections**
 
@@ -64,7 +64,7 @@ Explain that collections are the main unit of organization. A collection is a na
 
 Collections come from two places: the marketplace (pre-built collections that the org downloads and installs, like a BambooHR replacement or a Greenhouse replacement) and the org itself (collections the org builds for their own proprietary workflows). The org can have as many of their own collections as makes sense for how they work.
 
-Explain that collections are stored on the org's remote filesystem — the member can think of them as folders of capabilities that the org has made available. Claude reads collection files through the MCP server in the background; from the member's perspective, collections just work.
+Explain that collections are stored on the org's remote filesystem — the member can think of them as folders of capabilities that the org has made available. Claude reads collection files from the remote filesystem as needed; from the member's perspective, collections just work.
 
 **Topic 3: Skills and tasks**
 
@@ -88,7 +88,7 @@ The first is the member index: at the start of every session, Claude reads the l
 
 The second is task state: stateful tasks write a `current-state.md` file when you work with them. When you return to that task, Claude reads this file to pick up where you left off — reconstructing what was done last session, what is in progress, what decisions were made. This only happens for whichever task is active in your session. You do not have to re-brief Claude each time.
 
-Both of these — the member index and task state — live locally on your machine. They are fast to read and private. Session start also checks connectivity to the remote filesystem (via the MCP server) so that shared org resources are available when needed.
+Both of these — the member index and task state — live locally on your machine. They are fast to read and private. Session start also checks connectivity to the remote filesystem so that shared org resources are available when needed.
 
 **Topic 6: Invocation and aliases**
 
@@ -121,13 +121,13 @@ The key points to convey:
 - New collections offered by the admin are presented as optional — the member chooses whether to install them
 - The member can also run `@ai:check-updates` at any time as a diagnostic to see everything that is out of date and why
 
-After Topic 8, offer to go deeper on any topic or to answer specific questions. If the member seems curious about the two-tier architecture, the MCP server, or how remote connectivity works, explain at whatever depth they want — but do not front-load these infrastructure details unless asked.
+After Topic 8, offer to go deeper on any topic or to answer specific questions. If the member seems curious about the two-tier architecture, the remote filesystem, or how connectivity works, explain at whatever depth they want — but do not front-load these infrastructure details unless asked.
 
 Also surface the shortcut: "If you ever have a specific question about how something works, just ask me directly — you do not need to invoke the tutorial formally."
 
 ### Troubleshooting: Member Bootstrap
 
-If remote connectivity ever fails at session start — if the MCP server loses contact with the org's shared filesystem — I'll suggest `@ai:member-bootstrap`. This is the troubleshooting tool that re-establishes your connection and gets you back online. It is rarely needed, but when it is, it is the right tool.
+If remote connectivity ever fails at session start — if the remote filesystem connection is lost — I'll suggest `@ai:member-bootstrap`. This is the troubleshooting tool that re-establishes your connection and gets you back online. It is rarely needed, but when it is, it is the right tool.
 
 ### Answering Specific Questions
 
@@ -139,7 +139,7 @@ Common question patterns and how to approach them:
 
 **"How does {thing} work?"** — Explain the mechanism at the level of detail appropriate to the question. "How do aliases work?" warrants a full explanation of the two-layer alias system. "How does @ai:email work?" just warrants "it invokes your email-manager task from the acme-corp collection."
 
-**"Why did {thing} happen?"** — Diagnose the observed behavior against system behavior. "Why did I see a warning at startup?" is an invitation to explain EOL dates and deprecation warnings specifically. "Why did it say the remote filesystem is not connected?" is an invitation to explain the MCP server and authentication model, and to point them toward `@ai:member-bootstrap`.
+**"Why did {thing} happen?"** — Diagnose the observed behavior against system behavior. "Why did I see a warning at startup?" is an invitation to explain EOL dates and deprecation warnings specifically. "Why did it say the remote filesystem is not connected?" is an invitation to explain the remote filesystem connection and authentication model, and to point them toward `@ai:member-bootstrap`.
 
 **"What can I do with agent-index?"** — Frame the answer around the member's specific installed capabilities. Show them what they have, explain what each does, and point to anything available in installed collections that they have not yet installed.
 

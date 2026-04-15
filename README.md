@@ -88,7 +88,7 @@ The bootstrap hook will detect you as a new member and guide you through authent
 
 ## Directory Structure
 
-Agent-index uses a two-tier filesystem: member files are local, org/shared files are on remote storage accessed via an MCP server.
+Agent-index uses a two-tier filesystem: member files are local, org/shared files are on remote storage accessed via `aifs_*` tools in exec mode.
 
 **Local (on member's machine at `~/agent-index/`):**
 ```
@@ -109,7 +109,7 @@ Agent-index uses a two-tier filesystem: member files are local, org/shared files
       /profile/
 ```
 
-**Remote (on org's shared storage, accessed via `aifs_*` MCP tools):**
+**Remote (on org's shared storage, accessed via `aifs_*` tools in exec mode):**
 ```
 /
   org-config.json                     ← org configuration (written by create-org)

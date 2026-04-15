@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap-setup
 type: setup
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Setup for the member-bootstrap skill
 target: member-bootstrap
@@ -11,13 +11,13 @@ upgrade_compatible: true
 
 ## Setup Overview
 
-Member Bootstrap guides you through authenticating to your org's remote filesystem, verifying connectivity, creating your local member workspace, and registering with the org. This skill requires remote filesystem connectivity. The MCP server must be running (started by `.claude/settings.json` in CLI or the agent-index-filesystem plugin in Cowork). This setup validates your runtime environment.
+Member Bootstrap guides you through authenticating to your org's remote filesystem, verifying connectivity, creating your local member workspace, and registering with the org. This skill requires remote filesystem connectivity. The on-demand executor bundle must be present in `mcp-servers/filesystem/` (included in the bootstrap zip). This setup validates your runtime environment.
 
 ---
 
 ## Pre-Setup Checks
 
-- MCP server tools (`aifs_*`) are available in the tool list → if not: "The agent-index-filesystem MCP server is not running. In Cowork, install the agent-index-filesystem plugin. In Claude Code CLI, verify `.claude/settings.json` includes the server configuration."
+- The exec shell wrapper exists at `mpc-servers/filesystem/aifs-exec.sh` and responds to `aifs_auth_status` → if not: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip."
 
 ---
 

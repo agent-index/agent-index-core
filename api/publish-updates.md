@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -11,8 +11,8 @@ dependencies:
   skills: []
   tasks: []
 external_dependencies:
-  - name: Remote filesystem MCP server
-    description: Reads org state and writes update log entries to the remote filesystem via the agent-index-filesystem MCP server (aifs_* tools).
+  - name: Remote filesystem exec bundle
+    description: Reads org state and writes update log entries to the remote filesystem via the on-demand executor (aifs-exec.bundle.js).
 reads_from: null
 writes_to: "/shared/updates/"
 ---
@@ -153,8 +153,8 @@ Present the computed operations to the admin:
 > The following changes will be published for members to apply:
 >
 > {For each operation, a one-line summary:}
-> - **agent-index-core** updated from 2.0.0 to 2.1.0
-> - **projects** collection updated from 2.0.0 to 3.0.0 (major — migration required)
+> - **agent-index-core** updated from 3.0.0 to 3.1.0
+> - **projects** collection updated from 3.0.4 to 4.0.0 (major — migration required)
 > - **email-triage** collection newly installed (v1.0.0)
 > - **CLAUDE.md** updated
 > - **Adapter bundle** updated from 1.0.0 to 1.1.0
@@ -202,8 +202,8 @@ Otherwise: take the last entry's `id`, parse as integer, increment by 1, zero-pa
   "operations": [
     {
       "type": "core-update",
-      "target_version": "2.1.0",
-      "from_version": "2.0.0"
+      "target_version": "3.1.0",
+      "from_version": "3.0.0"
     },
     {
       "type": "collection-update",
@@ -281,9 +281,9 @@ This file exists so that lightweight checks (session-start) can read a single sm
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface when available. If `aifs_*` tools are not found in the tool list, the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback: check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge also fails, guide the admin to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and restart the session.
+All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
 ### Behavior
 

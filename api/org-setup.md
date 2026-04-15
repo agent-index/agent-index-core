@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -12,8 +12,8 @@ dependencies:
     - member-bootstrap
   tasks: []
 external_dependencies:
-  - name: Remote filesystem MCP server
-    description: Collection definitions are read from the remote filesystem via the agent-index-filesystem MCP server (aifs_* tools).
+  - name: Remote filesystem exec bundle
+    description: Collection definitions are read from the remote filesystem via the on-demand executor (aifs-exec.bundle.js).
 ---
 
 ## About This Skill
@@ -46,9 +46,9 @@ This skill manages capability installation and lifecycle. It does not manage pre
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. These are MCP tool calls — invoke them through the MCP tool interface when available. If `aifs_*` tools are not found in the tool list, the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback: check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge also fails, guide the member to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and restart the session.
+All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
 ### Behavior
 

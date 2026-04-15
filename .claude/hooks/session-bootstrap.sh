@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# agent-index session bootstrap hook (v2.0.0)
+# agent-index session bootstrap hook (v3.0.0)
 # Runs automatically at the start of every Cowork session.
 #
 # This script performs LOCAL checks only — no remote calls.
-# The MCP server (agent-index-filesystem) is started by .claude/settings.json,
-# not by this script. Remote connectivity and auth checks happen in session-start.
+# Remote filesystem access uses the on-demand executor (aifs-exec.sh),
+# not this script. Remote connectivity and auth checks happen in session-start.
 #
 # This script detects the current member and tells Claude how to initialize
 # the session. It handles two cases:

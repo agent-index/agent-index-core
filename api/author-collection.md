@@ -1,7 +1,7 @@
 ---
 name: author-collection
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Guided workflow for creating a new agent-index collection from scratch — scaffolds directory structure, generates all required files, and ensures standards compliance.
 stateful: false
@@ -201,7 +201,7 @@ Common local patterns:
 
 **Hybrid** — many collections use both patterns.
 
-**Remote directory structure** — if the collection has `produces_shared_artifacts: true` on any task, design the shared data layout under `/shared/` on the remote filesystem. This is accessed via `aifs_read`/`aifs_write`/`aifs_list` MCP tools and is visible to all org members.
+**Remote directory structure** — if the collection has `produces_shared_artifacts: true` on any task, design the shared data layout under `/shared/` on the remote filesystem. This is accessed via `aifs_read`/`aifs_write`/`aifs_list` tools and is visible to all org members.
 
 Common remote patterns:
 
@@ -347,7 +347,7 @@ writes_to: null                     # remote path under /shared/ this task write
 
 Write the full content for each API member. The content should be substantive — not placeholder text. Claude should draft real workflow steps, real behavioral directives, and real edge cases based on the collection design discussed in Steps 1–5.
 
-For tasks that access shared data (`produces_shared_artifacts: true` or non-null `reads_from`/`writes_to`): workflow steps that read or write shared files must use the `aifs_*` MCP tools (`aifs_read`, `aifs_write`, `aifs_list`, etc.) — not native file tools. Local member data continues to use native Read/Write/Edit. Make sure the workflow steps specify which tier each file operation targets.
+For tasks that access shared data (`produces_shared_artifacts: true` or non-null `reads_from`/`writes_to`): workflow steps that read or write shared files must use the `aifs_*` tools (`aifs_read`, `aifs_write`, `aifs_list`, etc.) — not native file tools. Local member data continues to use native Read/Write/Edit. Make sure the workflow steps specify which tier each file operation targets.
 
 After writing each file, briefly summarize what was written and move to the next.
 

@@ -1,7 +1,7 @@
 ---
 name: agent-index-core-collection-setup
 type: collection-setup
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Org-admin setup for agent-index-core — run automatically as part of create-org
 upgrade_compatible: true

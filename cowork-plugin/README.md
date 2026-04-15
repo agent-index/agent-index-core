@@ -1,33 +1,32 @@
 # agent-index-filesystem Cowork Plugin
 
-This plugin connects Cowork sessions to the org's remote filesystem by starting the agent-index MCP server.
+This plugin validates that the agent-index remote filesystem exec bundle is present and accessible in the Cowork session.
 
-## Why This Exists
+## Architecture
 
-Cowork does not launch MCP servers defined in `.claude/settings.json`. All MCP servers in Cowork are delivered through its plugin system. This plugin bridges that gap for agent-index — it discovers the workspace at runtime and starts the same MCP server that `.claude/settings.json` starts for Claude Code CLI users.
+Agent-index uses an on-demand execution model for remote filesystem access. Each `aifs_*` operation runs a fresh Node process via the `aifs-exec.sh` shell wrapper, executes one tool call, and exits. There is no persistent server process and no MCP server — Claude calls the shell wrapper directly via bash.
+
+This plugin exists to provide early validation at session start. It discovers the agent-index workspace, verifies the exec bundle is present, and reports any issues. It does not start a server or run any long-lived process.
 
 ## How It Works
 
 1. Scans `$HOME/mnt/*/` for a directory containing `agent-index.json`
-2. Reads `remote_filesystem.mcp_server.bundle_path` from that config
-3. Sets `AIFS_CONFIG_PATH` and starts the server with `node`
+2. Reads `remote_filesystem.exec.bundle_path` from that config
+3. Verifies the exec bundle file exists at the expected location
+4. Reports status to stderr for diagnostics
 
-The plugin ships no adapter code and no org-specific configuration. It discovers everything from `agent-index.json`, which the bootstrap zip already configures per-org.
+Claude accesses the remote filesystem by calling the shell wrapper directly:
+
+```bash
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/projects/foo/project.md"}'
+```
 
 ## Installation
 
 Members receive this plugin as `agent-index-filesystem.plugin` inside their bootstrap zip. To install: open the `.plugin` file and confirm the install prompt in Cowork.
 
-CLI users do not need this plugin — `.claude/settings.json` handles MCP server startup for them.
+CLI users do not need this plugin — the session-bootstrap hook and session-start task handle everything.
 
-## Known Issue: Mid-Session Server Termination
+## Previous Architecture (Removed)
 
-Cowork's platform-level process management can terminate the plugin's MCP server process during active sessions. When this happens, the `aifs_*` tools disappear from the session with no automatic recovery. This is a Cowork platform behavior, not a bug in the plugin or server code — the server has no idle timeouts or self-shutdown logic.
-
-**Fallback:** The bootstrap zip includes `agent-index-core/tools/aifs-bridge/`, an HTTP bridge daemon that spawns the same server bundle as a subprocess outside of Cowork's plugin lifecycle. The session-start task and member-bootstrap skill automatically attempt bridge recovery when native MCP tools are unavailable. Members can also start it manually:
-
-```bash
-bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start
-```
-
-The bridge provides the same `aifs_*` tools over HTTP (`curl http://127.0.0.1:7819/call`). It auto-restarts the server if the subprocess exits.
+Earlier versions used a persistent MCP server process that Cowork would start via this plugin, with an HTTP bridge daemon as a fallback when the server was terminated mid-session. This architecture was removed because Cowork's platform-level process management would terminate the server unpredictably, the bridge added complexity and its own failure modes, and the on-demand executor proved more reliable with comparable performance when path caching is warm.

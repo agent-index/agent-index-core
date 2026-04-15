@@ -1,17 +1,17 @@
 # Agent-Index Core — Roadmap
 
-Current version: 2.1.0
-Last updated: 2026-04-05
+Current version: 3.0.0
+Last updated: 2026-04-14
 
 ---
 
 ## Current State
 
-v2.1.0 is the foundation of agent-index: session initialization, member onboarding, org and capability management, and collection publishing/update distribution. The collection runs on a hybrid local/remote filesystem model where member-specific data stays local and org/shared data lives on a remote storage backend (Google Drive, OneDrive, or S3) accessed via MCP.
+v3.0.0 is the foundation of agent-index: session initialization, member onboarding, org and capability management, and collection publishing/update distribution. The collection runs on a hybrid local/remote filesystem model where member-specific data stays local and org/shared data lives on a remote storage backend (Google Drive, OneDrive, or S3) accessed via the on-demand executor (`aifs_*` tools invoked through the exec shell wrapper).
 
-v2.1.0 introduces the **capability provider system**, allowing collections to declare abstract capability requirements and register as providers of those capabilities. This enables loose coupling between collections: instead of hard-coding dependencies on specific collections, a consumer collection can declare "I need messaging capability" and bind to whichever provider has registered one.
+v3.0.0 introduces the **capability provider system**, allowing collections to declare abstract capability requirements and register as providers of those capabilities. This enables loose coupling between collections: instead of hard-coding dependencies on specific collections, a consumer collection can declare "I need messaging capability" and bind to whichever provider has registered one.
 
-Upgrade paths from v1 to v2.0.x are deprecated; new deployments should start at v2.0.0 or later. The MCP-based remote filesystem is required for v2+.
+Upgrade paths from v1 to v2.0.x are deprecated; new deployments should start at v3.0.0. The remote filesystem (via the on-demand executor) is required for v2+.
 
 ### Known Limitations
 

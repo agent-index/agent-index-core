@@ -1,12 +1,12 @@
 {
   "name": "agent-index-core",
   "display_name": "Agent-Index Core",
-  "version": "2.1.0",
-  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial.",
+  "version": "3.0.0",
+  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial. v3.0.0: replaced MCP server and bridge with on-demand executor (aifs-exec).",
   "author": "agent-index",
   "license": "proprietary",
   "category": "infrastructure",
-  "agent_index_min_version": "2.0.0",
+  "agent_index_min_version": "3.0.0",
   "api": [
     "session-start",
     "member-bootstrap",

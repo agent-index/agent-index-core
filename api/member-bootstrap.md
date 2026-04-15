@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -10,25 +10,25 @@ dependencies:
   skills: []
   tasks: []
 external_dependencies:
-  - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be running. In Claude Code CLI, it is started by .claude/settings.json. In Cowork, it is started by the agent-index-filesystem plugin (included in the bootstrap zip as agent-index-filesystem.plugin). If aifs_* tools are not in the tool list, first attempt the aifs-bridge fallback (agent-index-core/tools/aifs-bridge/) which manages the server as an independent subprocess. If the bridge also fails, guide the member to install the plugin (Cowork) or check settings.json (CLI).
+  - name: Remote filesystem exec bundle
+    description: The on-demand executor bundle (aifs-exec.bundle.js and aifs-exec.sh) must be present in mcp-servers/filesystem/. It is included in the bootstrap zip. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and guide the member to obtain a new bootstrap zip from their org admin.
 ---
 
 ## About This Skill
 
 When a new member unpacks the bootstrap zip and opens Cowork (or Claude Code CLI) pointed at their `~/agent-index/` directory, they need to authenticate to the org's remote filesystem, verify connectivity, create their local workspace, and register themselves with the org. The Member Bootstrap Skill handles this entire flow.
 
-**Runtime environment note:** The MCP server starts differently depending on the runtime. In Claude Code CLI, `.claude/settings.json` starts the server automatically. In Cowork, the server is delivered through the `agent-index-filesystem` plugin (included in the bootstrap zip as `agent-index-filesystem.plugin`). This skill detects which environment is active and guides accordingly.
+**Runtime environment note:** The on-demand executor works identically in both runtimes. In Claude Code CLI and Cowork, the exec shell wrapper at `mcp-servers/filesystem/aifs-exec.sh` is called directly via bash. This skill detects which environment is active and guides accordingly.
 
-This skill replaces the previous Filesystem Setup Skill. The old skill scanned for local cloud-sync mount points (Google Drive, OneDrive, Dropbox) and verified local directory access. The new model is different: the org's shared files live on a remote filesystem accessed through an MCP server, and member files live locally. This skill bridges the two — it gets the member authenticated to the remote side and creates the local workspace structure.
+This skill replaces the previous Filesystem Setup Skill. The old skill scanned for local cloud-sync mount points (Google Drive, OneDrive, Dropbox) and verified local directory access. The new model is different: the org's shared files live on a remote filesystem accessed through an on-demand executor, and member files live locally. This skill bridges the two — it gets the member authenticated to the remote side and creates the local workspace structure.
 
-This skill is also the recovery tool when remote connectivity breaks — for example, when an OAuth refresh token is revoked and the member needs to re-authenticate. In normal operation, the MCP server handles access token refresh transparently (the member never sees auth prompts during regular use). Re-authentication is only needed when the refresh token itself is invalid — typically because the user revoked app access, the admin deleted the OAuth app, or the Google OAuth app is in "testing" status with 7-day refresh token expiry. In that context this skill runs a shorter reconnection flow rather than the full first-time setup.
+This skill is also the recovery tool when remote connectivity breaks — for example, when an OAuth refresh token is revoked and the member needs to re-authenticate. In normal operation, the on-demand executor handles access token refresh transparently (the member never sees auth prompts during regular use). Re-authentication is only needed when the refresh token itself is invalid — typically because the user revoked app access, the admin deleted the OAuth app, or the Google OAuth app is in "testing" status with 7-day refresh token expiry. In that context this skill runs a shorter reconnection flow rather than the full first-time setup.
 
 ### When This Skill Is Active
 
 When invoked, this skill guides the member through a structured sequence: verify local bootstrap, authenticate to remote, test connectivity, create local workspace, register on remote, and hand off to preferences and capability setup.
 
-This skill is triggered automatically by the Session Start Task when the member is detected as new (no local `member-index.json`). It is also triggered when session-start detects an authentication failure (`NOT_AUTHENTICATED` from the MCP server).
+This skill is triggered automatically by the Session Start Task when the member is detected as new (no local `member-index.json`). It is also triggered when session-start detects an authentication failure (`NOT_AUTHENTICATED` from the remote filesystem).
 
 ### What This Skill Does Not Cover
 
@@ -38,19 +38,9 @@ This skill establishes remote authentication and local workspace structure. It d
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This skill uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access and authentication. There are two ways to invoke these tools:
-
-1. **Native MCP tools (primary):** The `aifs_*` tools appear directly in the tool list. Invoke them through the MCP tool interface as normal.
-
-2. **Bridge HTTP fallback (Cowork only):** If the native tools are not available, the aifs-bridge daemon can provide the same tools over HTTP. Check whether the bridge is running: `curl -s --max-time 2 http://127.0.0.1:7819/health`. If it returns a response, the bridge is active. Call tools via: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. If the bridge is not running, start it: `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`.
-
-If neither native tools nor the bridge are available, the MCP server did not start. The cause depends on the runtime environment:
-
-- **Cowork:** The MCP server is delivered through the `agent-index-filesystem` plugin. If tools are missing, first attempt to start the bridge fallback (see above). If the bridge also fails to start (server bundle not found), the plugin is not installed. Guide the member: "The remote filesystem tools aren't available. You need to install the agent-index-filesystem plugin to connect to your org's shared storage. You should find `agent-index-filesystem.plugin` in your workspace folder — open it and confirm the install in Cowork, then let me know when it's done." After the member confirms installation, they must restart the Cowork session for the plugin's MCP server to start.
-
-- **Claude Code CLI:** The MCP server is started by `.claude/settings.json`. If tools are missing, guide the member to check that file and restart the session.
+All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
 ### Install Logging
 
@@ -78,7 +68,7 @@ This skill must maintain a structured install log during first-time setup and re
 
 **Event types and when to use them:**
 
-- **`session_start`**: First entry. Include: context type (first-time, re-auth, reconnection), member hash, whether `aifs_*` MCP tools are present in the tool list.
+- **`session_start`**: First entry. Include: context type (first-time, re-auth, reconnection), member hash, whether the exec shell wrapper is available at `mcp-servers/filesystem/aifs-exec.sh`.
 - **`step_start`** / **`step_complete`**: When beginning/finishing a step. Include: step number, duration, outcome.
 - **`intent`**: BEFORE taking any action. Describe what you plan to do and why. This is the most important event type — it captures your reasoning. If you are considering multiple approaches, log that reasoning.
 - **`result`**: AFTER an action completes successfully.
@@ -121,7 +111,7 @@ If `authenticated: false`: proceed to Step 3.
 
 Guide the member through the backend-specific authentication flow.
 
-Call `aifs_authenticate(action="start")` to initiate the flow. The MCP server returns an `auth_url`, a `status` field, and backend-specific instructions.
+Call `aifs_authenticate(action="start")` to initiate the flow. The adapter returns an `auth_url`, a `status` field, and backend-specific instructions.
 
 The `status` field from `aifs_authenticate(action="start")` determines how the callback is handled:
 
@@ -317,7 +307,7 @@ Never write to any remote file other than `members-registry.json`. This skill re
 
 Never overwrite an existing local `member-index.json`. If it exists, the member has installed capabilities and overwriting would lose that data.
 
-Never store or display raw credentials or tokens. The MCP server manages credential storage. This skill only orchestrates the auth flow — it never handles the actual secret material.
+Never store or display raw credentials or tokens. The adapter manages credential storage. This skill only orchestrates the auth flow — it never handles the actual secret material.
 
 Never proceed past Step 3 without confirmed authentication. Every subsequent step depends on remote access.
 
@@ -331,7 +321,7 @@ If `members-registry.json` cannot be read from remote (e.g., file doesn't exist)
 
 If the remote `org-config.json` version is newer than the local `agent-index.json` version: surface as an advisory notice. The bootstrap zip may be outdated. The member can still proceed, but they should request an updated bootstrap zip from their admin.
 
-If the MCP server fails to start (no `aifs_*` tools in the tool list): first attempt the bridge fallback as described in the MCP Tool Usage section above. If the bridge starts successfully, proceed with bootstrap using the bridge for all `aifs_*` calls. If the bridge also fails, determine the runtime environment and surface the appropriate guidance. In Cowork: "The remote filesystem tools aren't available. The agent-index-filesystem plugin may not be installed. Look for `agent-index-filesystem.plugin` in your workspace folder, open it to install, then restart this Cowork session." In Claude Code CLI: "The remote filesystem connector isn't configured. Make sure you've unpacked the complete bootstrap zip and that `.claude/settings.json` includes the MCP server configuration." In either case: "If this problem persists, contact your org admin for a new bootstrap zip."
+If the exec shell wrapper is not found at `mpc-servers/filesystem/aifs-exec.sh`, the exec bundle is missing from the install. Surface an error: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip." In Cowork, the plugin validates the exec bundle presence — if the plugin is installed and the bundle is missing, it will surface this error during plugin installation.
 
 If the member workspace already exists locally but member-index.json does not: this is a partial prior setup. Create member-index.json without recreating the directory structure. Proceed normally.
 

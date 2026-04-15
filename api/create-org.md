@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -23,7 +23,7 @@ writes_to: null
 
 Create-org is the first thing an org admin runs after cloning agent-index-core. It establishes the org's presence in the agent-index system — giving the org a name and ID, configuring the remote filesystem backend, uploading org resources, generating a bootstrap zip for member distribution, recording the initial admin list, and optionally launching the marketplace to install collections.
 
-The remote filesystem replaces the previous shared-mount-drive model. Instead of requiring every member to mount a shared drive locally, the org's files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through an MCP server. Each member authenticates individually to the backend during their own setup. The admin configures the backend choice and connection details during this task.
+The remote filesystem replaces the previous shared-mount-drive model. Instead of requiring every member to mount a shared drive locally, the org's files live on a remote storage backend (Google Drive, OneDrive, or S3) accessed through an on-demand executor. Each member authenticates individually to the backend during their own setup. The admin configures the backend choice and connection details during this task.
 
 This task is run once per org. If `org-config.json` already exists on the remote filesystem, this task detects it and offers `edit-org` instead.
 
@@ -33,7 +33,7 @@ The org admin provides: org name, remote filesystem backend choice, backend conn
 
 ### Outputs
 
-Written to the remote filesystem via MCP:
+Written to the remote filesystem via the on-demand executor:
 - `org-config.json` at the remote root — the authoritative org configuration record
 - `members-registry.json` at the remote root — the member lookup table
 - `CLAUDE.md` at the remote root — Claude context for the system
@@ -42,7 +42,7 @@ Written to the remote filesystem via MCP:
 
 Written locally:
 - `agent-index.json` updated with the configured remote filesystem section
-- `.claude/settings.json` with the MCP server configuration and session hook
+- `.claude/settings.json` with the session hook
 - `CLAUDE.md` local copy
 - The admin's local member workspace
 
@@ -108,7 +108,7 @@ If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-
 
 Read `agent-index.json` from the local project directory. Check if `remote_filesystem` is already fully configured (backend and connection fields populated).
 
-If the remote filesystem is already configured: start the MCP server and attempt `aifs_exists("/org-config.json")`. If it exists, read it and surface: "It looks like this org is already configured as '{org_name}'. Would you like to edit the org configuration instead?" If yes: invoke `run agent-index task edit-org`. Halt this task.
+If the remote filesystem is already configured: attempt `aifs_exists("/org-config.json")` via the on-demand executor. If it exists, read it and surface: "It looks like this org is already configured as '{org_name}'. Would you like to edit the org configuration instead?" If yes: invoke `run agent-index task edit-org`. Halt this task.
 
 If the remote filesystem is not configured (empty backend/connection fields): this is a fresh install. Proceed to Step 2.
 
@@ -130,7 +130,7 @@ Show the generated ID: "I'll use `{org-id}` as your org's identifier — this is
 
 ### Step 3: Choose Remote Filesystem Backend
 
-Explain: "Agent-index stores your org's shared files — collection definitions, org config, shared reports — on a remote filesystem that all members access through an MCP server. Each member authenticates individually during their own setup."
+Explain: "Agent-index stores your org's shared files — collection definitions, org config, shared reports — on a remote filesystem that all members access through an on-demand executor. Each member authenticates individually during their own setup."
 
 Read the available backends from `filesystem-adapter-directory.json` (fetch from `filesystem_adapter_directory_url` if not cached). Present the supported backends based on the directory entries:
 
@@ -262,29 +262,31 @@ Test ALL domains from both groups for network reachability (see Step 0 for the t
 
 ### Step 3c: Download Bundle, Write Config Files, and Save State
 
-All required domains are reachable. This step downloads the adapter bundle, writes all local configuration files, and halts with a session restart instruction. The MCP server configuration written here will be loaded when the admin starts a new session.
+All required domains are reachable. This step downloads the adapter bundle, writes all local configuration files, and halts with a session restart instruction. The session hook and executor configuration written here will be loaded when the admin starts a new session.
 
 **1. Download the adapter bundle:**
 
-Read `filesystem-adapter-directory.json` (fetch from `filesystem_adapter_directory_url` in `agent-index.json` if not cached). Find the entry matching the chosen backend. Download the adapter repo via its `zip_url`. Extract `dist/server.bundle.js` and `adapter.json` from the downloaded zip.
+Read `filesystem-adapter-directory.json` (fetch from `filesystem_adapter_directory_url` in `agent-index.json` if not cached). Find the entry matching the chosen backend. Download the adapter repo via its `zip_url`. Extract `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the downloaded zip.
 
-Verify bundle integrity: compute SHA-256 of `server.bundle.js` and compare against `bundle_checksum` in `adapter.json`. If mismatch, report the error and prompt the admin to retry.
+Verify bundle integrity: compute SHA-256 of `aifs-exec.bundle.js` and compare against `exec_bundle_checksum` in `adapter.json`. If mismatch, report the error and prompt the admin to retry.
 
 Place the files at their final locations:
-- `mcp-servers/filesystem/server.bundle.js` — the MCP server bundle
+- `mcp-servers/filesystem/aifs-exec.bundle.js` — the on-demand executor bundle
+- `mcp-servers/filesystem/aifs-exec.sh` — the shell wrapper for the executor
 - `mcp-servers/filesystem/adapter.json` — adapter metadata (version, checksum, build timestamp)
 
 **2. Write `agent-index.json`** with the `remote_filesystem` section:
 
 - Set `backend` to the chosen backend identifier (`gdrive`, `onedrive`, or `s3`)
-- Set `mcp_server.adapter` to the chosen backend identifier
-- Set `mcp_server.adapter_version` to the version from the adapter directory
-- Set `mcp_server.bundle_path` to `mcp-servers/filesystem/server.bundle.js`
+- Set `exec.adapter` to the chosen backend identifier
+- Set `exec.adapter_version` to the version from the adapter directory
+- Set `exec.bundle_path` to `mcp-servers/filesystem/aifs-exec.bundle.js`
+- Set `exec.shell_wrapper` to `mcp-servers/filesystem/aifs-exec.sh`
 - Set `auth.method` to `per-member`
 - Set `auth.credential_store` to `.agent-index/credentials/` (relative to project root — this ensures credentials persist across Cowork sessions since the project directory is mounted from the host)
 - Set `connection` to the collected config from Step 3
 
-**3. Write `.claude/settings.json`** with the MCP server configuration:
+**3. Write `.claude/settings.json`** with the session hook (the hook loads the bootstrap script, which calls the on-demand executor):
 
 ```json
 {
@@ -301,15 +303,6 @@ Place the files at their final locations:
         ]
       }
     ]
-  },
-  "mcpServers": {
-    "agent-index-filesystem": {
-      "command": "node",
-      "args": ["${CLAUDE_PROJECT_DIR}/mcp-servers/filesystem/server.bundle.js"],
-      "env": {
-        "AIFS_CONFIG_PATH": "${CLAUDE_PROJECT_DIR}/agent-index.json"
-      }
-    }
   }
 }
 ```
@@ -354,9 +347,9 @@ Place the files at their final locations:
 > I've completed all the setup I can in this session:
 > - Downloaded and verified the {adapter_display_name} adapter bundle
 > - Wrote `agent-index.json` with your backend configuration
-> - Wrote `.claude/settings.json` with the MCP server configuration
+> - Wrote `.claude/settings.json` with the session hook
 >
-> The MCP server configuration will load when you start a new session. To continue:
+> The session hook will load when you start a new session, enabling the on-demand executor. To continue:
 >
 > 1. Start a **new Cowork session**
 > 2. Open the same project folder
@@ -364,17 +357,17 @@ Place the files at their final locations:
 >
 > Your progress has been saved. The next session will pick up at authentication — you'll sign in to {adapter_display_name} and verify connectivity.
 
-**6. Halt.** Do not proceed to Step 4. The MCP server tools are not available in this session.
+**6. Halt.** Do not proceed to Step 4. The remote filesystem tools are not available in this session.
 
 ---
 
 ### Step 4: Admin Authentication
 
-Now that the MCP server is loaded (from `.claude/settings.json` written in Step 3c and loaded at session start), authenticate the admin to the remote filesystem.
+Now that the session hook is loaded (from `.claude/settings.json` written in Step 3c and loaded at session start), authenticate the admin to the remote filesystem.
 
-This step runs in the new session (Phase 3). The `agent-index.json` and `.claude/settings.json` files were already written in Step 3c. The MCP server should have started automatically when this session launched.
+This step runs in the new session (Phase 3). The `agent-index.json` and `.claude/settings.json` files were already written in Step 3c. The session hook enables the on-demand executor when this session launches.
 
-1. Verify the MCP server is available by calling `aifs_auth_status()`. If the tool is not found, first attempt the aifs-bridge fallback (see MCP Tool Usage directives). If the bridge also fails, surface: "The filesystem MCP server doesn't appear to be running. Check that `.claude/settings.json` is present and contains the `agent-index-filesystem` server entry, then restart the session."
+1. Verify the exec wrapper is available by calling `aifs_auth_status()` via the shell wrapper: `bash $CLAUDE_PROJECT_DIR/mcp-servers/filesystem/aifs-exec.sh aifs_auth_status '{}'`. If the wrapper cannot be found or executed, surface: "The executor wrapper isn't found at `mcp-servers/filesystem/aifs-exec.sh`. Please ensure the bootstrap zip was correctly unpacked and contains all files."
 
 2. If `aifs_auth_status()` returns `authenticated: false`, call `aifs_authenticate(action="start")` to initiate the auth flow. The response will include an `auth_url` and a `status` field indicating how the callback will be handled:
 
@@ -479,11 +472,11 @@ Present a complete summary:
 
 Wait for explicit confirmation.
 
-On confirmation, execute the following writes. All remote writes use MCP tools. All local writes use Claude's native file tools.
+On confirmation, execute the following writes. All remote writes use `aifs_*` tools. All local writes use Claude's native file tools.
 
 **Important: sequential remote writes.** When writing multiple files to the remote filesystem, write them ONE AT A TIME — wait for each `aifs_write` to complete before starting the next one. Do NOT issue parallel writes. Google Drive allows duplicate folder names, so parallel writes that create intermediate directories (e.g., two files both targeting `/email-triage/`) will each independently create the folder, resulting in duplicates. The adapter serializes folder creation internally, but sequential writes from the caller eliminate the risk entirely.
 
-**Remote writes (via MCP):**
+**Remote writes (via the on-demand executor):**
 
 1. Initialize the remote directory structure using `aifs_write` to create placeholder files in each directory (Google Drive requires at least one file to "create" a folder path). Write these sequentially, one at a time:
 
@@ -508,10 +501,11 @@ On confirmation, execute the following writes. All remote writes use MCP tools. 
   "last_updated": "{today YYYY-MM-DD}",
   "remote_filesystem": {
     "backend": "{backend}",
-    "mcp_server": {
+    "exec": {
       "adapter": "{backend}",
       "adapter_version": "1.0.0",
-      "bundle_path": "mcp-servers/filesystem/server.bundle.js"
+      "bundle_path": "mcp-servers/filesystem/aifs-exec.bundle.js",
+      "shell_wrapper": "mcp-servers/filesystem/aifs-exec.sh"
     },
     "auth": {
       "method": "per-member"
@@ -575,7 +569,7 @@ Include entries for ALL admins defined in Step 7.
    - The **Bootstrap Protocol** section: how to handle each `AGENT_INDEX_BOOTSTRAP` signal
    - The **Handling Member Requests** routing table
    - The **Key Files** section: paths to `agent-index.json` (local), `org-config.json` (remote), `members-registry.json` (remote), `member-index.json` (local), `preferences.md` (local), `filesystem.md` (local)
-   - The **Two-Tier Filesystem** section: local files via native tools, remote files via `aifs_*` MCP tools. Explain that `NOT_AUTHENTICATED` errors trigger automatic re-authentication — the system will attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
+   - The **Two-Tier Filesystem** section: local files via native tools, remote files via the `aifs_*` tools on the on-demand executor. Explain that `NOT_AUTHENTICATED` errors trigger automatic re-authentication — the system will attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
    - The **Identity Resolution** section: SHA256 of lowercase email, first 16 hex characters
    - The **Important Constraints** section: never modify collection directories on remote, never write outside the current member's local workspace and `/shared/` on remote, always read skill/task definitions before executing, always get member confirmation before changes
 
@@ -655,30 +649,27 @@ Create a temporary directory and populate it with:
 agent-index/
 ├── agent-index.json                    # The local copy (with remote_filesystem configured)
 ├── .claude/
-│   └── settings.json                   # SessionStart hook + MCP server config (CLI only)
+│   └── settings.json                   # SessionStart hook
 ├── mcp-servers/
 │   └── filesystem/
-│       ├── server.bundle.js            # Pre-built MCP server bundle
+│       ├── aifs-exec.bundle.js         # On-demand executor bundle
+│       ├── aifs-exec.sh                # Shell wrapper for executor
 │       └── adapter.json                # Adapter metadata (version, checksum, build timestamp)
 ├── agent-index-core/
-│   ├── .claude/
-│   │   └── hooks/
-│   │       └── session-bootstrap.sh    # Bootstrap script
-│   └── tools/
-│       └── aifs-bridge/
-│           ├── aifs-bridge.mjs         # MCP server bridge daemon (Cowork fallback)
-│           └── aifs-call.sh            # CLI wrapper for bridge
-├── agent-index-filesystem.plugin       # Cowork plugin for MCP server (Cowork only)
+│   └── .claude/
+│       └── hooks/
+│           └── session-bootstrap.sh    # Bootstrap script
+├── agent-index-filesystem.plugin       # Cowork plugin for validation (Cowork only)
 └── CLAUDE.md                           # Claude context
 ```
 
-**Include the adapter bundle:**
+**Include the executor bundle:**
 
-The adapter bundle (`server.bundle.js` and `adapter.json`) was already downloaded and verified in Step 3c. It is available at `mcp-servers/filesystem/` in the project directory. Copy these files into the bootstrap zip contents at `mcp-servers/filesystem/server.bundle.js` and `mcp-servers/filesystem/adapter.json`. Do NOT re-download the bundle.
+The executor bundle (`aifs-exec.bundle.js`, `aifs-exec.sh`, and `adapter.json`) was already downloaded and verified in Step 3c. It is available at `mcp-servers/filesystem/` in the project directory. Copy these files into the bootstrap zip contents at `mcp-servers/filesystem/aifs-exec.bundle.js`, `mcp-servers/filesystem/aifs-exec.sh`, and `mcp-servers/filesystem/adapter.json`. Do NOT re-download the bundle.
 
 The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. It does NOT include any credentials.
 
-The `.claude/settings.json` includes both the session hook and the MCP server configuration for the chosen backend. The MCP server command points to the bundled path: `node ${CLAUDE_PROJECT_DIR}/mcp-servers/filesystem/server.bundle.js`. This is used by Claude Code CLI — Cowork does not read MCP server definitions from settings.json.
+The `.claude/settings.json` includes only the session hook that enables the on-demand executor. It does not include server definitions — the executor is called directly via the shell wrapper.
 
 **Include the Cowork plugin:**
 
@@ -688,11 +679,7 @@ Build the `agent-index-filesystem.plugin` file from `agent-index-core/cowork-plu
 cd {project_dir}/agent-index-core/cowork-plugin && zip -r {temp_directory}/agent-index/agent-index-filesystem.plugin .claude-plugin/ .mcp.json scripts/ README.md
 ```
 
-This plugin is what enables the MCP server in Cowork sessions. It discovers the workspace at runtime (by scanning `$HOME/mnt/*/` for `agent-index.json`) and starts the server — no org-specific configuration needed. Cowork members must install this plugin during their first-time setup; the member-bootstrap skill guides them through it.
-
-**Include the aifs-bridge tools:**
-
-Copy the bridge directory from `agent-index-core/tools/aifs-bridge/` into the zip at `agent-index-core/tools/aifs-bridge/`. This includes `aifs-bridge.mjs` and `aifs-call.sh`. The bridge is a fallback mechanism for Cowork sessions where the plugin's MCP server process is terminated mid-session by the platform. It spawns the same server bundle as a subprocess under Claude's control and exposes tool calls over HTTP. The session-start task and member-bootstrap skill automatically attempt bridge recovery when native MCP tools are unavailable.
+This plugin is used by Cowork for validation and configuration management. It discovers the workspace at runtime (by scanning `$HOME/mnt/*/` for `agent-index.json`) — no org-specific configuration needed. Cowork members should install this plugin for an optimal experience; the member-bootstrap skill guides them through it.
 
 The `session-bootstrap.sh` is copied from the local `agent-index-core/.claude/hooks/`.
 
@@ -824,15 +811,9 @@ If `log_collector_url` or `log_collector_api_key` is not configured in `agent-in
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This task uses the `agent-index-filesystem` MCP server for all remote filesystem operations. The server is configured in `.claude/settings.json` and starts automatically when the Cowork session launches.
-
-**Tool invocation:** When this document says `aifs_read(path)`, `aifs_write(path, content)`, `aifs_auth_status()`, etc., these are MCP tool calls on the `agent-index-filesystem` server. Invoke them as MCP tools — they will appear in the tool list with names like `mcp__agent-index-filesystem__aifs_read`. They are NOT shell commands, JavaScript functions, or Python calls.
-
-**Primary mode:** Always prefer native MCP tool calls when the tools are present in the tool list. Do not build ad-hoc wrapper scripts or directly invoke `server.bundle.js` for one-off operations.
-
-**If MCP tools are not available:** This means the MCP server did not start. In Cowork, first attempt recovery using the aifs-bridge fallback — the bridge is an approved recovery mechanism that spawns the server as a managed subprocess and exposes tool calls over HTTP. Check `curl -s --max-time 2 http://127.0.0.1:7819/health` and if not running, start it with `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`. If the bridge starts, use it for all `aifs_*` calls via `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'` and proceed normally. If the bridge also fails, guide the admin to install the plugin and restart. In Claude Code CLI, check `.claude/settings.json` and verify the bundle path exists. Other common causes: (1) the server bundle at `mcp-servers/filesystem/server.bundle.js` doesn't exist, (2) the session needs to be restarted for config changes to take effect. Surface the specific issue and halt — do not proceed without working MCP tools (native or bridge).
+All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
 ### Install Logging
 
@@ -860,15 +841,15 @@ This task must maintain a structured install log throughout its execution. The l
 
 **Event types and when to use them:**
 
-- **`session_start`**: First entry in a new session. Include: session number, whether resuming from install state, tool list summary (specifically: are `aifs_*` MCP tools present in the tool list? list them).
+- **`session_start`**: First entry in a new session. Include: session number, whether resuming from install state, whether the exec shell wrapper exists and is executable.
 - **`session_resume`**: When resuming from install state. Include: the install state status, completed steps, next step.
 - **`step_start`**: When beginning a new step. Include: step number, brief description.
 - **`step_complete`**: When a step finishes. Include: step number, duration, outcome.
 - **`intent`**: BEFORE taking any action. Describe what you plan to do and why. This is the most important event type — it captures your reasoning. Examples:
   - "Calling aifs_auth_status to check if member is already authenticated"
-  - "Writing .claude/settings.json with MCP server configuration"
+  - "Writing .claude/settings.json with the session hook"
   - "Domain raw.githubusercontent.com is blocked — saving install state for resume"
-  - "aifs_write tool not found in tool list — checking .claude/settings.json for MCP server config"
+  - "Executor wrapper not found at expected path — checking .claude/settings.json for session hook config"
 - **`result`**: AFTER an action completes successfully. Include what happened.
 - **`error`**: When something fails. Include: the full error message, whether it's retryable, what you plan to do next. In `detail`, include any error codes, stack traces, or diagnostic information available.
 - **`decision`**: When choosing between alternatives. Include: what the options were, which you chose, and why. This is critical for diagnosing cases where the wrong path was taken.
@@ -879,7 +860,7 @@ This task must maintain a structured install log throughout its execution. The l
 {"detail": {"tool": "aifs_auth_status", "result": {"authenticated": false, "reason": "no_credential"}}}
 {"detail": {"tool": "aifs_write", "path": "/org-config.json", "size_bytes": 1234}}
 {"detail": {"blocked_domains": ["accounts.google.com"], "reachable_domains": ["raw.githubusercontent.com"]}}
-{"detail": {"options": ["use MCP tool", "build shell wrapper"], "chosen": "use MCP tool", "reason": "MCP tools are available in tool list"}}
+{"detail": {"options": ["retry auth", "collect credentials again"], "chosen": "retry auth", "reason": "auth code may have expired"}}
 {"detail": {"error_code": "NETWORK_ERROR", "retryable": true, "retry_count": 1}}
 ```
 
@@ -895,15 +876,15 @@ The backend selection and authentication steps (Steps 3–5) are the critical pa
 
 **Three-phase flow:** This task always spans at least two Cowork sessions, with an optional admin action in between:
 
-- **Phase 1 (first session, Steps 1–3c):** Collect org info, pick the adapter, test domain reachability, download the adapter bundle, write all local config files (`agent-index.json`, `.claude/settings.json`), and write the install state file. Always ends with a halt — either because domains are blocked (admin must update allowlist) or because the MCP server config needs a session restart to load.
+- **Phase 1 (first session, Steps 1–3c):** Collect org info, pick the adapter, test domain reachability, download the adapter bundle, write all local config files (`agent-index.json`, `.claude/settings.json`), and write the install state file. Always ends with a halt — either because domains are blocked (admin must update allowlist) or because the session hook needs a session restart to load.
 - **Phase 2 (admin action, outside Cowork):** If domains were blocked, the admin goes to Claude.ai admin settings and adds the required domains to the network allowlist. If domains were already reachable, this phase is skipped.
-- **Phase 3 (second session, Steps 4+):** The admin starts a new Cowork session. The MCP server loads from `.claude/settings.json`. Step 0 detects the install state file, verifies domain reachability, and resumes at Step 4 (authentication). From here the flow continues uninterrupted through completion.
+- **Phase 3 (second session, Steps 4+):** The admin starts a new Cowork session. The session hook loads from `.claude/settings.json`, enabling the on-demand executor. Step 0 detects the install state file, verifies domain reachability, and resumes at Step 4 (authentication). From here the flow continues uninterrupted through completion.
 
 In sandboxed environments (Cowork), network access to backend API domains AND infrastructure domains (GitHub) may be blocked by the platform's network allowlist. Step 3b detects this and saves progress to `.agent-index/install-state.json`, giving the admin clear instructions to update the allowlist and resume in a new session. This is expected behavior, not an error — present it calmly and clearly. The admin should feel confident that their progress is saved and that resuming is straightforward.
 
 Write nothing to the remote filesystem before the Step 8 confirmation. Steps 1–7 are purely data collection and local configuration. The Step 8 confirmation is the point of no return for remote writes.
 
-The local `agent-index.json` and `.claude/settings.json` are written in Step 3c (end of Phase 1). This happens before the Step 8 confirmation because the MCP server must be configured and loaded (in the next session) before authentication can proceed in Step 4. These local config files do not affect the remote filesystem.
+The local `agent-index.json` and `.claude/settings.json` are written in Step 3c (end of Phase 1). This happens before the Step 8 confirmation because the session hook must be configured and loaded (in the next session) before authentication can proceed in Step 4. These local config files do not affect the remote filesystem.
 
 ### State Management
 
@@ -942,7 +923,7 @@ If `agent-index.json` cannot be read at the expected local path: surface: "I cou
 
 If the running admin's email cannot be determined from Cowork session context, ask for it directly. The email is required for identity resolution.
 
-If the MCP server fails to start (e.g., the bundle cannot be found or is corrupted): surface the error clearly. Common causes: the adapter bundle was not downloaded correctly during org setup, Node.js not available. Offer guidance: "Make sure Node.js is installed and the adapter bundle exists at the expected path (mcp-servers/filesystem/server.bundle.js)."
+If the executor wrapper cannot be found or is not executable: surface the error clearly. Common causes: the bootstrap zip was not correctly unpacked, or the shell wrapper file permissions were lost. Offer guidance: "Make sure the executor bundle was correctly unpacked and that `aifs-exec.sh` has execute permissions. Check that the file exists at `mcp-servers/filesystem/aifs-exec.sh`."
 
 If a remote write fails partway through Step 8 (some files written, some not): surface which writes succeeded and which failed. The admin can retry — all writes are idempotent (they overwrite existing files).
 

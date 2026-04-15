@@ -1,7 +1,7 @@
 ---
 name: upload-install-log
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Upload install diagnostic logs to the agent-index development team for analysis and improvement.
 stateful: false
@@ -104,9 +104,9 @@ After all uploads complete, summarize: "{N} log(s) uploaded. Thank you — this 
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This task may use `aifs_read` to read `org-config.json` for the org name hash. If the MCP tools are not available (e.g., running before MCP server is configured), fall back to reading `.agent-index/install-state.json` locally. This is one of the few tasks where MCP tool unavailability is acceptable — the upload should work even during a partially completed install.
+This task may use `aifs_read` to read `org-config.json` for the org name hash. If the remote filesystem exec tools are not available (e.g., running before the exec bundle is available), fall back to reading `.agent-index/install-state.json` locally. This is one of the few tasks where exec tool unavailability is acceptable — the upload should work even during a partially completed install.
 
 ### Behavior
 

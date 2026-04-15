@@ -3,8 +3,8 @@
   "type": "task",
   "display_name": "Session Start",
   "collection": "agent-index-core",
-  "collection_version": "2.1.0",
-  "version": "2.1.0",
+  "collection_version": "3.0.0",
+  "version": "3.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
@@ -19,7 +19,7 @@
     "tasks": []
   },
   "external_dependencies": [
-    "Remote filesystem MCP server"
+    "Remote filesystem exec bundle"
   ],
   "optional_external_dependencies": [],
   "reads_from": null,

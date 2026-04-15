@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -11,8 +11,8 @@ dependencies:
   skills: []
   tasks: []
 external_dependencies:
-  - name: Remote filesystem MCP server
-    description: The agent-index-filesystem MCP server must be running for remote connectivity checks, org config reads, and update checks. In Claude Code CLI it is started by .claude/settings.json. In Cowork it is started by the agent-index-filesystem plugin. If the plugin's server is terminated mid-session, the aifs-bridge fallback (agent-index-core/tools/aifs-bridge/) is attempted automatically in Step 2.
+  - name: Remote filesystem exec bundle
+    description: The aifs-exec bundle and shell wrapper must be present in the local install for remote connectivity checks, org config reads, and update checks. The shell wrapper (aifs-exec.sh) is called via bash for each operation — no persistent server process is needed.
 reads_from: null
 writes_to: null
 ---
@@ -33,7 +33,7 @@ If something went wrong during session start, Claude surfaces a clear, specific 
 
 ### What This Task Does Not Cover
 
-This task does not install, upgrade, or configure anything. It does not interact with the collection layer or the marketplace. It does not make decisions about the member's work. It is purely a context-loading and notice-surfacing operation. It reads from both local files (member workspace) and remote files (org config, members registry, collection versions via `aifs_*` tools), but never writes to either.
+This task does not install, upgrade, or configure anything. It does not interact with the collection layer or the marketplace. It does not make decisions about the member's work. It is purely a context-loading and notice-surfacing operation. It reads from both local files (member workspace) and remote files (org config, members registry, collection versions via the `aifs-exec.sh` on-demand executor), but never writes to either.
 
 ---
 
@@ -59,32 +59,31 @@ Do not proceed with any further steps. Do not attempt to infer installed capabil
 
 ### Step 2: Check Remote Filesystem Connectivity
 
-First, check whether `aifs_*` tools are available in the tool list. If they are not present at all, the MCP server did not start. This is a different condition from "server running but not authenticated" — it means the server launch mechanism is not configured for this runtime.
+The remote filesystem is accessed through the on-demand executor — a shell wrapper (`aifs-exec.sh`) that runs a single Node process per operation and exits. There is no persistent server process, no bridge, and no port management. Each call is independent and self-contained.
 
-**If `aifs_*` tools are not in the tool list (Cowork):** Before surfacing a notice to the member, attempt to recover using the aifs-bridge fallback. The bridge is an HTTP daemon that spawns the MCP server as a subprocess outside of Cowork's plugin lifecycle, making it resilient to the platform killing the plugin's server process.
+First, locate the exec shell wrapper. Read `remote_filesystem.exec.shell_wrapper` from `agent-index.json` to get the relative path (default: `mcp-servers/filesystem/aifs-exec.sh`). Verify the file exists at that path relative to the project directory.
 
-Recovery procedure:
+**If the shell wrapper is not found:** Proceed to Step 3 with a notice queued for Step 8:
 
-1. Check whether the bridge is already running: `curl -s --max-time 2 http://127.0.0.1:7819/health`
-2. If not running, start it: `bash agent-index-core/tools/aifs-bridge/aifs-call.sh --start`
-3. If the bridge starts successfully, verify by calling `aifs_auth_status` through the bridge: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"aifs_auth_status","args":{}}'`
+> "The remote filesystem tools aren't available — the exec bundle is missing. You can still use your installed skills and tasks this session. Say '@ai:member-bootstrap' if you need help, or ask your org admin for an updated bootstrap zip."
 
-If bridge recovery succeeds: proceed with all remote operations in this session using the bridge HTTP interface instead of native MCP tools. For each `aifs_*` tool call in subsequent steps, use: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'` and parse the `content[0].text` field from the response. Do not surface a notice to the member — the recovery was transparent.
+Skip all subsequent remote operations (Steps 5 and 7 depend on remote access and will be skipped per their existing remote-unavailable handling).
 
-If bridge recovery fails (bridge script not found, server bundle not found, startup timeout, or auth check fails): proceed to Step 3 with a tool-availability notice queued for Step 8:
+**If the shell wrapper is found:** Call `aifs_auth_status` to verify authentication:
 
-In Cowork:
-> "The remote filesystem tools aren't available — the agent-index-filesystem plugin may not be running. I tried to recover using the backup connector but it also failed. You can still use your installed skills and tasks this session. Try restarting this Cowork session, or say '@ai:member-bootstrap' if you need help."
+```bash
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_auth_status
+```
 
-**If `aifs_*` tools are not in the tool list (Claude Code CLI):** The bridge is not needed — CLI users should check `.claude/settings.json`. Proceed to Step 3 with a notice queued for Step 8:
+Parse the JSON response.
 
-> "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. Check that `.claude/settings.json` includes the MCP server configuration and restart the session, or say '@ai:member-bootstrap' to troubleshoot."
+**If `authenticated: true`:** Confirm connectivity by calling `aifs_exists`:
 
-Skip the `aifs_auth_status()` call and all subsequent remote operations (Steps 5 and 7 depend on remote access and will be skipped per their existing remote-unavailable handling).
+```bash
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_exists '{"path":"/org-config.json"}'
+```
 
-**If `aifs_*` tools are available:** call `aifs_auth_status()` to verify authentication.
-
-**If `authenticated: true`:** Confirm connectivity by calling `aifs_exists("/org-config.json")`. If the file exists, remote connectivity is confirmed. Proceed to Step 3.
+If the file exists, remote connectivity is confirmed. Proceed to Step 3.
 
 **If `authenticated: true` but `aifs_exists("/org-config.json")` fails or returns `exists: false`:** Proceed to Step 3 with a connectivity warning queued for Step 8. The member can still use locally installed capabilities.
 
@@ -94,7 +93,7 @@ Skip the `aifs_auth_status()` call and all subsequent remote operations (Steps 5
 
 > "I wasn't able to restore your remote filesystem connection. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to try again."
 
-**If `aifs_auth_status()` itself errors (MCP server running but unresponsive):** Proceed to Step 3 with a connectivity failure notice queued for Step 8:
+**If `aifs_auth_status` itself errors (exec fails or times out):** Proceed to Step 3 with a connectivity failure notice queued for Step 8:
 
 > "The remote filesystem connector isn't responding. You can still use your installed skills and tasks this session. If this persists, say '@ai:member-bootstrap' to troubleshoot."
 
@@ -273,17 +272,23 @@ Update-available notices (from Step 5) are only shown at `brief` and `detailed` 
 
 ## Directives
 
-### MCP Tool Usage
+### Remote Filesystem Access
 
-This task uses `aifs_*` MCP tools on the `agent-index-filesystem` server for remote filesystem access. There are two ways these tools may be available:
+This task uses the on-demand executor (`aifs-exec.sh`) for all remote filesystem operations. Each operation runs a fresh Node process that executes one tool call and exits — there is no persistent server, no bridge daemon, and no process management.
 
-1. **Native MCP tools (primary):** The `aifs_*` tools appear directly in the tool list. This is the normal case when the Cowork plugin or CLI settings.json is working. Invoke them through the MCP tool interface as normal.
+All `aifs_*` operations are invoked via bash:
 
-2. **Bridge HTTP fallback (Cowork only):** If the native tools disappear mid-session (a known Cowork platform issue where the plugin's MCP server process is terminated), the aifs-bridge daemon can be started as a recovery mechanism. When operating through the bridge, tool calls are made via HTTP: `curl -s -X POST http://127.0.0.1:7819/call -d '{"tool":"TOOL_NAME","args":ARGS_JSON}'`. The response contains `content[0].text` with the tool result, matching the same format as native MCP tool responses.
+```bash
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'
+```
 
-The bridge fallback is attempted automatically in Step 2 when native tools are absent. If the bridge is running (from Step 2 recovery or a manual start), use it for all `aifs_*` operations in the session.
+The shell wrapper auto-discovers the config file and exec bundle. It outputs JSON to stdout. Parse the JSON response to get the result or error.
 
-If neither native tools nor the bridge are available, the MCP server did not start. This is distinct from authentication failure (where the tools exist but return `authenticated: false`). When tools are entirely absent, the cause depends on the runtime environment — see Step 2 for the specific notices.
+Available tools: `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_stat`, `aifs_delete`, `aifs_copy`, `aifs_auth_status`, `aifs_authenticate`.
+
+The exec approach uses a persistent path cache on disk (path-cache.json in the credential store) to avoid redundant Google Drive API calls between invocations. The first call to a new path may be slower while the cache warms up; subsequent calls benefit from cached path→ID resolution.
+
+If the shell wrapper is missing, the exec bundle was not included in the bootstrap zip. See Step 2 for the specific notices.
 
 ### Behavior
 

@@ -1,7 +1,7 @@
 ---
 name: author-collection-setup
 type: setup
-version: 2.1.0
+version: 3.0.0
 collection: agent-index-core
 description: Setup interview for author-collection
 target: author-collection

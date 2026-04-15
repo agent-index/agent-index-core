@@ -302,7 +302,7 @@ Read `project.md` from `{shared_projects_path}/{project_slug}/` using `aifs_read
 ```markdown
 Tool selection: Operations on the member's private workspace (`members/{member_hash}/strategies/`)
 use native Read/Write tools. Operations on the shared strategies path (`{shared_strategies_path}`)
-use `aifs_*` MCP tools.
+use `aifs_*` tools.
 ```
 
 The mixed pattern is the most complex and the most important to get right. State the tool selection rule once at the top of the workflow, then reference it in each step where it matters.
@@ -571,41 +571,15 @@ Mark a dependency as `required: true` only if the collection is non-functional w
 
 Most external dependencies are MCP servers. Name them by their function ("Gmail MCP", "Slack MCP"), not by their package name. The setup template's Pre-Setup Checks section should validate that required MCP servers are connected before proceeding.
 
-### MCP server launch: dual-path (CLI vs. Cowork)
+### Remote filesystem access: the on-demand executor
 
-Agent-index runs in two runtime environments that start MCP servers differently. Any collection that depends on an MCP server (including `agent-index-filesystem`) must account for both paths:
+The remote filesystem is accessed through an on-demand executor (`aifs-exec.sh`) rather than a persistent MCP server. Each `aifs_*` operation runs a fresh Node process via the shell wrapper, executes one tool call, and exits. There is no persistent server process, no bridge daemon, and no port management. This eliminates the class of failures where Cowork's platform-level process management terminates a plugin's MCP server mid-session.
 
-**Claude Code CLI** reads MCP server definitions from `.claude/settings.json` and starts them as child processes. This is the traditional path — declare the server in settings.json with its command and environment variables, and the CLI handles the rest.
+**How it works:** Claude calls the shell wrapper directly via bash: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. The wrapper auto-discovers the config file and exec bundle, runs the operation, outputs JSON, and exits. A persistent path cache on disk avoids redundant Google Drive API calls between invocations.
 
-**Cowork** does not read MCP server definitions from `.claude/settings.json`. All MCP servers in Cowork are delivered through its plugin system. A Cowork plugin declares MCP servers in a `.mcp.json` file, and Cowork launches them natively. The `${CLAUDE_PLUGIN_ROOT}` variable is available for path resolution within plugins.
+**What collection authors don't need to do:** Individual collection files (setup templates, API tasks, tutorials) do not need to manage the executor lifecycle — there is nothing to start, stop, or recover. Each call is independent.
 
-For agent-index-core, the `agent-index-filesystem` MCP server uses both paths: `.claude/settings.json` for CLI users, and the `agent-index-filesystem.plugin` (built from `agent-index-core/cowork-plugin/`) for Cowork users. The plugin is included in the bootstrap zip.
-
-**What this means for collection authors:** if your collection bundles its own MCP server (rare — most collections use `aifs_*` or third-party MCP servers), you need to provide both a settings.json entry and a Cowork plugin. If your collection depends on a third-party MCP server (Gmail, Slack, etc.), those are typically already available in both environments — just validate tool availability in your setup template's Pre-Setup Checks.
-
-**Detecting the runtime environment:** check whether expected MCP tools are in the tool list. If tools are absent, guide the member based on context: in Cowork, suggest installing the relevant plugin; in CLI, suggest checking settings.json. The `session-start` and `member-bootstrap` specs in agent-index-core demonstrate this pattern.
-
-**Key Cowork conventions for plugin MCP servers:**
-- The user's selected workspace folder is mounted under `$HOME/mnt/{folder-name}/` in the Cowork sandbox
-- `$HOME` always resolves to the session root, making `$HOME/mnt/*/` a stable discovery pattern
-- Session names change between sessions, so never hardcode a mount path — scan for a known marker file (e.g., `agent-index.json`)
-- After plugin installation, the member must restart the Cowork session for the MCP server to start
-
-### MCP server resilience: the HTTP bridge pattern
-
-Cowork's plugin system manages MCP server processes and can terminate them mid-session. This is a known platform behavior — the server code is not at fault, and there is no plugin-side configuration to prevent it. When the process dies, the native MCP tools disappear from the session with no automatic recovery.
-
-The `aifs-bridge` tool (`agent-index-core/tools/aifs-bridge/`) addresses this by running the MCP server as a child process of an HTTP daemon that Claude controls directly, outside the plugin lifecycle. The bridge spawns the server bundle, completes the MCP initialization handshake over stdio, and proxies tool calls via HTTP. If the server process exits, the next tool call transparently restarts it.
-
-**When to use this pattern:** Any Cowork plugin MCP server that (a) members depend on for session-critical operations and (b) cannot tolerate mid-session termination. The bridge is a workaround for a platform limitation, not an architectural preference — native MCP tools are better UX when they work.
-
-**How it integrates:** The `session-start` task automatically attempts bridge recovery when it detects that native `aifs_*` tools are missing from the tool list. If the bridge starts successfully, the session proceeds transparently — all `aifs_*` calls route through `http://127.0.0.1:7819` instead of native MCP tools. The member never sees the difference. See `session-start.md` Step 2 and `member-bootstrap.md` MCP Tool Usage for the implementation.
-
-**Generalizing for other servers:** The bridge accepts a `--bundle` flag for any MCP server bundle, not just the agent-index filesystem adapter. If your collection bundles its own MCP server and experiences the same mid-session termination, you can reuse the bridge: `node aifs-bridge.mjs --bundle /path/to/your/server.js --port 7821 --env YOUR_CONFIG_VAR=value`. Use a different port to avoid conflicts with the filesystem bridge.
-
-**What collection authors don't need to do:** Individual collection files (setup templates, API tasks, tutorials) do not need to reference the bridge directly. The `session-start` task handles bridge recovery transparently before any collection code runs. When `aifs_*` tools are available (whether natively or via bridge), collection tasks use them identically. When tools are completely unavailable (bridge also failed), collection setup templates should route the member to `@ai:member-bootstrap` for troubleshooting — that flow already includes bridge recovery as part of its diagnostic steps.
-
-**What collection authors should do:** In your `collection-setup.md` Pre-Setup Checks, validate `aifs_*` connectivity early — call `aifs_auth_status()` or attempt a lightweight read before doing any writes. If the call fails, don't tell the member to "restart the session." Instead, direct them to `@ai:member-bootstrap`, which will attempt bridge recovery, re-authentication, and plugin diagnostics in the correct order. This keeps recovery logic centralized rather than duplicated across collections.
+**What collection authors should do:** In your `collection-setup.md` Pre-Setup Checks, validate `aifs_*` connectivity early — call `aifs_auth_status` via the executor or attempt a lightweight read before doing any writes. If the call fails, direct the member to `@ai:member-bootstrap` for troubleshooting. This keeps recovery logic centralized rather than duplicated across collections.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-index",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "library_root": "/",
   "core_path": "/agent-index-core/",
   "marketplace_path": "/agent-index-marketplace/",
@@ -13,10 +13,11 @@
   },
   "remote_filesystem": {
     "backend": "",
-    "mcp_server": {
+    "exec": {
       "adapter": "",
-      "adapter_version": "1.0.0",
-      "bundle_path": "mcp-servers/filesystem/server.bundle.js"
+      "adapter_version": "2.0.0",
+      "bundle_path": "mcp-servers/filesystem/aifs-exec.bundle.js",
+      "shell_wrapper": "mcp-servers/filesystem/aifs-exec.sh"
     },
     "auth": {
       "method": "per-member",
