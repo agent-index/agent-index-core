@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.0.0
+version: 3.0.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -564,16 +564,16 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
 
 Include entries for ALL admins defined in Step 7.
 
-4. Write `CLAUDE.md` to the remote root. This is a reference copy. The content must include:
+4. Write `CLAUDE.md` to the remote root. This is a reference copy. The canonical source is `agent-index-core/.claude/CLAUDE.md.template` — read it, substitute `{org_name}` with the org's display name, and write the result. The template includes:
    - A brief description of what agent-index is
    - The **Bootstrap Protocol** section: how to handle each `AGENT_INDEX_BOOTSTRAP` signal
-   - The **Handling Member Requests** routing table
+   - The **Handling Member Requests** routing table — split into Core aliases, Marketplace aliases, and a Catch-all section that tells Claude how to resolve any other `@ai:{name}` invocation by checking the local member index and then scanning installed collections' `api/` directories. The catch-all is a routing instruction, not an allowlist — Claude must not treat unknown aliases as invalid without first attempting resolution.
    - The **Key Files** section: paths to `agent-index.json` (local), `org-config.json` (remote), `members-registry.json` (remote), `member-index.json` (local), `preferences.md` (local), `filesystem.md` (local)
    - The **Two-Tier Filesystem** section: local files via native tools, remote files via the `aifs_*` tools on the on-demand executor. Explain that `NOT_AUTHENTICATED` errors trigger automatic re-authentication — the system will attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
    - The **Identity Resolution** section: SHA256 of lowercase email, first 16 hex characters
    - The **Important Constraints** section: never modify collection directories on remote, never write outside the current member's local workspace and `/shared/` on remote, always read skill/task definitions before executing, always get member confirmation before changes
 
-Use the canonical `CLAUDE.md` template from `agent-index-core/.claude/` as the source content. If no template exists, generate it from the sections above.
+If the template file is missing for any reason, fall back to generating the file from the sections above — but the template is the source of truth and should not be skipped lightly. Marketplace aliases in the template apply only when `agent-index-marketplace` is in `installed_collections`; if the marketplace section is irrelevant to this org (extremely rare), it can be omitted from the written file.
 
 **Local writes:**
 

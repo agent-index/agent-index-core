@@ -1,0 +1,75 @@
+# Agent Index — {org_name}
+
+Agent-index is a capability management system for AI-assisted orgs. It manages skills, tasks, and shared resources through a two-tier filesystem: local member workspaces for personal configuration, and a remote shared filesystem for org-wide resources.
+
+## Bootstrap Protocol
+
+When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTSTRAP` signals:
+
+- **`needs_auth`**: The remote filesystem exec bundle is present but the member is not authenticated. Automatically attempt re-authentication using stored credentials. If automatic re-auth fails, surface the issue and suggest `@ai:member-bootstrap` as a manual fallback.
+- **`needs_setup`**: The member has no local workspace (`member-index.json` not found). Guide them to run `@ai:setup` for first-time onboarding.
+- **`ready`**: Everything is configured. Proceed normally.
+
+## Handling Member Requests
+
+### Core aliases (always available)
+
+| Request pattern | Route to |
+|---|---|
+| `@ai:setup` or "set up my workspace" | org-setup skill |
+| `@ai:update` or "check for updates" | apply-updates task |
+| `@ai:tutorial` or "how does this work" | system-tutorial skill |
+| `@ai:member-bootstrap` or "fix my connection" | member-bootstrap skill |
+| `@ai:preferences` / `@ai:prefs` or "change my preferences" | preferences-management skill |
+| `@ai:edit-org` or "edit org config" | edit-org task (admin only) |
+| `@ai:create-org` or "create org" | create-org task (admin only) |
+| `@ai:publish-updates` | publish-updates task (admin only) |
+| `@ai:upload-install-log` | upload-install-log task |
+
+### Marketplace aliases (available when `agent-index-marketplace` is installed)
+
+| Request pattern | Route to |
+|---|---|
+| `@ai:marketplace` or "open marketplace" | list-marketplace-collections task |
+| `@ai:list-marketplace-collections` | list-marketplace-collections task |
+| `@ai:list-org-collections` | list-org-collections task |
+| `@ai:check-updates` | check-updates task |
+| `@ai:refresh-marketplace-cache` | refresh-marketplace-cache task |
+| `@ai:install-collection` | install-collection task |
+| `@ai:download-collection` | download-collection task |
+| `@ai:download-and-install-collection` | download-and-install-collection task |
+
+### Catch-all: any other `@ai:{name}` alias
+
+If a request matches `@ai:{name}` and is not in the tables above, resolve it as an installed skill or task before declaring it unknown. The resolution sequence is:
+
+1. **Check the local member index first.** Read `members/{member_hash}/member-index.json` and look for an installed capability whose `name` (or one of its `aliases`) equals `{name}`. If found, read the capability's `.md` file at the path recorded in the index and execute it.
+2. **Fall back to a remote scan.** If the member index has no match, list installed collections from `org-config.json` (remote) and, for each `installed_collections[].name`, check whether `/{collection}/api/{name}.md` exists on the remote filesystem. If exactly one collection has a matching task/skill file, read and execute it. If multiple match, ask the member which one they meant.
+3. **Only then declare it unknown.** If neither step finds a match, surface: "I don't recognize the alias `@ai:{name}`. Try `@ai:tutorial` to see what's available, or `@ai:marketplace` to browse installable collections." Do **not** require the alias to appear in this routing table to consider it valid — this table is a fast-path index, not an allowlist.
+
+## Key Files
+
+- **`agent-index.json`** (local): Root configuration — backend settings, paths, org metadata
+- **`org-config.json`** (remote: `/org-config.json`): Authoritative org configuration
+- **`members-registry.json`** (remote: `/members-registry.json`): Member lookup table
+- **`member-index.json`** (local: `members/{hash}/member-index.json`): Member's installed capabilities
+- **`preferences.md`** (local: `members/{hash}/profile/preferences.md`): Member preferences
+- **`filesystem.md`** (local: `members/{hash}/profile/filesystem.md`): Filesystem auth state
+
+## Two-Tier Filesystem
+
+- **Local files**: Read and write using native file tools (Read, Write, Edit). These are in the project directory on the member's machine.
+- **Remote files**: Read and write using the on-demand executor via `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. These live on Google Drive (shared drive).
+
+If `aifs_*` calls return `NOT_AUTHENTICATED`, the system will automatically attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
+
+## Identity Resolution
+
+Member identity is resolved by computing SHA-256 of the member's lowercase email address and taking the first 16 hexadecimal characters. This hash is used as the member's directory name under `members/` and as `member_hash` throughout the system.
+
+## Important Constraints
+
+- Never modify collection directories on the remote filesystem — they are read-only references
+- Never write outside the current member's local workspace (`members/{hash}/`) and `/shared/` on remote
+- Always read skill/task definitions before executing them
+- Always get member confirmation before making changes

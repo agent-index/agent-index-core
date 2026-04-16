@@ -113,24 +113,24 @@ Guide the member through the backend-specific authentication flow.
 
 Call `aifs_authenticate(action="start")` to initiate the flow. The adapter returns an `auth_url`, a `status` field, and backend-specific instructions.
 
-The `status` field from `aifs_authenticate(action="start")` determines how the callback is handled:
+The `status` field from `aifs_authenticate(action="start")` tells you which flow to use:
 
-- `"awaiting_callback"` — the adapter started a temporary server to capture the OAuth redirect automatically. The member just needs to sign in and grant access in their browser; the code is captured behind the scenes.
-- `"awaiting_code"` — the callback server could not start. The member must manually copy the authorization code from the browser URL bar.
+- `"awaiting_code"` — the adapter expects the member to paste back the URL their browser lands on after sign-in. **This is the normal path in Cowork and any other sandboxed environment**, because the browser running on the member's host cannot reach a callback server running inside our container.
+- `"awaiting_callback"` — the adapter started a loopback callback server and will capture + exchange the code automatically. This happens only on developer-laptop installs where host == container. The member still just needs to sign in and grant access; if the redirect happens to fail, fall back to the paste-URL flow.
 
 **Google Drive:**
 Surface: "To connect to your org's shared storage, you'll need to sign in with your Google account. I'll give you a URL to open in your browser."
 
 Present the OAuth URL from the `aifs_authenticate` response.
 
-If `status` is `"awaiting_callback"`: instruct the member: "Click this link, sign in with your Google account, and grant access. You'll see a success page when it's done — then come back here." When the member confirms they've completed sign-in: call `aifs_authenticate(action="complete")` (no code needed — it was captured automatically).
+If `status` is `"awaiting_code"`: instruct the member: "Click this link, sign in with your Google account, and grant access. The browser will try to redirect to a `localhost` URL that won't load — that's expected. Copy the full URL from your browser's address bar and paste it back here." When the member pastes the URL (or just the code), call `aifs_authenticate(action="complete", auth_code="{pasted value}")` — the adapter will extract the code itself whether they pasted the full URL or just the code value.
 
-If `status` is `"awaiting_code"`: instruct the member: "Click this link, sign in with your Google account, and grant access. After granting access, you'll see a page that may not load — that's okay. Copy everything after `code=` in the URL bar (up to the `&` if there is one) and paste it here." When the member provides the code: call `aifs_authenticate(action="complete", auth_code="{code}")`.
+If `status` is `"awaiting_callback"`: instruct the member: "Click this link, sign in with your Google account, and grant access. You'll see a success page when the handshake completes." Wait for the member to confirm they saw the success page, then call `aifs_authenticate(action="complete")` to verify. If they report the redirect failed, ask them to paste the full URL from their browser instead and call `aifs_authenticate(action="complete", auth_code="{pasted URL}")`.
 
 **Microsoft OneDrive/SharePoint:**
 Surface: "To connect to your org's shared storage, you'll need to sign in with your Microsoft account. I'll give you a URL to open in your browser."
 
-Present the OAuth URL from the `aifs_authenticate` response. Follow the same callback/manual code logic as Google Drive above, adjusted for Microsoft sign-in.
+Present the OAuth URL from the `aifs_authenticate` response. Follow the same paste-URL logic as Google Drive above, adjusted for Microsoft sign-in.
 
 **Amazon S3:**
 Surface: "To connect to your org's shared storage on AWS, you'll need to set up your AWS credentials. Your org admin should have provided instructions for your org's AWS setup."
@@ -297,7 +297,7 @@ Then run the re-authentication flow. Keep it minimal — the member did not ask 
 This skill is designed for members who may have no technical background. The authentication step is the most technical part — frame it in terms of actions, not concepts.
 
 "Sign in with your Google account" — not "Complete the OAuth2 authorization flow."
-"Paste the code you see after signing in" — not "Provide the authorization code from the callback."
+"Paste the URL your browser lands on after signing in" — not "Provide the authorization code from the callback."
 
 When something goes wrong, be specific and actionable. "Contact your org admin" is always an acceptable fallback, but include what to tell them.
 
