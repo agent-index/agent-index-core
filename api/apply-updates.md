@@ -198,11 +198,54 @@ For each `collection-update` where the member has capabilities installed from th
 3. For each of the member's installed capabilities from this collection:
    - Delegate to the org-setup skill's upgrade flow (Phase 4 steps 1–9 of org-setup's "Upgrading an Installed Capability" section)
    - This handles: reading the new definition from remote, reading the existing setup responses, running the upgrade script's migration, presenting reset parameters to the member for input, writing updated files, updating `member-index.json`
-4. After all capabilities from a collection are upgraded, surface: "{collection} capabilities upgraded to {target_version}."
+4. **Merge new triggers into routing.json.** After upgrading all capabilities from a collection, read the updated `collection.json` from remote and check whether it contains trigger arrays (object-format `api` entries with a `triggers` field). If it does:
+   - Read the member's existing `routing.json` from `members/{member_hash}/profile/routing.json`. If it does not exist, initialize it with an empty `mappings` array (version `"1.0.0"`, member_hash, timestamp).
+   - For each trigger in the updated collection: check if a mapping with the same `phrase` already exists in `routing.json`. If not, add it with `source: "collection-default"`, `active: true`. If a mapping with the same phrase exists from a different collection, present the collision to the member and let them choose. If a mapping with the same phrase exists from the same collection, leave the existing one (it may have been customized).
+   - Write the updated `routing.json`.
+   - Surface: "Natural language triggers updated for {collection}."
+   
+   If the updated collection has no trigger arrays: skip this sub-step.
+5. Surface: "{collection} capabilities upgraded to {target_version}."
 
 If a capability's upgrade requires member input (reset parameters or new required parameters): pause, gather input, then continue. The member is not asked about preserved parameters — those carry forward silently.
 
-**Phase 5 — New collection installs (optional)**
+**Phase 5 — Natural language routing initialization**
+
+If the update plan includes a `core-update` with target version ≥ 3.0.5, and the member's `routing.json` file does not yet exist at `members/{member_hash}/profile/routing.json`:
+
+1. For each installed collection in the member's `member-index.json`, read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")`.
+2. Extract trigger entries from the `api` array — entries using the object format with a `triggers` array.
+3. Build the initial `routing.json`:
+   ```json
+   {
+     "version": "1.0.0",
+     "member_hash": "{member_hash}",
+     "last_updated": "{ISO timestamp}",
+     "mappings": [
+       {
+         "phrase": "{trigger phrase}",
+         "capability": "{capability name}",
+         "collection": "{collection name}",
+         "description": "{trigger description}",
+         "source": "collection-default",
+         "active": true
+       }
+     ]
+   }
+   ```
+4. Check for cross-collection phrase collisions (two collections claiming the same phrase). If any exist, present the collision to the member and let them choose which collection handles it. Mark the unchosen mapping as `active: false`.
+5. Present the complete routing table to the member:
+   > "Natural language routing has been set up for your installed collections. Here are the phrases that will route to your capabilities:"
+   Show the table organized by collection. Note that the member can customize these anytime via `@ai:preferences` (or "edit my routing").
+6. Write `routing.json` to `members/{member_hash}/profile/routing.json`.
+
+If zero triggers are found across all installed collections (all collections are still on pre-trigger versions): **do not write routing.json**. Skip this phase silently. The file's absence signals that routing initialization has not yet completed — Phase 4's trigger merge sub-step will create the file when collections are upgraded to trigger-supporting versions in a future update. This handles the case where the admin upgrades core to 3.0.5 before upgrading the collections.
+
+If `routing.json` already exists (member has already been through this process, or Phase 4's trigger merge created it during collection upgrades earlier in this same update): skip this phase entirely. Existing routing customizations are never overwritten by apply-updates.
+
+If the core-update target version is < 3.0.5: skip this phase — routing.json is a 3.0.5+ feature.
+
+**Phase 6 — New collection installs (optional)**
 
 For each `collection-install` (unless `--skip-optional`):
 
@@ -215,7 +258,7 @@ For each `collection-install` (unless `--skip-optional`):
    - Write to `member-index.json`
 4. After installation (or skip): surface result and continue.
 
-**Phase 6 — Collection removals (informational)**
+**Phase 7 — Collection removals (informational)**
 
 For each `collection-remove`:
 
@@ -223,7 +266,7 @@ For each `collection-remove`:
 2. If yes: surface "{collection} has been removed from your org. Your installed capabilities ({list}) will continue to work with their current versions, but they won't receive future updates. You can keep using them or say '@ai:setup' to remove them."
 3. If no: skip silently — the member never had anything from this collection.
 
-**Phase 7 — Org config changes (informational)**
+**Phase 8 — Org config changes (informational)**
 
 If `org_config_updates` is non-empty: surface a brief summary of what changed:
 > "Your org's configuration has been updated: {change descriptions}."
@@ -320,7 +363,7 @@ The pending update plan file at `.agent-index/install-state/pending-update-plan.
   "status": "interrupted",
   "interrupted_at": "{ISO timestamp}",
   "target_cursor": "{entry ID}",
-  "completed_phases": ["infrastructure", "claude-md", "adapter-bundle"],
+  "completed_phases": ["infrastructure", "claude-md", "adapter-bundle", "routing-init"],
   "remaining_operations": {
     "collection_updates": { ... },
     "collection_installs": { ... },
@@ -331,3 +374,4 @@ The pending update plan file at `.agent-index/install-state/pending-update-plan.
 ```
 
 This file is written when the task is interrupted (typically by an adapter bundle restart) and read on the next invocation to resume from where it left off. It is deleted after successful completion.
+
