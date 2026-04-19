@@ -2,6 +2,16 @@
 
 Agent-index is a capability management system for AI-assisted orgs. It manages skills, tasks, and shared resources through a two-tier filesystem: local member workspaces for personal configuration, and a remote shared filesystem for org-wide resources.
 
+## Agent-Index First
+
+**All project, strategy, task, triage, and work-management requests MUST be routed through agent-index capabilities first.** Do NOT use built-in connectors or external tools (Jira, Asana, Confluence, Slack search, etc.) unless:
+
+1. The member explicitly names the external tool ("check Jira", "search Slack")
+2. An agent-index task definition itself calls for external data (e.g., `channel-digest` reads Slack channels as part of its workflow)
+3. The request clearly falls outside agent-index's installed capabilities
+
+Agent-index is the source of truth for project tracking, action items, ideas, decisions, status reports, strategy, bug tracking, and communication triage. External tools are supplementary.
+
 ## Bootstrap Protocol
 
 When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTSTRAP` signals:
@@ -11,6 +21,62 @@ When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTST
 - **`ready`**: Everything is configured. Proceed normally.
 
 ## Handling Member Requests
+
+Members use natural language to interact with agent-index. They say "what's on my plate" or "give me a pulse on the API project" — not `@ai:daily-view` or `@ai:project-pulse`. The `@ai:` aliases exist as an explicit fallback for disambiguation, not as the primary interface.
+
+### Routing priority
+
+When a member makes a request:
+
+1. **Match against natural language mappings** (from `routing.json` if loaded, otherwise the default table below, plus the member's installed capabilities in `member-index.json`). If the intent matches an agent-index capability, route to it.
+2. **Match against `@ai:` alias tables** if the request uses explicit alias syntax.
+3. **Use catch-all resolution** for `@ai:{name}` aliases not in the tables.
+4. **Only use external tools** if no agent-index capability matches and the request falls outside agent-index scope.
+
+### Natural language → capability mapping
+
+At session start, `session-start` loads the member's personalized routing mappings from `members/{member_hash}/profile/routing.json`. These mappings associate natural language phrases with specific capabilities and take precedence over the defaults below. Members can customize their mappings via `@ai:preferences` (or "edit my routing").
+
+If `routing.json` is not present (new installs, pre-Phase 2 members), use the default mappings below. This table is not exhaustive — use judgment to match new phrasings to the closest installed capability by checking `member-index.json`.
+
+| What the member says (examples) | Capability | Collection |
+|---|---|---|
+| "project pulse", "status of project X", "how's X going", "project update report" | project-pulse | projects |
+| "update project X", "I finished the API work", "log my progress" | update-project | projects |
+| "create a project", "start a new project", "new project called X" | create-project | projects |
+| "edit project X", "change the milestones", "add a member to X" | edit-project | projects |
+| "what are my action items", "what's assigned to me", "open tasks", "what's on my plate" | manage-action-items | projects |
+| "I have an idea", "new idea for project X", "idea for improving Y" | create-idea | projects |
+| "what decisions have we made", "decision log for X" | project-decide | projects |
+| "read the channel", "what happened in Slack for project X" | channel-digest | projects |
+| "archive project X", "close project X" | archive-project | projects |
+| "daily view", "what's on my plate today", "morning overview" | daily-view | projects |
+| "what bugs do we have", "show bugs", "open bugs for X" | view-bugs | bug-reports |
+| "report a bug", "found a bug", "log a bug" | report-bug | bug-reports |
+| "triage my email", "check my inbox", "what's important in my email" | email-triage | email-triage |
+| "triage my Slack", "what's important in Slack", "Slack summary" | slack-triage | slack-triage |
+| "capture this", "remember this", "note this down", "save this for later" | capture | capture |
+| "create a strategy", "strategy for X", "strategic plan for Y" | create-strategy | strategy |
+| "edit strategy", "update the strategy for X" | edit-strategy | strategy |
+| "run my briefing", "morning briefing", "daily briefing" | run-briefing | strategy |
+
+When new collections are installed, their default triggers are merged into `routing.json` automatically (see `org-setup`). Members can review and customize these at install time or later via preferences.
+
+### How to execute a skill or task
+
+When routing resolves to a capability, follow this procedure — **do not explore the filesystem looking for the file**:
+
+1. **Core capabilities** (from the `agent-index-core` collection): read the definition from the remote filesystem:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/agent-index-core/api/{name}.md"}'`
+2. **Marketplace capabilities** (from the `agent-index-marketplace` collection): read from:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/agent-index-marketplace/api/{name}.md"}'`
+3. **Installed collection capabilities** (member's own skills/tasks): read from:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/{collection}/api/{name}.md"}'`
+   where `{collection}` is the collection name from the mapping table or `member-index.json`.
+
+The general pattern: all task and skill definitions live at `/{collection}/api/{name}.md` on the remote filesystem. Read them with `aifs_read`, then follow the instructions in the file. **Do not `ls` or `aifs_list` to search for them** — the path is deterministic.
+
+`<project_dir>` is the directory containing `agent-index.json`. In Cowork, this is the mounted workspace folder.
 
 ### Core aliases (always available)
 
@@ -53,13 +119,23 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 - **`org-config.json`** (remote: `/org-config.json`): Authoritative org configuration
 - **`members-registry.json`** (remote: `/members-registry.json`): Member lookup table
 - **`member-index.json`** (local: `members/{hash}/member-index.json`): Member's installed capabilities
+- **`routing.json`** (local: `members/{hash}/profile/routing.json`): Member's natural language routing mappings
 - **`preferences.md`** (local: `members/{hash}/profile/preferences.md`): Member preferences
 - **`filesystem.md`** (local: `members/{hash}/profile/filesystem.md`): Filesystem auth state
 
 ## Two-Tier Filesystem
 
 - **Local files**: Read and write using native file tools (Read, Write, Edit). These are in the project directory on the member's machine.
-- **Remote files**: Read and write using the on-demand executor via `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. These live on Google Drive (shared drive).
+- **Remote files**: Read and write using the on-demand executor. Each call spawns a fresh Node process, executes one operation, and exits. There is no persistent server or bridge process.
+
+**Invocation pattern (the ONLY way to call remote filesystem operations):**
+```
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'
+```
+
+**Available tools:** `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_stat`, `aifs_delete`, `aifs_copy`, `aifs_auth_status`, `aifs_authenticate`
+
+**IMPORTANT — deprecated v2 artifacts:** If the local install contains `agent-index-core/tools/aifs-bridge/` (with `aifs-bridge.mjs` and `aifs-call.sh`), these are **obsolete v2 infrastructure** — do NOT use them. They reference `server.bundle.js` which no longer exists. The only supported invocation path is `mcp-servers/filesystem/aifs-exec.sh` as shown above.
 
 If `aifs_*` calls return `NOT_AUTHENTICATED`, the system will automatically attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
 
@@ -73,3 +149,4 @@ Member identity is resolved by computing SHA-256 of the member's lowercase email
 - Never write outside the current member's local workspace (`members/{hash}/`) and `/shared/` on remote
 - Always read skill/task definitions before executing them
 - Always get member confirmation before making changes
+- Always route through agent-index first for project, strategy, bug, triage, and work-management requests — external tools are supplementary, not primary

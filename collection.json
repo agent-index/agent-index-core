@@ -1,8 +1,8 @@
 {
   "name": "agent-index-core",
   "display_name": "Agent-Index Core",
-  "version": "3.0.2",
-  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial. v3.0.2: ships canonical CLAUDE.md template with marketplace aliases broken out and an explicit catch-all alias-resolution procedure so unknown @ai: aliases get resolved against installed collections instead of being treated as invalid. v3.0.1: member-bootstrap now documents paste-URL-back as the primary OAuth flow for sandboxed environments. v3.0.0: replaced MCP server and bridge with on-demand executor (aifs-exec).",
+  "version": "3.0.5",
+  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial. v3.0.5: natural language triggers as first-class collection contract — triggers in collection.json, routing.json per member, session-start loads dynamic routing, org-setup writes defaults, preferences-management edits routing, author-collection and validate-collection updated. v3.0.4: CLAUDE.md natural-language-first routing. v3.0.3: deterministic API path patterns. v3.0.2: canonical CLAUDE.md template. v3.0.1: paste-URL-back OAuth flow. v3.0.0: on-demand executor.",
   "author": "agent-index",
   "license": "proprietary",
   "category": "infrastructure",
@@ -10,15 +10,57 @@
   "api": [
     "session-start",
     "member-bootstrap",
-    "org-setup",
-    "preferences-management",
-    "system-tutorial",
+    {
+      "name": "org-setup",
+      "triggers": [
+        { "phrase": "set up my workspace", "capability": "org-setup", "description": "Run first-time member onboarding and capability installation" },
+        { "phrase": "install my collections", "capability": "org-setup", "description": "Install or reinstall available collections" },
+        { "phrase": "set up agent-index", "capability": "org-setup", "description": "Initialize agent-index member workspace" }
+      ]
+    },
+    {
+      "name": "preferences-management",
+      "triggers": [
+        { "phrase": "change my preferences", "capability": "preferences-management", "description": "View or modify session preferences and settings" },
+        { "phrase": "edit my settings", "capability": "preferences-management", "description": "Adjust member configuration options" },
+        { "phrase": "update my preferences", "capability": "preferences-management", "description": "Change session behavior settings" },
+        { "phrase": "edit my routing", "capability": "preferences-management", "description": "Customize natural language trigger mappings" }
+      ]
+    },
+    {
+      "name": "system-tutorial",
+      "triggers": [
+        { "phrase": "how does this work", "capability": "system-tutorial", "description": "Get a guided tour of the agent-index system" },
+        { "phrase": "show me around", "capability": "system-tutorial", "description": "Walk through agent-index features and concepts" },
+        { "phrase": "what can you do", "capability": "system-tutorial", "description": "Learn about available agent-index capabilities" }
+      ]
+    },
     "create-org",
     "edit-org",
     "publish-updates",
-    "apply-updates",
-    "author-collection",
-    "validate-collection",
+    {
+      "name": "apply-updates",
+      "triggers": [
+        { "phrase": "check for updates", "capability": "apply-updates", "description": "Check and apply pending org updates" },
+        { "phrase": "update my workspace", "capability": "apply-updates", "description": "Apply the latest org changes to local install" },
+        { "phrase": "am I up to date", "capability": "apply-updates", "description": "Check if there are pending updates to apply" }
+      ]
+    },
+    {
+      "name": "author-collection",
+      "triggers": [
+        { "phrase": "create a collection", "capability": "author-collection", "description": "Build a new agent-index collection from scratch" },
+        { "phrase": "build a collection", "capability": "author-collection", "description": "Author a new collection with guided workflow" },
+        { "phrase": "start a new collection", "capability": "author-collection", "description": "Scaffold a new collection project" }
+      ]
+    },
+    {
+      "name": "validate-collection",
+      "triggers": [
+        { "phrase": "validate my collection", "capability": "validate-collection", "description": "Check a collection for standards compliance" },
+        { "phrase": "check my collection", "capability": "validate-collection", "description": "Run validation checks on a collection" }
+      ]
+    },
     "upload-install-log"
   ],
   "dependencies": [],

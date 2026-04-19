@@ -163,7 +163,8 @@ If `core-update` is present:
 2. Read each updated core API member from remote via `aifs_read("/{collection}/api/{name}.md")`
 3. Overwrite the local core files with the updated versions
 4. Update the local `agent-index.json` version field
-5. Surface: "agent-index-core updated to {target_version}."
+5. **Clean up deprecated v2 artifacts:** If `agent-index-core/tools/aifs-bridge/` exists locally, delete the entire directory (it contains `aifs-bridge.mjs` and `aifs-call.sh` which reference the removed `server.bundle.js`). Also delete `mcp-servers/filesystem/server.bundle.js` if present. These are pre-v3 artifacts that cause errors if Claude discovers and tries to use them.
+6. Surface: "agent-index-core updated to {target_version}."
 
 If `marketplace-update` is present:
 1. Same pattern — read updated marketplace files from remote, overwrite local
