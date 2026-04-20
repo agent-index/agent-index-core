@@ -164,11 +164,13 @@ If `core-update` is present:
 3. Overwrite the local core files with the updated versions
 4. Update the local `agent-index.json` version field
 5. **Clean up deprecated v2 artifacts:** If `agent-index-core/tools/aifs-bridge/` exists locally, delete the entire directory (it contains `aifs-bridge.mjs` and `aifs-call.sh` which reference the removed `server.bundle.js`). Also delete `mcp-servers/filesystem/server.bundle.js` if present. These are pre-v3 artifacts that cause errors if Claude discovers and tries to use them.
-6. Surface: "agent-index-core updated to {target_version}."
+6. **Merge triggers into routing.json.** After updating core files, check the updated `agent-index-core/collection.json` for trigger arrays. If present and `routing.json` exists (or was created by a previous phase in this update), merge new triggers using the same logic as Phase 4 step 4. Core capabilities (org-setup, preferences-management, system-tutorial, apply-updates, author-collection, validate-collection) have triggers that should appear in routing.json alongside member-installed collection triggers.
+7. Surface: "agent-index-core updated to {target_version}."
 
 If `marketplace-update` is present:
 1. Same pattern — read updated marketplace files from remote, overwrite local
-2. Surface: "agent-index-marketplace updated to {target_version}."
+2. **Merge triggers into routing.json.** Same as core-update step 6 — check the updated `agent-index-marketplace/collection.json` for trigger arrays and merge into routing.json if present.
+3. Surface: "agent-index-marketplace updated to {target_version}."
 
 **Phase 2 — CLAUDE.md**
 
@@ -213,8 +215,8 @@ If a capability's upgrade requires member input (reset parameters or new require
 
 If the update plan includes a `core-update` with target version ≥ 3.0.5, and the member's `routing.json` file does not yet exist at `members/{member_hash}/profile/routing.json`:
 
-1. For each installed collection in the member's `member-index.json`, read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")`.
-2. Extract trigger entries from the `api` array — entries using the object format with a `triggers` array.
+1. Build the list of collections to scan for triggers. Start with `agent-index-core` and `agent-index-marketplace` (these are infrastructure collections whose triggers are always relevant but are not listed in `member-index.json`). Then add every unique collection name from the member's `member-index.json` installed capabilities. For each collection in this combined list, read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")`.
+2. Extract trigger entries from each collection's `api` array — entries using the object format with a `triggers` array.
 3. Build the initial `routing.json`:
    ```json
    {
