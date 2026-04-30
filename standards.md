@@ -522,6 +522,8 @@ Files on the org's remote storage are accessed through the `aifs_*` tool family 
 
 **Collections must use `aifs_read` and `aifs_write` for all remote file access.** Never use native file tools (Read/Write/Edit) for paths under the remote filesystem root.
 
+**Adapter contract v2.0 (added 2026-04-30):** The `aifs_*` family is extended with five additional ops — `aifs_share`, `aifs_unshare`, `aifs_get_permissions`, `aifs_transfer_ownership` (optional per backend), and `aifs_search` — plus an optional `if_revision` parameter on `aifs_write` for safe concurrent edits to shared state files. All ops execute under the calling member's OAuth identity; adapters never elevate privilege. The full operation specifications, including parameter schemas and backend-specific notes, live in `agent-index-filesystem/SPEC.md` v2.0. Consumer collections call these ops directly alongside the existing family — no capability-resolution layer is involved.
+
 ### Remote Access Failure Handling
 
 Remote connectivity may be unavailable (expired credentials, exec bundle missing, network issues). Collections should handle this gracefully:

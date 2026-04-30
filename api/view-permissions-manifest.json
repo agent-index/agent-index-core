@@ -1,28 +1,25 @@
 {
-  "name": "create-org",
+  "name": "view-permissions",
   "type": "task",
-  "display_name": "Create Org",
+  "display_name": "View Permissions",
   "collection": "agent-index-core",
-  "collection_version": "3.0.2",
-  "version": "3.0.1",
+  "collection_version": "3.1.0",
+  "version": "1.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
-  "stateful": true,
+  "stateful": false,
   "produces_artifacts": false,
   "produces_shared_artifacts": false,
-  "setup_template": "create-org-setup.md",
+  "setup_template": "view-permissions-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
   "dependencies": {
-    "skills": [
-      "member-bootstrap",
-      "org-setup"
-    ],
+    "skills": [],
     "tasks": []
   },
   "external_dependencies": [
-    "Remote filesystem backend"
+    "Remote filesystem exec bundle (gdrive contract v2.0+)"
   ],
   "optional_external_dependencies": [],
   "reads_from": null,

@@ -24,6 +24,13 @@ This repository is the starting point for every agent-index deployment.
 - **Edit Org** — manage admins, roles, adapter bundle, and launch the marketplace
 - **Upload Install Log** — uploads local install state to the remote filesystem for admin visibility
 
+**Member management tasks** (v3.1.0+, admin-only unless noted):
+- **Invite Member** — onboards a new member; creates their member directory, applies per-folder ACLs, sends install instructions
+- **Remove Member** — removes a member from the registry (Workspace IT handles Drive offboarding)
+- **View Permissions** *(member-facing)* — shows who has access to a resource on the remote filesystem
+- **View Audit Trail** — surfaces the audit trail for a resource (v1.0 navigates to Drive Activity; v2.0 will wrap the Activity API directly)
+- **Verify Workspace Policy** — diagnostic that confirms Workspace settings support the access-control model
+
 **Collection authoring tools**:
 - **Author Collection** — guided workflow for building a new marketplace-eligible collection
 - **Validate Collection** — checks a collection against the marketplace standards and reports compliance issues

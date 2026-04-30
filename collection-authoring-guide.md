@@ -309,6 +309,75 @@ The mixed pattern is the most complex and the most important to get right. State
 
 ---
 
+
+---
+
+## Designing for Native Permissions (v3.1.0+)
+
+Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder access control via the backend's native ACL system (Drive Permissions, OneDrive permissions, S3 IAM). Every member operates as themselves through their own OAuth credentials — agent-index never elevates privilege. This affects how you design collections that touch shared resources.
+
+### When to call `aifs_share`
+
+If your task creates a shared resource that has a member-level audience (e.g., a project folder, a bug report, an idea folder), the task must call `aifs_share` to grant the appropriate roles. The adapter's `aifs_share` operation maps to the backend's native sharing API; it executes as the calling member's identity, so they can only share what they themselves have authority to share.
+
+Pattern:
+
+```markdown
+### Step N: Apply ACLs to the new project folder
+
+1. `aifs_share("/shared/projects/{slug}/", "{owner_email}", "writer")`
+2. For each invited member: `aifs_share("/shared/projects/{slug}/", "{email}", "{role}")`
+3. After each share, poll `aifs_get_permissions("/shared/projects/{slug}/")` until the
+   subjects appear (Drive's permissions API is eventually consistent — up to ~5s).
+```
+
+Roles are the AIFS-level abstraction (`reader` / `commenter` / `writer`) and adapters map to native roles. Use `inherit: false` on the share when the resource should be visible *only* to the named subjects (not also to anyone with access to the parent folder) — used for path-B initial member dirs and Phase-5 scoped ideas.
+
+### When to call `aifs_unshare`
+
+Symmetric inverse, used when removing a member from a project, an idea, or any other shared resource. Returns `{unshared: false}` (a soft outcome, not an error) when the subject only had inherited access — handle that gracefully.
+
+### The `if_revision` pattern for shared state files
+
+Files that are written by multiple members concurrently (`activity-log.jsonl`, `action-items.json`, `members-registry.json`, etc.) should use revision-aware writes to avoid lost updates:
+
+```markdown
+### Step N: Append an event to the activity log (revision-aware)
+
+1. Read with revision: `{ content, revision } = aifs_read(path) + aifs_stat(path).revision`
+2. Append the new entry to `content` in memory.
+3. Write back: `aifs_write(path, new_content, if_revision=revision)`
+4. On `REVISION_CONFLICT`: re-read, re-apply the append, retry. Cap at 5 retries.
+```
+
+If you don't pass `if_revision`, you get the legacy unconditional-write behavior — that's fine for files only one writer touches, but risky for shared logs.
+
+### Tasks that produce shared artifacts must set their initial ACL
+
+Standards rule: if your task has `produces_shared_artifacts: true` AND it creates a new resource (vs. appending to an existing one), the task must include an ACL-setting step. Reasons:
+
+- The path-B target state (non-admin members aren't drive members) means a freshly-created folder is otherwise visible only to the creator. Without an explicit share, no other member — including the project's owner if they're someone else — can see it.
+- Future `validate-collection` checks will flag tasks producing shared artifacts that don't reference `aifs_share` in their workflow.
+
+The exception is resources whose ACL is fully covered by parent inheritance. If your task creates `/shared/projects/{slug}/ideas/{idea-slug}/` and the parent project folder already has the right shares, you may rely on inheritance — but document it clearly in the task workflow.
+
+### Keep `reads_from` and `writes_to` accurate
+
+These task frontmatter fields are documentation and input for the access-control runtime (`backfill-shares` reads them to know which paths to walk during the path-B cutover, and `validate-collection` cross-checks them against actual `aifs_*` calls in the workflow). Don't treat them as boilerplate — list every shared path the task touches.
+
+### Adapter contract version awareness
+
+Tasks that use `aifs_share` / `aifs_unshare` / `aifs_get_permissions` / `aifs_search` / `aifs_transfer_ownership` should declare a pre-flight check that the local adapter's `contract_version` is at `2.0.0` or higher. The pattern:
+
+```markdown
+### Pre-flight: adapter contract check
+
+Read local `mcp-servers/filesystem/adapter.json`. Verify `contract_version` is `>= "2.0.0"`. If not, surface: "This task requires the v3.1.0 adapter (contract v2.0). Run `@ai:update` first." and stop.
+```
+
+This protects members on partially-upgraded installs from confusing errors deep inside an op call.
+
+
 ## Writing Skill Directives
 
 Skills use a `Directives` section instead of numbered workflow steps. The structure is different because skills are reactive — they respond to whatever the member asks for.

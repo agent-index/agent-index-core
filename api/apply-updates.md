@@ -156,6 +156,33 @@ On confirmation: proceed to Step 5.
 
 Execute operations in dependency order. Each category is a phase — complete one phase before starting the next.
 
+**Phase 0 — Prerequisite checks**
+
+If the update plan includes a `core-update` with target version ≥ 3.1.0, run these prerequisite checks before any operations are applied. If a check fails, halt the update with a clear message — the member must resolve the prerequisite and re-run `@ai:update`.
+
+**Prerequisite: all_members_group must be configured.**
+
+The 3.1.0 release introduces native filesystem permissions, which depend on a Workspace-maintained Google Group whose membership is the authoritative agent-index member roster. Admin-published infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip, marketplace cache) are shared with this address.
+
+1. Read the local `org-config.json` and check `remote_filesystem.connection.all_members_group`.
+2. If the field is present and non-empty: the prerequisite is satisfied. Continue to Phase 1.
+3. If the field is missing or empty:
+   - Surface to the admin:
+     > **Prerequisite needed before applying agent-index-core 3.1.0:**
+     >
+     > 3.1.0 ships native filesystem permissions, which require a Workspace-level Google Group whose membership is the authoritative agent-index member roster. Admin-published files (CLAUDE.md, org-config, registry, bootstrap zip, marketplace cache) are shared with this group.
+     >
+     > Two things to confirm before continuing:
+     > 1. Does a group exist at the Workspace level with all current agent-index members in it? (e.g., `agent-index-all@{your-domain}`.) If not, create it via Google Workspace Admin Console or your IT team. The group must be configured to allow members of your domain to view content shared with it.
+     > 2. Once it exists, paste the full group address here and I'll write it to `org-config.json` and continue the upgrade.
+     >
+     > **Or, defer this upgrade.** Reply "later" and I'll exit cleanly. Re-run `@ai:update` once the group is in place.
+   - If the admin replies with an email address: validate that it is a syntactically valid email (contains `@` and a `.` after the `@`). Write the address to `org-config.json` at `remote_filesystem.connection.all_members_group`. Confirm: "Saved `{group_address}` to org-config.json. Continuing the upgrade." Proceed to Phase 1.
+   - If the admin replies "later" / "skip" / "defer": surface "Upgrade deferred. Your install remains at v{current}. Re-run `@ai:update` once the all-members group is configured." Exit cleanly without writing anything to local state.
+   - If the admin asks how to create the group: provide instructions — admin.google.com → Apps → Google Workspace → Groups for Business → create a new group with the address `agent-index-all@{your-domain}`, set "Who can view conversations" and "Who can view members" to "Members of organization", add all agent-index members. Then return to the prompt.
+
+This prerequisite check is gated on target version ≥ 3.1.0. Updates that do not include a `core-update` to 3.1.0+ skip this phase entirely.
+
 **Phase 1 — Infrastructure updates**
 
 If `core-update` is present:

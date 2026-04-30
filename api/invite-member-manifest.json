@@ -1,16 +1,16 @@
 {
-  "name": "publish-updates",
+  "name": "invite-member",
   "type": "task",
-  "display_name": "Publish Updates",
+  "display_name": "Invite Member",
   "collection": "agent-index-core",
-  "collection_version": "3.0.0",
-  "version": "3.0.0",
+  "collection_version": "3.1.0",
+  "version": "1.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
   "produces_artifacts": false,
   "produces_shared_artifacts": true,
-  "setup_template": "publish-updates-setup.md",
+  "setup_template": "invite-member-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
@@ -19,9 +19,10 @@
     "tasks": []
   },
   "external_dependencies": [
-    "Remote filesystem exec bundle"
+    "Remote filesystem exec bundle (gdrive contract v2.0+)",
+    "All-members Google Group"
   ],
   "optional_external_dependencies": [],
-  "reads_from": null,
-  "writes_to": "/shared/updates/"
+  "reads_from": "/members-registry.json",
+  "writes_to": "/members-registry.json,/members/,/shared/members/artifacts/"
 }

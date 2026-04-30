@@ -1,16 +1,16 @@
 {
-  "name": "edit-org",
+  "name": "remove-member",
   "type": "task",
-  "display_name": "Edit Org",
+  "display_name": "Remove Member",
   "collection": "agent-index-core",
-  "collection_version": "3.0.0",
-  "version": "3.0.0",
+  "collection_version": "3.1.0",
+  "version": "1.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
   "produces_artifacts": false,
-  "produces_shared_artifacts": false,
-  "setup_template": "edit-org-setup.md",
+  "produces_shared_artifacts": true,
+  "setup_template": "remove-member-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
@@ -22,6 +22,6 @@
     "Remote filesystem exec bundle"
   ],
   "optional_external_dependencies": [],
-  "reads_from": null,
-  "writes_to": null
+  "reads_from": "/members-registry.json",
+  "writes_to": "/members-registry.json"
 }

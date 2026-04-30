@@ -90,6 +90,11 @@ The general pattern: all task and skill definitions live at `/{collection}/api/{
 | `@ai:edit-org` or "edit org config" | edit-org task (admin only) |
 | `@ai:create-org` or "create org" | create-org task (admin only) |
 | `@ai:publish-updates` | publish-updates task (admin only) |
+| `@ai:invite-member` or "invite a member", "add a member" | invite-member task (admin only, v3.1.0+) |
+| `@ai:remove-member` or "remove a member", "offboard a member" | remove-member task (admin only, v3.1.0+) |
+| `@ai:view-permissions` or "who can see this", "show permissions" | view-permissions task (v3.1.0+) |
+| `@ai:view-audit` or "show audit trail", "view activity" | view-audit task (v3.1.0+) |
+| `@ai:verify-workspace-policy` or "verify workspace policy", "check workspace setup" | verify-workspace-policy task (admin only, v3.1.0+) |
 | `@ai:upload-install-log` | upload-install-log task |
 
 ### Marketplace aliases (available when `agent-index-marketplace` is installed)
