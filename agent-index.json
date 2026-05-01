@@ -1,6 +1,6 @@
 {
   "name": "agent-index",
-  "version": "3.0.0",
+  "version": "3.1.1",
   "library_root": "/",
   "core_path": "/agent-index-core/",
   "marketplace_path": "/agent-index-marketplace/",
@@ -28,6 +28,7 @@
   "bootstrap_zip_path": "/shared/bootstrap/member-bootstrap.zip",
   "marketplace_directory_url": "https://raw.githubusercontent.com/agent-index/agent-index-resource-listings/refs/heads/main/marketplace-directory.json",
   "filesystem_adapter_directory_url": "https://raw.githubusercontent.com/agent-index/agent-index-resource-listings/refs/heads/main/filesystem-adapter-directory.json",
+  "infrastructure_directory_url": "https://raw.githubusercontent.com/agent-index/agent-index-resource-listings/refs/heads/main/infrastructure-directory.json",
   "marketplace_cache_path": "/shared/marketplace-cache/",
   "marketplace_cache_ttl_hours": 24,
   "log_collector_url": "https://v1.logs.agent-index.ai/logs",

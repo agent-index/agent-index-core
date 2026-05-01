@@ -6,6 +6,19 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.1.1] — 2026-04-30
+
+### Added
+
+- **`infrastructure_directory_url` field** in `agent-index.json` template, pointing to the new `infrastructure-directory.json` in `agent-index-resource-listings`. Together with the `marketplace_directory_url` and `filesystem_adapter_directory_url` fields, this gives `check-updates` a single public, reachable place to discover infrastructure (core + marketplace) versions. Closes the gap left by `core_version_url` 404ing because the agent-index-core repo is private.
+- **`apply-updates` Phase 1 step 4 extended** to migrate new top-level fields onto existing local `agent-index.json` files during a `core-update`. Non-destructive: never overwrites a field the member has set, only adds fields absent locally that exist in the canonical template. As of 3.1.1, this auto-migration adds `infrastructure_directory_url` for installs upgrading from 3.1.0 or earlier.
+
+### Changed
+
+- `apply-updates` task v3.0.0 → v3.1.0 (the migration logic is a meaningful addition).
+
+---
+
 ## [3.1.0] — 2026-04-30
 
 ### Added
