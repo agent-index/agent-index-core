@@ -1,8 +1,8 @@
 {
   "name": "agent-index-core",
   "display_name": "Agent-Index Core",
-  "version": "3.1.1",
-  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial. v3.0.5: natural language triggers as first-class collection contract \u2014 triggers in collection.json, routing.json per member, session-start loads dynamic routing, org-setup writes defaults, preferences-management edits routing, author-collection and validate-collection updated. v3.0.4: CLAUDE.md natural-language-first routing. v3.0.3: deterministic API path patterns. v3.0.2: canonical CLAUDE.md template. v3.0.1: paste-URL-back OAuth flow. v3.0.0: on-demand executor.",
+  "version": "3.2.0",
+  "description": "Core infrastructure for the agent-index system. Provides session management, member bootstrap, org setup, preferences management, and the system tutorial. v3.2.0: org-setup management dashboard fixes \u2014 'Needs Attention' upgrade-available criterion now compares correctly against api/{name}.md frontmatter (strict less-than), and a new 'Removed from Collection' section surfaces orphaned member-index entries with a member-confirmed Remove action. v3.1.1: infrastructure-directory broadcast + apply-updates auto-migration of new top-level fields. v3.1.0: extended adapter contract v2.0 (share/unshare/permissions/transfer/search) and Phase 0 prerequisite check. v3.0.5: natural language triggers as first-class collection contract \u2014 triggers in collection.json, routing.json per member, session-start loads dynamic routing, org-setup writes defaults, preferences-management edits routing, author-collection and validate-collection updated. v3.0.4: CLAUDE.md natural-language-first routing. v3.0.3: deterministic API path patterns. v3.0.2: canonical CLAUDE.md template. v3.0.1: paste-URL-back OAuth flow. v3.0.0: on-demand executor.",
   "author": "agent-index",
   "license": "proprietary",
   "category": "infrastructure",

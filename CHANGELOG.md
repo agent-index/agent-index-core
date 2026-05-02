@@ -6,6 +6,28 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.2.0] — 2026-05-02
+
+### Fixed
+
+- **`org-setup` management dashboard "Needs Attention" — upgrade-available criterion was incorrect.** Pre-3.2.0 prose described the upgrade signal as "the collection version in the member index differs from the current collection version." Two errors in one sentence: (1) loose-equality (`differs from`) instead of strict less-than, and (2) the wrong field — `member-index.json` records the capability's `.md` frontmatter version (set by the install/upgrade flow that reads `aifs_read("/{collection}/api/{name}.md")`), not the collection-level `collection.json` `version`. Capabilities version independently of their parent collection, so a collection-level bump (trigger arrays, README polish, dependency manifest tweaks) does not imply any installed capability is out of date. The corrected criterion compares the per-capability `.md` frontmatter `version` against the member-index per-capability `version` using strict less-than semver. Local-ahead-of-remote is surfaced as an informational note rather than as an upgrade. Closes core-improvements idea `org-setup-capability-version-comparison-mismatch`. Same conceptual fix as marketplace 2.1.2 Step 4 (bug `20260430-8d20ea22`); the two surfaces now use identical comparison logic.
+
+### Added
+
+- **`org-setup` management dashboard — new "Removed from Collection" section.** During the dashboard scan, every member-index entry is now checked against `aifs_exists("/{collection}/api/{name}.md")`. Entries whose collection is reachable but whose capability file no longer exists are flagged as orphaned (the capability was removed in a later collection version) and listed in a new "Removed from Collection" dashboard section, separated from the *Installed* section. Each row offers a member-confirmed **Remove** action that triggers the existing "Removing an Installed Capability" flow — never auto-remove. Pairs with marketplace 2.1.2 Step 4's "capability removed from collection" classification: that fix produces the signal, this section consumes it. Closes core-improvements idea `org-setup-suggest-orphan-cleanup`.
+
+### Changed
+
+- `org-setup` skill v3.0.0 → v3.2.0 (dashboard scan and rendering changes; both fixes live in this single skill).
+- `collection.json` description rewritten to lead with the v3.2.0 changes.
+- All API-member manifests bumped to `collection_version: 3.2.0`.
+
+### Drift cleanup (surfaced by the new developer 1.2.2 preflight check)
+
+- **`member-bootstrap.md` frontmatter `version` corrected from 3.0.0 to 3.0.1.** This is pre-existing drift, not a 3.2.0 regression: commit `45544d6` ("OAuth flow fix 3.0.1," 2026-04-15) rewrote the member-bootstrap content for sandboxed environments and bumped `member-bootstrap-manifest.json` to `version: 3.0.1`, but the corresponding `.md` frontmatter was missed and stayed at `3.0.0`. The manifest was correct (it matched what was actually shipped); the `.md` frontmatter was the stale half. Self-running the new developer 1.2.2 preflight check against `agent-index-core` 3.2.0 surfaced this drift on the first run — exactly the case the new check is designed to catch. Bundled into this release rather than punted forward so the new check ships against a clean collection. No behavior change for installed members (the install/upgrade flow read frontmatter at install time, so existing dev_install entries record `member-bootstrap version: 3.0.0`; after `@ai:update` lands 3.2.0, the new "Needs Attention" upgrade-available comparison will see installed `3.0.0` < frontmatter `3.0.1` and flag a member-bootstrap upgrade — apply it as a normal upgrade).
+
+---
+
 ## [3.1.1] — 2026-04-30
 
 ### Added

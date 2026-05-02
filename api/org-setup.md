@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.0.0
+version: 3.2.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -225,15 +225,34 @@ When invoked by a member who has already completed onboarding, determine what th
 
 **Management Dashboard**
 
-Present three sections:
+Before rendering, perform the dashboard scan. For every entry in the member's `member-index.json`:
 
-*Installed* — all skills and tasks currently in `member-index.json`, with version, collection, and alias.
+1. Read its `collection` and `name` fields.
+2. Call `aifs_exists("/{collection}/api/{name}.md")`.
+   - If it exists: read the file, parse the frontmatter `version`. Cache the result for this run, keyed by full path, to avoid re-reading on later sections.
+   - If it does not exist (PATH_NOT_FOUND): mark the entry as **orphaned — removed from collection**. The capability's collection still exists but the file was removed in a later collection version.
+   - If the collection itself is unreachable (Step 3-style "missing — directory not found"): mark the entry as **collection unavailable** and exclude it from version comparison; surface in *Needs Attention* as a connectivity issue rather than as an upgrade signal.
+
+Present four sections:
+
+*Installed* — all skills and tasks currently in `member-index.json`, with version, collection, and alias. Excludes entries flagged as orphaned (those appear in *Removed from Collection* below).
 
 *Available* — skills and tasks in installed collections that are not yet in the member's index. Group by collection. Show the alias that would be assigned.
 
-*Needs Attention* — any installed capabilities with `eol_date` within the deprecation threshold, any with `dependency_status: incomplete`, any where the collection version in the member index differs from the current collection version (an upgrade is available).
+*Needs Attention* — any installed capabilities matching any of the following conditions. Each condition produces a distinct row type so the member can act on each appropriately:
 
-Offer actions: install something new, upgrade something, show details about a capability, or exit.
+- **`eol_date` within the deprecation threshold** — capability is approaching end-of-life.
+- **`dependency_status: incomplete`** — a dependency could not be resolved at install time.
+- **Upgrade available** — the member-index `version` (set by the install/upgrade flow from `api/{name}.md` frontmatter) is **older than** the current frontmatter `version` of the corresponding `api/{name}.md` on the remote filesystem. The comparison is strict less-than using semver: `installed_version < frontmatter_version` flags an upgrade. Equal versions are up-to-date. Local-ahead-of-remote (`installed_version > frontmatter_version`) is rare but possible and should be surfaced as an informational note ("local version is ahead of published") rather than as an upgrade.
+- **Collection unavailable** — the capability's collection is unreachable; surface so the member knows their dashboard view is incomplete.
+
+Do **not** compare the member-index per-capability `version` against `collection.json`'s `version` field. The member-index records the capability's `.md` frontmatter version at install/upgrade time, not the collection-level version. Capabilities version independently of their parent collection, so a collection-level bump (trigger arrays, README polish, etc.) does not imply any installed capability is out of date.
+
+*Removed from Collection* — any installed capabilities flagged as orphaned during the scan above (capability file no longer exists in its collection, but the collection itself is still reachable). For each, show: name, collection, member-index version recorded locally, and the alias. Offer a one-click **Remove** action for each entry that triggers the existing "Removing an Installed Capability" flow (see below) — never auto-remove. The member may want to keep the local installed copy for reference even though the capability is gone from the collection.
+
+If there are no orphaned entries, omit this section entirely from the dashboard render rather than showing an empty placeholder.
+
+Offer actions: install something new, upgrade something, remove an orphaned capability, show details about a capability, or exit.
 
 **Installing a Single Capability**
 
