@@ -6,6 +6,35 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.3.0] — 2026-05-04
+
+### Added
+
+- **`permission-change-helper` skill** (new in `agent-index-core/api/`). The canonical agent-callable surface for any task or skill that needs to modify access controls (`aifs_share` / `aifs_unshare` / `aifs_transfer_ownership`). Tasks invoke the skill with a structured spec; the skill validates, invokes the pre-built `agent-index-show-plan` binary, branches on the binary's terminal outcome, verifies post-state via `aifs_get_permissions`, and surfaces narration. Tasks must never call the underlying permission-modifying ops directly — the new section in `standards.md` codifies this. Closes the agent-side half of the architectural answer to bug `20260502-8d20ea22-4`.
+- **Helper binary + page template + apply-script** (new in `agent-index-core/lib/permission-helper/`). Pre-built Node infrastructure that ships with core. The `agent-index-show-plan` binary picks a random localhost port, generates a one-time session token, renders an HTML review page in the member's default browser, listens for the member's deliberate Accept click, and runs an apply-script that uses the **member's existing OAuth token** (via `aifs-exec.sh`) to make the actual permission change. Listener has full lifecycle handling for accept / reject / page-close-via-heartbeat-absence / 10-min idle timeout / SIGTERM / apply-failure with retry. Includes a `--cli` fallback for headless contexts. Zero npm runtime dependencies (Node stdlib only). Detailed in the access-control project's tech design at `/shared/projects/access-control/artifacts/permission-change-helper-tech-design.md`.
+- **`apply-updates` Phase 1 step 6** (new step): on a `core-update`, the task now installs or refreshes `mcp-servers/permission-helper/` from `agent-index-core/lib/permission-helper/` on remote. Recursive listing so future helper additions are picked up automatically; `chmod +x` for the executable scripts; idempotent on re-runs. Without this install path, the new skill's invocation of `bash mcp-servers/permission-helper/show-plan.sh` would fail.
+- **`standards.md` § "Permission-Modifying Operations"** new section codifying the rule: tasks call `permission-change-helper`, never `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly. Lays out the required pattern for collections, what the helper is and isn't, and the future-adapter contract (call into core's helper as a peer; do not implement adapter-specific helpers).
+
+### Fixed
+
+- **`org-setup` "Upgrading an Installed Capability" — local file content was not being rewritten on per-capability bump (closes bug `20260502-8d20ea22-5`).** Pre-3.3.0 prose for the MINOR/PATCH branch said "apply the new definition directly, carry all existing setup responses forward unchanged, update the version in `member-index.json`." The "apply the new definition directly" phrasing was loose enough that agents interpreted it as "just bump the bookkeeping," skipping the actual file-content rewrite. The result was bookkeeping (member-index.json) saying one version while the on-disk installed file frontmatter remained at the pre-update version. Surfaced during the dev_install verification of 3.2.0 + developer 1.2.2: preflight reported "local install is stale at 1.1.0" while member-index recorded `preflight 1.2.2`. The fix makes the file-rewrite step explicit and unambiguous in both the upgrade-script and the no-upgrade-script branches: read the new content from remote (.md, -setup.md, -manifest.json), write each to the corresponding local installed path, then update member-index.json. The "no upgrade script" branch is *not* a bookkeeping-only operation.
+
+### Changed
+
+- `org-setup` skill v3.2.0 → v3.2.1 (upgrade-flow prose tightened; behavior fix only — no new functionality).
+- `apply-updates` task v3.1.0 → v3.2.0 (new Phase 1 step 6 install plumbing; behavior addition).
+- `collection.json` description rewritten to lead with the v3.3.0 changes.
+- `collection.json` `api` array adds `permission-change-helper` (new entry, no triggers — plumbing skill is invoked by other tasks, never by members directly).
+- All API-member manifests bumped to `collection_version: 3.3.0`.
+
+### Implementation notes
+
+- The helper ships dormant in 3.3.0 — no consumer task in this release calls it. The v3.1.0+ admin task family (`invite-member`, `remove-member`, etc.) gets rewritten in a follow-up release to delegate permission-modifying steps through the helper. Tracking idea: `admin-tasks-use-permission-plan-pattern` in `core-improvements`.
+- End-to-end functionality of the helper's apply-script depends on bug `20260502-8d20ea22-2` (gdrive 2.2.0 ships a manifest declaring contract 2.0 + new ops, but the bundle is byte-identical to 2.1.3 and contains none of them). Until that bug is fixed, every `aifs_share` call from the apply-script will return `AIFS_EXEC_FAILED`. The helper itself works structurally; the underlying bundle is the gap.
+- The `--cli` fallback is the recommended workaround for any environment where browser-launch is not viable; it accepts the same spec format and produces the same JSON status report on stdout.
+
+---
+
 ## [3.2.0] — 2026-05-02
 
 ### Fixed

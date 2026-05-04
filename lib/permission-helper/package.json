@@ -1,0 +1,26 @@
+{
+  "name": "agent-index-permission-helper",
+  "version": "1.0.0",
+  "description": "Pre-built helper for the agent-index permission-change pattern. Renders an HTML review page in the member's browser, listens for member-clicked Accept, and runs an apply-script that uses the member's existing OAuth token to call permission-modifying ops via aifs-exec.sh.",
+  "private": true,
+  "main": "show-plan.js",
+  "bin": {
+    "agent-index-show-plan": "./show-plan.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "files": [
+    "show-plan.js",
+    "show-plan.sh",
+    "listener.js",
+    "lifecycle.js",
+    "apply.js",
+    "template.js",
+    "validate.js",
+    "templates/page.html",
+    "README.md"
+  ]
+}

@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'">
+<title>agent-index permission change</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #1a1a1a; line-height: 1.45; }
+  h1 { font-size: 1.3em; margin-bottom: 0.2em; }
+  .subtitle { color: #666; margin-bottom: 1.5em; font-size: 0.9em; }
+  .summary { background: #f5f7fa; border-left: 4px solid #4a7fbe; padding: 1em 1.2em; margin-bottom: 1.5em; border-radius: 4px; }
+  .summary .purpose { font-size: 1.05em; font-weight: 500; }
+  .summary .meta { font-size: 0.85em; color: #555; margin-top: 0.4em; }
+  .selected-count { margin-bottom: 1em; font-weight: 500; color: #444; }
+  .op { border: 1px solid #ddd; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 0.8em; }
+  .op.excluded { background: #f9f9f9; opacity: 0.55; }
+  .op-header { display: flex; align-items: center; gap: 0.6em; margin-bottom: 0.6em; }
+  .op-header input[type=checkbox] { transform: scale(1.2); cursor: pointer; }
+  .op-badge { display: inline-block; font-size: 0.75em; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; letter-spacing: 0.04em; }
+  .op-badge.share { background: #e7f5ec; color: #1d6b3d; }
+  .op-badge.unshare { background: #fce9ea; color: #93242a; }
+  .op-badge.transfer_ownership { background: #fff3dc; color: #8d5a06; }
+  .resource { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.95em; color: #222; }
+  .editable-row { display: grid; grid-template-columns: 1fr 9em; gap: 0.5em; margin: 0.6em 0; }
+  .editable-row input, .editable-row select { padding: 0.45em 0.6em; font-size: 0.95em; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+  .editable-row input.invalid { border-color: #c0392b; background: #fdedeb; }
+  .diff { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85em; margin-top: 0.6em; padding: 0.6em 0.8em; background: #fafafa; border-radius: 4px; }
+  .diff .label { color: #666; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3em; }
+  .diff .row { padding: 0.1em 0; }
+  .diff .added { color: #1d6b3d; }
+  .diff .added::before { content: "+ "; }
+  .diff .removed { color: #93242a; text-decoration: line-through; }
+  .diff .removed::before { content: "− "; }
+  .actions { display: flex; gap: 1em; margin-top: 2em; padding-top: 1.5em; border-top: 1px solid #eee; }
+  .btn { padding: 0.7em 1.4em; font-size: 1em; border: none; border-radius: 5px; cursor: pointer; font-family: inherit; font-weight: 500; }
+  .btn-primary { background: #4a7fbe; color: white; }
+  .btn-primary:hover { background: #3d6ba3; }
+  .btn-primary:disabled { background: #b0b8c4; cursor: not-allowed; }
+  .btn-secondary { background: #eee; color: #444; }
+  .btn-secondary:hover { background: #ddd; }
+  .footer-note { color: #888; font-size: 0.82em; margin-top: 1.5em; }
+  .modal-backdrop { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-backdrop.visible { display: flex; }
+  .modal { background: white; border-radius: 8px; padding: 1.5em 1.8em; max-width: 540px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+  .modal h2 { margin-top: 0; font-size: 1.15em; }
+  .modal ul { padding-left: 1.4em; margin: 0.6em 0; }
+  .modal li { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9em; }
+  .modal-actions { display: flex; gap: 0.8em; margin-top: 1.4em; justify-content: flex-end; }
+  .progress-row .status { display: inline-block; width: 1.1em; text-align: center; margin-right: 0.4em; }
+  .progress-row .status.pending { color: #aaa; }
+  .progress-row .status.applying { color: #4a7fbe; }
+  .progress-row .status.success { color: #1d6b3d; }
+  .progress-row .status.failure { color: #93242a; }
+  .progress-msg { font-size: 0.9em; color: #555; margin-left: 0.5em; }
+  .banner { padding: 0.8em 1.1em; border-radius: 5px; margin-bottom: 1em; display: none; }
+  .banner.visible { display: block; }
+  .banner.warn { background: #fff7e0; border-left: 4px solid #d48a13; }
+  .banner.error { background: #fce9ea; border-left: 4px solid #93242a; }
+  .banner.success { background: #e7f5ec; border-left: 4px solid #1d6b3d; }
+  .verify-list { list-style: none; padding-left: 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.88em; }
+  .verify-list li { padding: 0.15em 0; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>agent-index — permission change</h1>
+<div class="subtitle">Review the proposed changes below. Nothing happens until you click Accept.</div>
+
+<div id="banner" class="banner"></div>
+
+<div id="review-view">
+  <div class="summary">
+    <div class="purpose" id="purpose"></div>
+    <div class="meta">
+      Requested by: <span id="requestor"></span>
+      <span id="from-task-wrap"> · From task: <span id="from-task"></span></span>
+    </div>
+  </div>
+
+  <div class="selected-count" id="selected-count"></div>
+  <div id="ops-container"></div>
+
+  <div class="actions">
+    <button class="btn btn-secondary" id="btn-reject">Reject</button>
+    <button class="btn btn-primary" id="btn-accept">Accept</button>
+  </div>
+  <div class="footer-note">
+    Closing this page without clicking either button will cancel the request after a short timeout.
+  </div>
+</div>
+
+<div id="apply-view" class="hidden">
+  <h2 style="font-size: 1.1em;">Applying changes…</h2>
+  <div id="apply-rows"></div>
+</div>
+
+<div id="error-view" class="hidden">
+  <h2 style="font-size: 1.1em;">Some operations failed</h2>
+  <div id="error-summary"></div>
+  <ul id="error-rows"></ul>
+  <div class="actions">
+    <button class="btn btn-secondary" id="btn-close">Close without retrying</button>
+    <button class="btn btn-primary" id="btn-retry">Retry failed operations</button>
+  </div>
+</div>
+
+<div id="done-view" class="hidden">
+  <h2 style="font-size: 1.1em;">✓ All operations applied</h2>
+  <p>Verifying with the backend…</p>
+  <ul class="verify-list" id="verify-list"></ul>
+  <p style="color: #666; margin-top: 1.5em;">You can close this page.</p>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <h2>Confirm permission change</h2>
+    <p id="modal-summary"></p>
+    <div id="modal-resources"></div>
+    <p style="font-size: 0.9em; color: #666;">
+      This will execute against your backend storage using your current credentials.
+      Progress will be shown live on this page.
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- Bootstrap from injected spec ----
+  const SPEC = __SPEC__;
+  const TOKEN = "__TOKEN__";
+
+  // Per-op editable state, keyed by index. The page mutates this; on submit
+  // we build the final spec from the original + edits + exclusions.
+  const edits = SPEC.operations.map(op => ({
+    excluded: false,
+    recipient: op.recipient,
+    role: op.role || null,
+  }));
+
+  // ---- DOM helpers ----
+  function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    if (attrs) {
+      for (const k of Object.keys(attrs)) {
+        if (k === 'class') e.className = attrs[k];
+        else if (k.startsWith('on')) e.addEventListener(k.slice(2), attrs[k]);
+        else e.setAttribute(k, attrs[k]);
+      }
+    }
+    for (const c of children) {
+      if (c == null) continue;
+      e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+
+  function emailLooksValid(s) {
+    return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s || '');
+  }
+
+  // ---- Initial render ----
+  function renderHeader() {
+    document.getElementById('purpose').textContent = SPEC.context.purpose;
+    document.getElementById('requestor').textContent = SPEC.context.requestor;
+    if (SPEC.context.calling_task) {
+      document.getElementById('from-task').textContent = SPEC.context.calling_task;
+    } else {
+      document.getElementById('from-task-wrap').classList.add('hidden');
+    }
+  }
+
+  function updateSelectedCount() {
+    const total = SPEC.operations.length;
+    const selected = edits.filter(e => !e.excluded).length;
+    document.getElementById('selected-count').textContent =
+      `${selected} of ${total} operation${total === 1 ? '' : 's'} will be applied`;
+    document.getElementById('btn-accept').disabled = selected === 0 || hasInvalidEdits();
+  }
+
+  function hasInvalidEdits() {
+    return edits.some((e, i) => !e.excluded && !emailLooksValid(e.recipient));
+  }
+
+  function renderOps() {
+    const container = document.getElementById('ops-container');
+    container.innerHTML = '';
+    SPEC.operations.forEach((op, i) => {
+      const row = el('div', { class: 'op', id: 'op-' + i });
+      const checkbox = el('input', { type: 'checkbox', checked: 'checked', onchange: function () {
+        edits[i].excluded = !this.checked;
+        row.classList.toggle('excluded', edits[i].excluded);
+        updateSelectedCount();
+      }});
+      const badge = el('span', { class: 'op-badge ' + op.op }, op.op.replace('_', ' '));
+      const resource = el('span', { class: 'resource' }, op.resource);
+      const opNum = el('span', { style: 'color: #666; font-size: 0.85em;' },
+        'Op ' + (i + 1) + ' of ' + SPEC.operations.length + ' · ');
+      row.appendChild(el('div', { class: 'op-header' },
+        checkbox, opNum, badge, resource));
+
+      // Editable recipient + role for share; recipient only for unshare/transfer.
+      const editRow = el('div', { class: 'editable-row' });
+      const recipInput = el('input', {
+        type: 'email',
+        value: op.recipient,
+        onchange: function () { edits[i].recipient = this.value; this.classList.toggle('invalid', !emailLooksValid(this.value)); updateSelectedCount(); renderDiff(i); },
+        oninput: function () { edits[i].recipient = this.value; },
+      });
+      editRow.appendChild(recipInput);
+      if (op.op === 'share') {
+        const select = el('select', { onchange: function () { edits[i].role = this.value; renderDiff(i); }});
+        ['Reader', 'Commenter', 'Writer'].forEach(r => {
+          const opt = el('option', { value: r }, r);
+          if (r === op.role) opt.setAttribute('selected', 'selected');
+          select.appendChild(opt);
+        });
+        editRow.appendChild(select);
+      } else {
+        editRow.appendChild(el('span', { style: 'color: #777; font-size: 0.9em; padding-top: 0.5em;' },
+          op.op === 'unshare' ? '(removing access)' : '(transferring ownership to)'));
+      }
+      row.appendChild(editRow);
+
+      // Diff view.
+      row.appendChild(el('div', { class: 'diff', id: 'diff-' + i }));
+      renderDiff(i, row.querySelector('#diff-' + i));
+
+      container.appendChild(row);
+    });
+  }
+
+  function renderDiff(i, target) {
+    const op = SPEC.operations[i];
+    const e = edits[i];
+    const diffEl = target || document.getElementById('diff-' + i);
+    if (!diffEl) return;
+    diffEl.innerHTML = '';
+
+    const before = (op.before && op.before.recipients) ? op.before.recipients : null;
+    if (!before) {
+      diffEl.appendChild(el('div', { class: 'label' }, 'will:'));
+      const summary = op.op === 'share'
+        ? `${e.recipient} will gain ${e.role || op.role}`
+        : op.op === 'unshare'
+        ? `${e.recipient} will lose access`
+        : `${e.recipient} will become Owner`;
+      diffEl.appendChild(el('div', { class: 'row' }, summary));
+      diffEl.appendChild(el('div', { class: 'label', style: 'opacity: 0.7;' }, '(current state unknown)'));
+      return;
+    }
+
+    diffEl.appendChild(el('div', { class: 'label' }, 'currently:'));
+    before.forEach(r => diffEl.appendChild(el('div', { class: 'row' }, `${r.email} (${r.role})`)));
+
+    diffEl.appendChild(el('div', { class: 'label' }, 'after:'));
+    if (op.op === 'share') {
+      const existing = before.find(r => r.email === e.recipient);
+      const after = before.filter(r => r.email !== e.recipient);
+      after.forEach(r => diffEl.appendChild(el('div', { class: 'row' }, `${r.email} (${r.role})`)));
+      diffEl.appendChild(el('div', { class: 'row added' }, `${e.recipient} (${e.role || op.role})`));
+      if (existing) {
+        diffEl.appendChild(el('div', { class: 'row removed' }, `${existing.email} (${existing.role})`));
+      }
+    } else if (op.op === 'unshare') {
+      before.forEach(r => {
+        if (r.email === e.recipient) diffEl.appendChild(el('div', { class: 'row removed' }, `${r.email} (${r.role})`));
+        else diffEl.appendChild(el('div', { class: 'row' }, `${r.email} (${r.role})`));
+      });
+    } else if (op.op === 'transfer_ownership') {
+      before.forEach(r => {
+        const role = r.email === e.recipient ? 'Owner' : (r.role === 'Owner' ? 'Writer' : r.role);
+        diffEl.appendChild(el('div', { class: 'row' }, `${r.email} (${role})`));
+      });
+    }
+  }
+
+  // ---- Submit ----
+  function buildSubmittedSpec() {
+    return {
+      ...SPEC,
+      operations: SPEC.operations.map((op, i) => ({
+        ...op,
+        recipient: edits[i].recipient,
+        role: op.op === 'share' ? edits[i].role || op.role : op.role,
+        excluded: edits[i].excluded,
+      })),
+    };
+  }
+
+  function showModal() {
+    const spec = buildSubmittedSpec();
+    const included = spec.operations.filter(o => !o.excluded);
+    document.getElementById('modal-summary').textContent =
+      `About to apply ${included.length} permission change${included.length === 1 ? '' : 's'}.`;
+    const list = el('ul');
+    included.forEach(o => list.appendChild(el('li', null, `${o.op}  ${o.resource}  →  ${o.recipient}${o.role ? ' (' + o.role + ')' : ''}`)));
+    const resources = document.getElementById('modal-resources');
+    resources.innerHTML = '';
+    resources.appendChild(list);
+    document.getElementById('modal-backdrop').classList.add('visible');
+  }
+  function hideModal() {
+    document.getElementById('modal-backdrop').classList.remove('visible');
+  }
+
+  async function postApply() {
+    hideModal();
+    document.getElementById('review-view').classList.add('hidden');
+    document.getElementById('apply-view').classList.remove('hidden');
+    renderApplyRows();
+    try {
+      const res = await fetch('/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': TOKEN },
+        body: JSON.stringify(buildSubmittedSpec()),
+      });
+      if (!res.ok) {
+        showBanner('error', 'The local helper rejected the apply request: ' + res.status);
+      }
+    } catch (e) {
+      showBanner('error', 'Could not reach the local helper: ' + e.message);
+    }
+  }
+
+  async function postReject() {
+    try {
+      await fetch('/reject', { method: 'POST', headers: { 'X-Session-Token': TOKEN } });
+    } catch (e) {}
+    document.getElementById('review-view').classList.add('hidden');
+    showBanner('warn', 'Rejected. No permissions were modified.');
+  }
+
+  function renderApplyRows() {
+    const spec = buildSubmittedSpec();
+    const container = document.getElementById('apply-rows');
+    container.innerHTML = '';
+    spec.operations.forEach((op, i) => {
+      if (op.excluded) return;
+      const row = el('div', { class: 'progress-row', id: 'progress-' + i });
+      row.appendChild(el('span', { class: 'status pending', id: 'progress-status-' + i }, '◯'));
+      row.appendChild(el('span', null, `${op.op}  ${op.resource}  →  ${op.recipient}`));
+      row.appendChild(el('span', { class: 'progress-msg', id: 'progress-msg-' + i }, ''));
+      container.appendChild(row);
+    });
+  }
+
+  function setOpStatus(i, statusClass, glyph, msg) {
+    const s = document.getElementById('progress-status-' + i);
+    const m = document.getElementById('progress-msg-' + i);
+    if (s) { s.className = 'status ' + statusClass; s.textContent = glyph; }
+    if (m && msg !== undefined) m.textContent = msg;
+  }
+
+  // ---- SSE ----
+  const failed = [];
+  const successful = [];
+  let verified = [];
+
+  function connectSSE() {
+    const es = new EventSource('/events?token=' + encodeURIComponent(TOKEN));
+    es.addEventListener('message', (ev) => {
+      let data;
+      try { data = JSON.parse(ev.data); } catch (e) { return; }
+      handleEvent(data);
+    });
+    es.addEventListener('error', () => { /* keepalives + reconnects handled by EventSource */ });
+    return es;
+  }
+
+  function handleEvent(ev) {
+    if (ev.type === 'connected') {
+      // SSE connection established.
+    } else if (ev.type === 'op_pending') {
+      setOpStatus(ev.op_index, 'applying', '⟳', 'Applying...');
+    } else if (ev.type === 'op_progress') {
+      setOpStatus(ev.op_index, 'applying', '⟳', ev.message || 'Applying...');
+    } else if (ev.type === 'op_complete') {
+      setOpStatus(ev.op_index, 'success', '✓', 'Applied');
+      successful.push(ev.op_index);
+      if (ev.verified_state) verified.push({ op_index: ev.op_index, state: ev.verified_state });
+    } else if (ev.type === 'op_failed') {
+      setOpStatus(ev.op_index, 'failure', '✗', (ev.error && ev.error.message) || 'Failed');
+      failed.push({ op_index: ev.op_index, error: ev.error });
+    } else if (ev.type === 'done') {
+      onDone(ev);
+    } else if (ev.type === 'keepalive') {
+      // No-op.
+    }
+  }
+
+  function onDone(ev) {
+    if ((ev.failed || []).length === 0) {
+      // Pure success.
+      document.getElementById('apply-view').classList.add('hidden');
+      document.getElementById('done-view').classList.remove('hidden');
+      const list = document.getElementById('verify-list');
+      list.innerHTML = '';
+      (ev.verified_post_state || []).forEach(v => {
+        const recipients = (v.recipients || []).map(r => `${r.email} (${r.role})`).join(', ');
+        list.appendChild(el('li', null, `✓  ${v.resource}  →  ${recipients}`));
+      });
+    } else {
+      document.getElementById('apply-view').classList.add('hidden');
+      document.getElementById('error-view').classList.remove('hidden');
+      const summary = document.getElementById('error-summary');
+      summary.innerHTML = '';
+      summary.appendChild(el('p', null, `${(ev.successful || []).length} of ${(ev.successful || []).length + (ev.failed || []).length} operations applied successfully. Failed operations:`));
+      const rows = document.getElementById('error-rows');
+      rows.innerHTML = '';
+      (ev.failed || []).forEach(f => {
+        const op = SPEC.operations[f.op_index];
+        rows.appendChild(el('li', null, `${op.op} ${op.resource} → ${op.recipient}: ${(f.error && f.error.message) || (f.error && f.error.code) || 'unknown error'}`));
+      });
+    }
+  }
+
+  function showBanner(kind, msg) {
+    const b = document.getElementById('banner');
+    b.className = 'banner visible ' + kind;
+    b.textContent = msg;
+  }
+
+  // ---- Heartbeat (every 5s while page is up) ----
+  function startHeartbeat() {
+    setInterval(() => {
+      fetch('/heartbeat', { method: 'POST', headers: { 'X-Session-Token': TOKEN } }).catch(() => {});
+    }, 5000);
+    // Also one on beforeunload as a courtesy.
+    window.addEventListener('beforeunload', () => {
+      try { navigator.sendBeacon('/heartbeat?bye=1&token=' + encodeURIComponent(TOKEN)); } catch (e) {}
+    });
+  }
+
+  // ---- Wire up ----
+  renderHeader();
+  renderOps();
+  updateSelectedCount();
+  document.getElementById('btn-accept').addEventListener('click', () => {
+    if (hasInvalidEdits()) return;
+    showModal();
+  });
+  document.getElementById('btn-reject').addEventListener('click', postReject);
+  document.getElementById('modal-cancel').addEventListener('click', hideModal);
+  document.getElementById('modal-confirm').addEventListener('click', postApply);
+  document.getElementById('btn-close').addEventListener('click', () => {
+    fetch('/reject', { method: 'POST', headers: { 'X-Session-Token': TOKEN } }).catch(() => {});
+    showBanner('warn', 'Closed without retry. Successfully-applied operations are still in effect.');
+    document.getElementById('error-view').classList.add('hidden');
+  });
+  document.getElementById('btn-retry').addEventListener('click', async () => {
+    const retrySpec = {
+      ...SPEC,
+      operations: failed.map(f => SPEC.operations[f.op_index]).map((op, i) => ({
+        ...op,
+        recipient: edits[op._original_index !== undefined ? op._original_index : i].recipient,
+        role: op.role,
+      })),
+    };
+    try {
+      await fetch('/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': TOKEN },
+        body: JSON.stringify(retrySpec),
+      });
+      document.getElementById('error-view').classList.add('hidden');
+      document.getElementById('apply-view').classList.remove('hidden');
+      // Reset per-op rows for the retry batch.
+      renderApplyRows();
+    } catch (e) {
+      showBanner('error', 'Retry failed to reach the helper: ' + e.message);
+    }
+  });
+
+  connectSSE();
+  startHeartbeat();
+})();
+</script>
+
+</body>
+</html>

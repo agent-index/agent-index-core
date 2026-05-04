@@ -1,26 +1,25 @@
 {
-  "name": "org-setup",
+  "name": "permission-change-helper",
   "type": "skill",
-  "display_name": "Org Setup",
+  "display_name": "Permission Change Helper",
   "collection": "agent-index-core",
   "collection_version": "3.3.0",
-  "version": "3.2.1",
+  "version": "1.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
-  "stateful": true,
+  "stateful": false,
   "always_on_eligible": false,
-  "setup_template": "org-setup-setup.md",
+  "setup_template": "permission-change-helper-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
   "dependencies": {
-    "skills": [
-      "member-bootstrap",
-      "preferences-management"
-    ],
+    "skills": [],
     "tasks": []
   },
   "external_dependencies": [
-    "Remote filesystem exec bundle"
-  ]
+    "Permission-helper binary",
+    "Browser"
+  ],
+  "optional_external_dependencies": []
 }

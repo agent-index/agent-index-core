@@ -534,6 +534,43 @@ Remote connectivity may be unavailable (expired credentials, exec bundle missing
 
 ---
 
+## Permission-Modifying Operations
+
+The v2.0 adapter contract introduced operations that modify access controls — `aifs_share`, `aifs_unshare`, `aifs_transfer_ownership` — alongside the read-only `aifs_get_permissions`. The read-only op is callable by collections directly. The three permission-modifying ops are **never** callable by collections directly. They go through the agent-index permission helper.
+
+### Why permission-modifying ops are gated
+
+Agents running inside any Claude-based execution context are categorically prohibited from making security-changing calls on the user's behalf, even with explicit authorization, because agents can be manipulated (prompt injection, tool result manipulation, social engineering) and any architecture that lets a manipulated agent change permissions is the attack the safety boundary is trying to prevent. A consumer collection workflow that asks the executing agent to call `aifs_share` directly will halt at that step and the task will not complete. This is by design.
+
+The permission helper closes this gap by routing the privileged call out of the agent's call stack: the agent prepares a structured spec describing the proposed change, surfaces a review page in the member's browser, and the member's deliberate Accept click triggers an apply-script that uses the **member's existing OAuth token** to call the privileged op. The agent never directly initiates the permission change; the member does, with their own credentials, after explicit review.
+
+The helper's source lives in `agent-index-core/lib/permission-helper/` and is installed at runtime to `mcp-servers/permission-helper/` (analog to how `mcp-servers/filesystem/` is populated by the gdrive adapter). The agent-side skill `permission-change-helper` (in `agent-index-core/api/`) is the only callable surface; collections invoke that skill, not the underlying binary directly. The full architecture, lifecycle, and wire protocol are documented in `/shared/projects/access-control/decisions/permission-change-via-plan-page.md` (decision record) and `/shared/projects/access-control/artifacts/permission-change-helper-tech-design.md` (tech design).
+
+### Required pattern for collections
+
+Any task or skill that modifies access controls must:
+
+1. Call the read-only `aifs_get_permissions` op first to capture current state (used as the `before` field in the spec for diff visualization).
+2. Build a permission-change spec describing the proposed operations. Spec format documented in the tech design above.
+3. Invoke the `permission-change-helper` skill with the spec.
+4. Branch on the helper's outcome:
+   - **applied** — read post-state via `aifs_get_permissions` to confirm and continue task workflow
+   - **rejected** — surface to the member that the change was declined, halt task gracefully (and roll back any prior task state that depended on the share happening, if applicable)
+   - **timed_out / page_closed** — surface the ambiguous state, offer to retry the step
+   - **partial_failure** — surface what succeeded and what didn't, offer to retry just the failed ops
+   - **apply_error** — surface the error in detail, halt
+5. Continue the task workflow only after a successful apply has been verified post-state.
+
+Tasks that previously called `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly (e.g. v3.1.0+ admin tasks before they're rewritten) are authoring errors. Preflight v1.2.X+ flags any direct call to these ops in a task workflow as an error.
+
+### What the helper is NOT
+
+The helper is not a privileged service. It does not hold its own OAuth credential. It does not elevate privilege. It cannot make permission changes that the calling member doesn't already have authority to make. Adapters never call the helper directly — only collections (via the agent-side skill) do. The helper is purely orchestration: it produces a review page, listens for the member's Accept, and runs an apply-script that uses the member's existing token.
+
+This pattern is the canonical answer to bug `20260502-8d20ea22-4` (access-control execution-context mismatch). Future adapters (S3, OneDrive, Dropbox) call into core's permission-helper as a peer; they do not implement adapter-specific helpers.
+
+---
+
 ## Shared Artifacts and Data
 
 Collections that produce data visible to other members or that aggregate data across the org use the shared artifact system. The shared filesystem root is `/shared/` on the remote filesystem.

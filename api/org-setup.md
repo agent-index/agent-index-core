@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.2.0
+version: 3.2.1
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -267,17 +267,22 @@ When a member asks to install a specific skill or task:
 When a member asks to upgrade, or when upgrading is triggered from the management dashboard:
 
 1. Read the current version from the member's local `member-index.json`
-2. Read the new version's definition and setup template from the remote collection via `aifs_read("/{collection}/api/{name}.md")` and `aifs_read("/{collection}/api/{name}-setup.md")`
+2. Read the new version's definition, setup template, and manifest from the remote collection via three calls:
+   - `aifs_read("/{collection}/api/{name}.md")` — capability definition
+   - `aifs_read("/{collection}/api/{name}-setup.md")` — setup template
+   - `aifs_read("/{collection}/api/{name}-manifest.json")` — manifest
 3. Read the member's existing local `setup-responses.md`
 4. Run the upgrade flow from the collection's upgrade script (read via `aifs_read("/{collection}/upgrade/{old-version}-to-{new-version}.md")`) if one exists for this version boundary
 5. Migrate preserved responses automatically
 6. Present reset parameters and new parameters to the member for input
 7. Produce the migration report: preserved / reset / requires attention
-8. Write the updated installed instance, `setup-responses.md`, `manifest.json`
+8. **Write the new version's content to the member's local installed instance.** This is a content-replacement step, not a bookkeeping step:
+   - Write the contents read in step 2 to the corresponding local files at `members/{member_hash}/installed/{type}/{name}/` — `{name}.md`, `{name}-setup.md`, `{name}-manifest.json`. The local file content must match what's on remote at the new version.
+   - Write the migrated `setup-responses.md`.
 9. Update the version in `member-index.json`
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
 
-If no upgrade script exists for this version boundary (MINOR or PATCH upgrade): apply the new definition directly, carry all existing setup responses forward unchanged, update the version in `member-index.json`.
+**If no upgrade script exists for this version boundary (MINOR or PATCH upgrade):** still perform steps 2 and 8 — read the new content from remote and write it to the local install path. Carry all existing setup responses forward unchanged. Update the version in `member-index.json`. The "no upgrade script" branch is *not* a bookkeeping-only operation — the actual file content must be replaced. Skipping step 8 leaves the local file stale relative to what `member-index.json` claims is installed (which is the failure mode in bug `20260502-8d20ea22-5`).
 
 **Removing an Installed Capability**
 

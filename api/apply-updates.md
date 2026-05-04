@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.1.0
+version: 3.2.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -191,8 +191,13 @@ If `core-update` is present:
 3. Overwrite the local core files with the updated versions
 4. Update the local `agent-index.json` version field. Also migrate any new top-level fields that are present in the canonical `agent-index-core/agent-index.json` template (read from remote) but missing locally. Specifically as of 3.1.1: if `infrastructure_directory_url` is missing locally, copy it from the canonical template — without it, `check-updates` cannot determine the latest core or marketplace version. Field migrations are non-destructive: never overwrite a field the member has already set, only add fields that are absent.
 5. **Clean up deprecated v2 artifacts:** If `agent-index-core/tools/aifs-bridge/` exists locally, delete the entire directory (it contains `aifs-bridge.mjs` and `aifs-call.sh` which reference the removed `server.bundle.js`). Also delete `mcp-servers/filesystem/server.bundle.js` if present. These are pre-v3 artifacts that cause errors if Claude discovers and tries to use them.
-6. **Merge triggers into routing.json.** After updating core files, check the updated `agent-index-core/collection.json` for trigger arrays. If present and `routing.json` exists (or was created by a previous phase in this update), merge new triggers using the same logic as Phase 4 step 4. Core capabilities (org-setup, preferences-management, system-tutorial, apply-updates, author-collection, validate-collection) have triggers that should appear in routing.json alongside member-installed collection triggers.
-7. Surface: "agent-index-core updated to {target_version}."
+6. **Install or refresh `mcp-servers/permission-helper/`** (added in core 3.3.0): If the upgraded `agent-index-core` includes a `lib/permission-helper/` directory at remote (check via `aifs_list("/agent-index-core/lib/permission-helper/")`), populate the corresponding local runtime path. This is the runtime artifact for the new `permission-change-helper` skill — without it, the skill's invocation of `bash mcp-servers/permission-helper/show-plan.sh ...` will fail with "binary not found."
+   - Create the local directory `<project_dir>/mcp-servers/permission-helper/` if it does not exist (and `<project_dir>/mcp-servers/permission-helper/templates/`).
+   - For every file under `agent-index-core/lib/permission-helper/` on remote, read it via `aifs_read` and write it to the matching local path under `mcp-servers/permission-helper/`. Use a recursive listing (`aifs_list` of `lib/permission-helper/` and then of `lib/permission-helper/templates/`) so the install picks up any files added in future helper releases — do not hard-code the file list.
+   - Make `show-plan.sh`, `show-plan.js`, and `apply.js` executable (`chmod +x`) on Unix-like systems. On Windows the chmod is a no-op.
+   - This install logic is idempotent: running it on an install that already has the helper just overwrites the files with the new versions, which is the desired behavior on upgrade.
+7. **Merge triggers into routing.json.** After updating core files, check the updated `agent-index-core/collection.json` for trigger arrays. If present and `routing.json` exists (or was created by a previous phase in this update), merge new triggers using the same logic as Phase 4 step 4. Core capabilities (org-setup, preferences-management, system-tutorial, apply-updates, author-collection, validate-collection) have triggers that should appear in routing.json alongside member-installed collection triggers.
+8. Surface: "agent-index-core updated to {target_version}."
 
 If `marketplace-update` is present:
 1. Same pattern — read updated marketplace files from remote, overwrite local
