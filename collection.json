@@ -1,8 +1,8 @@
 {
   "name": "agent-index-core",
   "display_name": "Agent-Index Core",
-  "version": "3.3.1",
-  "description": "Core infrastructure for the agent-index system. v3.3.1: invite-member rewritten to delegate ACL grants to the permission-change-helper (closes the consumer-rewrite half of bug 20260502-8d20ea22-4); apply-updates Phase 1 LF normalization for shipped shell scripts (closes bug 20260504-8d20ea22-7); apply-updates Phase 1 strips stale remote_filesystem.mcp_server block from org-config.json (closes bug 20260502-8d20ea22-3); edit-org bootstrap regen also LF-normalizes; remove-member and verify-workspace-policy constraint sections clarified to forbid future direct aifs_share calls. v3.3.0: permission-change-helper skill + binary, install plumbing, bug 5 fix. v3.2.0: org-setup management dashboard fixes. v3.1.x: extended adapter contract v2.0, infrastructure-directory broadcast. v3.0.x: natural language triggers, on-demand executor, paste-URL OAuth flow.",
+  "version": "3.4.0",
+  "description": "Core infrastructure for the agent-index system. v3.4.0: native Go permission-helper binary v0.2.0 (replaces Node helper for production use, ships as agent-index:// URL scheme handler with per-platform installers); binary-distribution registry (infrastructure-directory.json -> binaries[]); org-level binary version pins (org-config.json -> binaries{}); pin-binary-version admin task; apply-updates Phase 1 step 7 (binary install/update flow with SHA256 verification); check-updates Step 2.6 (surfaces binary update availability); publish-updates Step 0 walks local infrastructure dirs and uploads changed files to remote (closes the manual git-pull-then-copy gap); permission-change-helper skill prefers Go binary, falls back to Node; canonical Drive-native form (lowercase roles, subject field) propagated through all helper components; agent-index.json template moved to templates/agent-index.template.json (Phase 1 of 2 — legacy path kept at remote during 3.4.0 for migration safety); apply-updates Phase 1 step 5 deletes local legacy collection-template file. v3.3.1: invite-member rewritten to delegate ACL grants to the permission-change-helper. v3.3.0: permission-change-helper skill + Node binary. v3.2.0: org-setup management dashboard fixes. v3.1.x: extended adapter contract v2.0, infrastructure-directory broadcast. v3.0.x: natural language triggers, on-demand executor.",
   "author": "agent-index",
   "license": "proprietary",
   "category": "infrastructure",
@@ -81,6 +81,26 @@
     },
     "create-org",
     "edit-org",
+    {
+      "name": "pin-binary-version",
+      "triggers": [
+        {
+          "phrase": "pin a binary",
+          "capability": "pin-binary-version",
+          "description": "Set or clear the org's pinned version for a registered binary tool"
+        },
+        {
+          "phrase": "rollback the helper",
+          "capability": "pin-binary-version",
+          "description": "Roll back the permission-helper or other binary tool to a prior version"
+        },
+        {
+          "phrase": "lock helper version",
+          "capability": "pin-binary-version",
+          "description": "Pin the org to a specific version of a binary tool"
+        }
+      ]
+    },
     {
       "name": "invite-member",
       "triggers": [

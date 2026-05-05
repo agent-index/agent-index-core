@@ -1,0 +1,81 @@
+# .goreleaser.yaml — cross-compile + raw-binary publishing.
+# https://goreleaser.com/customization/
+#
+# To release:
+#   git tag v0.2.0
+#   goreleaser release --clean
+#
+# Output: raw binaries named per the agent-index registry's filename
+# template (agent-index-show-plan-<version>-<os>-<arch>[.exe]) plus a
+# checksums.txt with SHA256 hashes — these are what the registry
+# (infrastructure-directory.json -> binaries[].platforms[].sha256)
+# tracks for verification.
+
+version: 2
+
+project_name: agent-index-show-plan
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agent-index-show-plan
+    main: ./cmd/agent-index-show-plan
+    binary: "agent-index-show-plan-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    no_unique_dist_dir: true
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Version }}
+
+archives:
+  - id: raw-binary
+    # format: binary publishes the raw binary instead of wrapping it
+    # in tar.gz/zip. The registry's filename template expects raw
+    # binaries (no archive layer to peel back during apply-updates).
+    format: binary
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-snapshot"
+
+release:
+  draft: true
+  prerelease: auto
+  github:
+    owner: agent-index
+    name: agent-index-permissions-binaries
+
+# Code-signing and notarization (commented for first cross-platform pass;
+# uncomment per platform when certs are in place):
+#
+# signs:
+#   - id: windows-authenticode
+#     ids: [agent-index-show-plan]
+#     env:
+#       - WINDOWS_AUTHENTICODE_CERT={{ .Env.WINDOWS_AUTHENTICODE_CERT }}
+#       - WINDOWS_AUTHENTICODE_KEY={{ .Env.WINDOWS_AUTHENTICODE_KEY }}
+#     ...
+#
+# notarize:
+#   macos:
+#     - enabled: true
+#       sign:
+#         certificate: "{{ .Env.MACOS_DEVELOPER_ID_CERT }}"
+#       notarize:
+#         issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+#         key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+#         key: "{{ .Env.MACOS_NOTARY_KEY }}"

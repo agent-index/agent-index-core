@@ -11,7 +11,7 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Permission-helper binary
-    description: The pre-built `agent-index-show-plan` binary at `mcp-servers/permission-helper/show-plan.sh`, installed by core during apply-updates. If not found, the helper cannot run — surface an error and direct the member to '@ai:update' or '@ai:member-bootstrap'.
+    description: The pre-built `agent-index-show-plan` helper. As of core 3.4.0 the canonical implementation is the native Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows), distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. The legacy Node helper at `mcp-servers/permission-helper/show-plan.sh` ships as a fallback for orgs that have not yet opted into the binary registry. If neither is present, the helper cannot run — surface an error and direct the member to '@ai:update' or '@ai:member-bootstrap'.
   - name: Browser
     description: The member's default browser. The helper opens a localhost URL for the member to review the proposed change. Headless contexts can use the `--cli` fallback.
 ---
@@ -22,7 +22,12 @@ The Permission-Change Helper is the canonical agent-callable surface for any tas
 
 The reason for the layering is documented in `agent-index-core/standards.md` under "Permission-Modifying Operations" and in the access-control project's decision record at `/shared/projects/access-control/decisions/permission-change-via-plan-page.md`. In short: agents are prohibited from making security-changing calls on the user's behalf, even with authorization, because agents can be manipulated. The helper sidesteps this by keeping the privileged call out of the agent's call stack — the agent prepares a structured proposal and surfaces it in the member's browser; the member's deliberate Accept click triggers a script that uses the member's existing OAuth token to make the actual call. The agent is upstream of the privileged action, never inside it.
 
-This skill is the agent-side bookend to the pre-built `agent-index-show-plan` binary that ships in `mcp-servers/permission-helper/`. The skill's job is to validate the input spec a calling task hands it, invoke the binary, branch on the binary's outcome, verify post-state, and surface clear narration to the member at each phase.
+This skill is the agent-side bookend to the pre-built `agent-index-show-plan` binary. As of core 3.4.0 there are two implementations of the binary, with the skill preferring the native one when present:
+
+1. **Native Go binary** at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows). Distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. Production-quality: real Drive API integration, OAuth refresh, custom URL scheme handler (`agent-index://`), per-platform installers.
+2. **Legacy Node helper** at `mcp-servers/permission-helper/show-plan.sh`. Shipped from `agent-index-core/lib/permission-helper/` during `apply-updates` Phase 1 step 6. Same wire protocol, same page UI, same trust contract — kept as a fallback for orgs that have not yet opted into the binary registry. Slated for removal in a future release once the Go binary has been deployed widely.
+
+The skill's job is to detect which is installed, invoke whichever is present (preferring Go), branch on its outcome, verify post-state, and surface clear narration to the member at each phase.
 
 ### When This Skill Is Active
 
@@ -74,20 +79,29 @@ For each operation in the spec, if the `before` field is missing or empty, call 
 
 Write the spec to `outputs/permission-plan-{ISO-timestamp}.json` using a native file write. The agent-index project_dir's `outputs/` directory is the standard location for tool inputs/outputs. The timestamp ensures uniqueness if the calling task generates multiple plans in the same session.
 
-**Step 4 — Invoke the binary.**
+**Step 4 — Detect and invoke the binary.**
 
-Run: `bash <project_dir>/mcp-servers/permission-helper/show-plan.sh <absolute-path-to-spec.json>`.
+Check for a Go binary first, fall back to Node:
 
-Capture stdout, stderr, and exit code. The binary will:
+1. **Go binary path** (preferred as of core 3.4.0):
+   - `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan.exe` on Windows
+   - `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan` on macOS / Linux
+2. **Node fallback path:** `<project_dir>/mcp-servers/permission-helper/show-plan.sh`.
+
+If the Go binary exists, invoke it directly: `<go-binary> <absolute-path-to-spec.json>`. The Go binary launches the listener, opens the browser, and behaves identically to the Node helper from the agent's perspective (same exit codes, same stdout JSON status report shape, same SSE event stream to the page).
+
+If only the Node helper exists, invoke: `bash <project_dir>/mcp-servers/permission-helper/show-plan.sh <absolute-path-to-spec.json>`.
+
+Capture stdout, stderr, and exit code. Either binary will:
 - Open the member's default browser to a localhost URL displaying the review page.
 - Wait for the member's action (Accept, Reject, or page-close).
-- If Accept: spawn the apply-script which calls the appropriate `aifs_*` ops via the existing `aifs-exec.sh` wrapper (using the member's OAuth token).
+- If Accept: spawn the apply-script which calls the appropriate Drive ops (Go binary: directly via the Drive API using the member's stashed OAuth token. Node helper: via the existing `aifs-exec.sh` wrapper.)
 - Stream progress to the page via Server-Sent Events.
 - On terminal state, write a final JSON status report to stdout and exit with a meaningful exit code.
 
 The agent-side narrative during this wait should be minimal — something like: "I'm opening a review page in your browser. Review the proposed changes there and click Accept to apply them with your own credentials." Then wait for the binary's exit. Do not poll or interfere; the binary owns the user interaction surface during this window.
 
-If the binary cannot be found at `mcp-servers/permission-helper/show-plan.sh`, return immediately with `{ outcome: "binary_not_found", error_detail: "Permission helper not installed. Run @ai:update to install it, or @ai:member-bootstrap if the install appears broken." }`.
+If neither binary is found, return immediately with `{ outcome: "binary_not_found", error_detail: "Permission helper not installed. Run @ai:update to install it, or @ai:member-bootstrap if the install appears broken." }`.
 
 **Step 5 — Parse the binary's exit.**
 
@@ -127,7 +141,7 @@ Then return the structured outcome to the calling task so it can branch on the r
 
 ### Spec Editing on the Page
 
-The page allows the member to edit certain fields per operation before clicking Accept. Specifically: `recipient` (email/group address) and `role` (Reader/Commenter/Writer for shares). The member can also uncheck individual operations in a batch via per-row checkboxes. The submitted spec on Accept reflects these edits.
+The page allows the member to edit certain fields per operation before clicking Accept. Specifically: `recipient` (email/group address) and `role` (`reader`/`commenter`/`writer` for shares — Drive-canonical lowercase). The member can also uncheck individual operations in a batch via per-row checkboxes. The submitted spec on Accept reflects these edits.
 
 When you receive the post-Accept spec back from the binary's stdout, surface a brief note in the chat narration if the member made edits: "Note: you adjusted the recipient/role for {op_index} before applying — applied with the edited values." This makes it clear that the applied result may not match the spec your calling task originally submitted.
 

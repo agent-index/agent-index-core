@@ -1,0 +1,28 @@
+{
+  "name": "pin-binary-version",
+  "type": "task",
+  "display_name": "Pin Binary Version",
+  "collection": "agent-index-core",
+  "collection_version": "3.4.0",
+  "version": "1.0.0",
+  "eol_date": null,
+  "eol_warning_days": 60,
+  "stateful": false,
+  "produces_artifacts": false,
+  "produces_shared_artifacts": false,
+  "setup_template": null,
+  "dependency_status": "complete",
+  "missing_dependencies": [],
+  "parameter_provenance": {},
+  "dependencies": {
+    "skills": [],
+    "tasks": []
+  },
+  "external_dependencies": [
+    "Remote filesystem exec bundle",
+    "infrastructure-directory.json reachable from infrastructure_directory_url"
+  ],
+  "optional_external_dependencies": [],
+  "reads_from": null,
+  "writes_to": "/org-config.json (binaries{} section)"
+}

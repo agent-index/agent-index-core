@@ -1,0 +1,116 @@
+package spec
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
+// Result is the outcome of validation.
+type Result struct {
+	OK     bool
+	Errors []string
+}
+
+// Validate checks a spec against the schema. Mirror of validate.js.
+// Canonical names match Drive's API: lowercase roles, "subject"
+// for recipient identifiers in before.recipients.
+func Validate(s *Spec) Result {
+	var errs []string
+
+	if s == nil {
+		return Result{OK: false, Errors: []string{"spec must not be nil"}}
+	}
+
+	// version
+	if s.Version != SchemaVersion {
+		errs = append(errs, fmt.Sprintf("spec.version must be %q (got: %q)", SchemaVersion, s.Version))
+	}
+
+	// operations
+	if len(s.Operations) == 0 {
+		errs = append(errs, "spec.operations must be non-empty")
+	} else {
+		for i, op := range s.Operations {
+			errs = append(errs, validateOp(op, i)...)
+		}
+		// At most one transfer_ownership.
+		var transfers int
+		for _, op := range s.Operations {
+			if op.Op == "transfer_ownership" {
+				transfers++
+			}
+		}
+		if transfers > 1 {
+			errs = append(errs, fmt.Sprintf("spec.operations: at most one transfer_ownership per spec (got: %d)", transfers))
+		}
+		// transfer_ownership recipient cannot be the requestor.
+		for i, op := range s.Operations {
+			if op.Op == "transfer_ownership" && op.Recipient == s.Context.Requestor {
+				errs = append(errs, fmt.Sprintf("spec.operations[%d]: cannot transfer ownership to the requestor", i))
+			}
+		}
+	}
+
+	// context
+	if strings.TrimSpace(s.Context.Requestor) == "" {
+		errs = append(errs, "spec.context.requestor must be a non-empty string (member_hash)")
+	}
+	if strings.TrimSpace(s.Context.Purpose) == "" {
+		errs = append(errs, "spec.context.purpose must be a non-empty string")
+	}
+
+	// mode (optional)
+	if s.Mode != "" && !allowedModes[s.Mode] {
+		errs = append(errs, fmt.Sprintf("spec.mode, if present, must be one of: fail_soft, all_or_nothing (got: %q)", s.Mode))
+	}
+
+	return Result{OK: len(errs) == 0, Errors: errs}
+}
+
+func validateOp(op Op, i int) []string {
+	prefix := fmt.Sprintf("spec.operations[%d]", i)
+	var errs []string
+
+	if !allowedOps[op.Op] {
+		errs = append(errs, fmt.Sprintf("%s.op must be one of: share, unshare, transfer_ownership (got: %q)", prefix, op.Op))
+	}
+
+	if !strings.HasPrefix(op.Resource, "/") {
+		errs = append(errs, fmt.Sprintf("%s.resource must be a string starting with %q (got: %q)", prefix, "/", op.Resource))
+	}
+
+	if !emailRegex.MatchString(op.Recipient) {
+		errs = append(errs, fmt.Sprintf("%s.recipient must be a valid email address (got: %q)", prefix, op.Recipient))
+	}
+
+	if op.Op == "share" {
+		if !allowedRoles[op.Role] {
+			errs = append(errs, fmt.Sprintf("%s.role for share ops must be one of: reader, commenter, writer (got: %q)", prefix, op.Role))
+		}
+	}
+
+	if op.Before != nil {
+		for j, r := range op.Before.Recipients {
+			if r.Subject == "" || r.Role == "" {
+				errs = append(errs, fmt.Sprintf("%s.before.recipients[%d] must have non-empty subject and role", prefix, j))
+			}
+		}
+	}
+
+	return errs
+}
+
+// ApplyExclusions returns a fresh Spec with operations marked Excluded=true filtered out.
+func ApplyExclusions(s *Spec) *Spec {
+	out := *s
+	out.Operations = make([]Op, 0, len(s.Operations))
+	for _, op := range s.Operations {
+		if !op.Excluded {
+			out.Operations = append(out.Operations, op)
+		}
+	}
+	return &out
+}

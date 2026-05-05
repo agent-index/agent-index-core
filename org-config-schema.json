@@ -60,5 +60,13 @@
       "repo_url": "https://github.com/agent-index/agent-index-core",
       "status": "installed"
     }
-  ]
+  ],
+  "binaries": {
+    "permission-helper-go": {
+      "version": "0.2.0",
+      "policy": "pinned",
+      "pinned_by": "a7f3b2c1d4e5f698",
+      "pinned_date": "2026-05-05"
+    }
+  }
 }

@@ -595,6 +595,36 @@ The helper's invocation surface is a custom URL scheme (`agent-index://`) that t
 
 **Implementation enforcement:** preflight checks should grep task workflows for the disallowed patterns (e.g., `<script>.*agent-index://`, `window\.location\s*=\s*['"]agent-index://`, `auto.*click.*Accept`). Any match is an authoring error and fails preflight. This gives the trust contract teeth at release time rather than relying on author memory.
 
+### Trust contract for binary-tool downloads (added in core 3.4.0)
+
+Binary tools (e.g. `permission-helper-go`) are downloaded from the registry declared in `infrastructure-directory.json` → `binaries[]` and installed by `apply-updates` Phase 1 step 7. This section codifies the trust boundary for that path.
+
+**The agent does:**
+
+- Read `infrastructure-directory.json` from `infrastructure_directory_url` (HTTPS only) to identify what binary tools the registry knows about.
+- Read `org-config.json` → `binaries{}` to identify what versions the org has pinned.
+- Read the local version file at the path declared by the registry's `version_file` to identify what's installed.
+- Surface the upgrade summary to the user in chat — source URL, target version, SHA256 fingerprint (truncated), local version, install destination.
+- Wait for explicit user Y/N confirmation in chat before downloading.
+- On Y: download the binary via HTTPS, compute SHA256 of the downloaded bytes, compare against the registry's published SHA256.
+- On SHA256 match: write atomically to `install_destination`, `chmod +x` on Unix, write the version string to the `version_file` path.
+- Run the registry's `post_install_command` (e.g. `--register`).
+- Surface the result of the install + post-install to the user.
+
+**The agent does not:**
+
+- Download binaries without explicit user Y/N approval in chat. The trust contract for the URL-handler flow extends to this: the user is the source of authority for making changes to their machine, including installing executables.
+- Skip SHA256 verification, even if the user wants to "just install it." A SHA256 mismatch is a security failure path. Abort, do not retry, surface clearly.
+- Install binaries to paths outside `mcp-servers/<name>/`. The registry's `install_destination` field is template-substituted with `{ext}` only; agents may not relocate binaries elsewhere.
+- Run `post_install_command` if the install or SHA256 step failed. Registration steps assume the binary is correctly placed; running them on a partial/corrupt install can leave the system in a worse state than no install.
+- Use download URLs not derived from the registry's `release_url_template`. URLs must come from the registry; the agent may not synthesize a URL that points elsewhere "because the registry seems out of date."
+- Pin to versions below the registry's `min_required_version`. That floor exists to lock everyone out of known-bad versions; the floor is non-negotiable from the agent side. Admins may try via `pin-binary-version`; that task validates and refuses.
+- Auto-run `--register` or any `post_install_command` outside the `apply-updates` flow. The trust contract requires the install + register pair to be a single user-approved step.
+
+**Why these specific don'ts:** the same boundary that gates permission writes also gates binary installs. The agent must not be the source of authority for "putting an executable on the user's machine." User-approved download in `apply-updates` makes the user the gating step; SHA256 verification makes the registry's signed identity the second gating step. The list above keeps both gates honest.
+
+**Implementation enforcement:** preflight checks should grep task workflows for disallowed patterns: bare `wget`/`curl` invocations for binary downloads outside the `apply-updates` Phase 1 step 7 flow, hard-coded URLs in any task that doesn't read from `infrastructure-directory.json`, any auto-confirm logic on the binary-install user-prompt step. Same pattern as the URL-handler enforcement above.
+
 ---
 
 ## Shared Artifacts and Data

@@ -6,6 +6,52 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.4.0] — 2026-05-05
+
+### Added
+
+- **Native Go permission-helper binary v0.2.0** (`lib/permission-helper-go/`) — production-quality reimplementation of the Node helper. Statically-linked single executable per platform (no Node on PATH required). Real `google.golang.org/api/drive/v3` integration with OAuth refresh, path resolution piggy-backing on the gdrive adapter's `path-cache.json`, typed errors mapped from Drive API codes (`permission_denied`, `not_found`, `rate_limited`, `drive_unavailable`). Same wire protocol, same review page, same trust contract as the Node helper. Implements the canonical Drive-native field form (lowercase roles `reader`/`commenter`/`writer`, `subject` for recipient identifiers in `before.recipients`).
+
+- **Custom URL scheme handler `agent-index://`** — chat-side review links route directly to the binary via the OS handler. Per-platform registration (no admin/root rights required): Windows registry keys under `HKCU\Software\Classes\agent-index`, macOS `.app` bundle with `CFBundleURLSchemes`, Linux `.desktop` file with `MimeType=x-scheme-handler/agent-index`. `--register`/`--unregister` flags wired up, per-platform installers under `lib/permission-helper-go/installer/{windows,darwin,linux}/`.
+
+- **Binary distribution architecture (registry + org pin + member-side reconciliation):**
+  - `infrastructure-directory.json` extends with a `binaries[]` array — registry of native tools with `current_version`, `min_required_version` (security floor), `release_url_template`, per-platform `filename` + `sha256`, `install_destination`, `post_install_command`.
+  - `org-config.json` extends with `binaries{}` — per-binary `version` + `policy` (`pinned`/`latest`/`min`), set by admins. Convergent: rollback is just changing the pin.
+  - `apply-updates.md` Phase 1 step 7 — new flow that reads registry + org pin, compares against locally-installed version, prompts user with download summary (URL, target version, SHA256 fingerprint), verifies SHA256 on download, installs atomically, runs `post_install_command`. Trust contract: every binary download requires explicit user Y/N approval; SHA256 mismatch is a hard abort.
+  - `check-updates.md` Step 2.6 — surfaces binary update availability alongside core/marketplace updates.
+  - **`pin-binary-version` admin task** — single-purpose task to set or clear binary version pins in `org-config.json`. Validates against directory's `min_required_version`. Convergent semantics support clean rollback.
+
+- **`permission-change-helper` skill prefers Go binary, falls back to Node helper** — detects which is installed at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`, invokes that if present; else falls back to existing `mcp-servers/permission-helper/show-plan.sh`. Same exit codes, same JSON status report shape from both implementations. Node helper kept as fallback for orgs not yet opted into the binary registry.
+
+- **`--validate-only` flag in Go binary** — reads + parses + validates a spec without prompts, listener, or Drive calls. Useful for CI / dev sanity checks.
+
+- **`publish-updates` 3.0.0 → 3.1.0 — Step 0 scan-and-upload** (closes bug `20260504-8d20ea22-6` partially: the upload half). Pre-3.4.0 publish-updates only wrote a CHANGELOG entry; it did not push the admin's local infrastructure files to remote. Admins had to copy them manually. As of 3.4.0, publish-updates Step 0 walks the local `agent-index-core/` and `agent-index-marketplace/` directories, hashes every file, compares against remote, and prompts the admin to upload differs/new + delete remote-only files. LF-normalized for shell scripts. Idempotent: re-runs on a fully-synced install do nothing. Power-user `--no-sync` flag skips Step 0 if files were already pushed via a script. Closes the admin's typical `git pull → publish-updates` flow without intermediate manual file copying. The fetch-from-upstream half (`--check-upstream` flag) is deferred to a future release per the `admin-upstream-upgrade-flow` idea.
+
+- **Trust contract addition in `standards.md`** — codifies the do/don't list for binary downloads (registry-derived URLs only, mandatory SHA256 verification, user approval gating, no auto-run of post-install commands outside `apply-updates`).
+
+- **Phase 1 of agent-index.json template disambiguation** — added `agent-index-core/templates/agent-index.template.json` (canonical workspace-bootstrap template). Legacy `agent-index-core/agent-index.json` kept at remote for one release for migration safety; removed in 3.5.0. `apply-updates` Phase 1 step 4 reads new path with fallback to legacy path on NOT_FOUND. `apply-updates` Phase 1 step 5 deletes the local copy of the legacy collection-template file (it confuses any tool that walks up looking for the workspace marker). The Go binary's `workspaceRoot()` includes a defensive `collection.json` sibling-skip workaround in case the cleanup hasn't run yet.
+
+### Changed
+
+- **`infrastructure-directory.json` `directory_version` 1.0.6 → 1.1.0** — schema extension for `binaries[]`. Backwards-compatible: pre-3.4.0 consumers ignore the new top-level field.
+- **`agent-index-marketplace` 2.1.2 → 2.2.0** — added `check-updates` Step 2.6 (binary update surfacing).
+
+### Fixed
+
+- **Canonical Drive-native form propagated** through Node validator (`validate.js`), Go validator (`validate.go`), both page templates (`templates/page.html`), apply-script stub helpers, tech design (`permission-change-helper-tech-design.md`), helper skill (`permission-change-helper.md`), and `invite-member.md` example. Prior to 3.4.0 the codebase carried both title-case (`Reader`/`Commenter`/`Writer`) and lowercase forms, plus both `email` and `subject` field names in `before.recipients`. Now uniform: lowercase roles only, `subject` only — matching the Drive API and `aifs_get_permissions` output exactly.
+
+### Migration notes
+
+This release changes how native tools are distributed. The Node helper continues to ship and work; existing installs can keep using it. To switch to the Go binary:
+
+1. After 3.4.0 lands, an admin runs `@ai:pin-binary-version permission-helper-go 0.2.0` to declare the version the org should run.
+2. Members run `@ai:apply-updates`. Phase 1 step 7 surfaces "permission-helper-go 0.2.0 available, not installed" and prompts for download. On Y, the binary is downloaded from `agent-index/agent-index-permissions-binaries`, SHA256-verified, installed at `mcp-servers/permission-helper-go/`, and `--register` is run to wire up the URL scheme handler.
+3. Subsequent `permission-change-helper` skill invocations prefer the Go binary; chat-side `agent-index://...` links are now clickable.
+
+The Node helper remains available as a fallback. To roll back the org from Go to Node: `@ai:pin-binary-version permission-helper-go --remove`. Members keep their installed binary but the skill stops flagging updates.
+
+---
+
 ## [3.3.1] — 2026-05-04
 
 ### Added

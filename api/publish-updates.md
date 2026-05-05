@@ -42,6 +42,63 @@ Optionally, the admin can provide:
 
 ## Workflow
 
+### Step 0: Sync Local Infrastructure to Remote (added in core 3.4.0)
+
+Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
+
+For each of the two infrastructure roots (`agent-index-core/`, `agent-index-marketplace/`):
+
+1. **Walk the local directory recursively.** For each file, compute the relative path from the directory root and the SHA-256 of the local file's content. Skip:
+   - `.git/`, `node_modules/`, `dist/` (Go build output for permission-helper-go)
+   - Any path containing `/.` (hidden files except for explicitly-shipped ones — `.claude/`, `.gitkeep`)
+   - Editor swap files (`*.swp`, `*.bak`, `*.tmp`)
+   - Compiled binaries (`*.exe`, `*.dll`, `*.so`, `*.dylib`) — these ship via the binaries registry, not via aifs_write
+2. **Read the corresponding remote file** via `aifs_read("/{collection_root}/{relative_path}")`. If the remote file exists, compute its SHA-256. If it does not exist (NOT_FOUND), treat as "missing remotely."
+3. **Classify each local file:**
+   - `local_only` — local exists, remote missing → upload
+   - `differs` — local exists, remote exists, hashes differ → upload (overwrite)
+   - `synced` — hashes match → no-op
+4. **Detect remote files that no longer exist locally.** List the remote directory recursively via `aifs_list`. For each remote file with no local counterpart, mark `remote_only`. These are candidates for deletion (e.g., a file that was renamed or removed on a `git pull`).
+
+Aggregate counts for both roots:
+
+```
+Source-to-remote sync summary:
+
+  /agent-index-core/        upload: 47   delete: 1   synced: 132
+  /agent-index-marketplace/ upload:  3   delete: 0   synced:  41
+
+Files to upload:
+  /agent-index-core/api/pin-binary-version.md         (new)
+  /agent-index-core/api/pin-binary-version-manifest.json (new)
+  /agent-index-core/CHANGELOG.md                      (modified)
+  ...
+
+Files to delete from remote:
+  /agent-index-core/agent-index.json   (Phase 2 of template-disambiguation)
+
+Proceed with sync? [Y/N]
+```
+
+On `N`: abort, no changes written. Surface "Sync cancelled. Re-run @ai:publish-updates when ready."
+
+On `Y`:
+
+1. **Upload all `local_only` and `differs` files** sequentially via `aifs_write`. Use the same LF-normalization as `apply-updates` Phase 1 step 6: read the local bytes, replace `\r\n` with `\n` and standalone `\r` with `\n` for all text file types (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`, `.template.json`). Binary files are not currently in scope — they ship via the binaries registry. If a non-text non-shipped file is encountered, surface a warning and skip it.
+2. **Delete `remote_only` files** sequentially via `aifs_delete`. Each deletion is logged so the admin sees what was removed.
+3. **Surface a one-line confirmation** per file processed (`✓ upload {path}`, `✓ delete {path}`).
+4. **On any individual file failure:** surface the error, continue with the rest of the batch (best-effort). At the end, report `N succeeded, M failed`. The admin can re-run to retry only the failures.
+
+After sync completes, the remote `/agent-index-core/` and `/agent-index-marketplace/` directories match the admin's local copy. Proceed to Step 1.
+
+**Idempotent re-runs:** If everything is already synced, the summary shows `upload: 0   delete: 0   synced: N` and asks "Nothing to sync. Continue to publish-updates diff phase? [Y/N]". On Y, proceed to Step 1; on N, halt.
+
+**Optional `--no-sync` flag:** for power users or recovery scenarios where the admin wants to skip this step entirely (e.g., if files were already pushed via a script). When passed, Step 0 is skipped and the task starts at Step 1.
+
+**Why limited to `agent-index-core/` and `agent-index-marketplace/`:** Marketplace collections (`projects`, `strategy`, etc.) are managed via `download-collection`/`install-collection`/`upgrade-collection` and have their own update flow. Adapter bundles ship via `edit-org` Step 2. Binary tools ship via the binaries registry (`apply-updates` Phase 1 step 7). Step 0 here only covers the two infrastructure collections that don't have any other shipping path.
+
+---
+
 ### Step 1: Verify Admin and Read Current Org State
 
 Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`.

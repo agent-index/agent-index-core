@@ -150,28 +150,28 @@ The actual access grants for both folders are batched into a single helper invoc
          "op": "share",
          "resource": "/members/{hash}/",
          "recipient": "{admin_email}",
-         "role": "Writer",
+         "role": "writer",
          "before": { "recipients": <members_pre.permissions> }
        },
        {
          "op": "share",
          "resource": "/members/{hash}/",
          "recipient": "{new_member_email}",
-         "role": "Writer",
+         "role": "writer",
          "before": { "recipients": <members_pre.permissions> }
        },
        {
          "op": "share",
          "resource": "/shared/members/artifacts/{hash}/",
          "recipient": "{admin_email}",
-         "role": "Writer",
+         "role": "writer",
          "before": { "recipients": <artifacts_pre.permissions> }
        },
        {
          "op": "share",
          "resource": "/shared/members/artifacts/{hash}/",
          "recipient": "{new_member_email}",
-         "role": "Writer",
+         "role": "writer",
          "before": { "recipients": <artifacts_pre.permissions> }
        }
      ],
