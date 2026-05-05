@@ -3,8 +3,8 @@
   "type": "task",
   "display_name": "Invite Member",
   "collection": "agent-index-core",
-  "collection_version": "3.3.0",
-  "version": "1.0.0",
+  "collection_version": "3.3.1",
+  "version": "1.1.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
@@ -15,7 +15,9 @@
   "missing_dependencies": [],
   "parameter_provenance": {},
   "dependencies": {
-    "skills": [],
+    "skills": [
+      "permission-change-helper"
+    ],
     "tasks": []
   },
   "external_dependencies": [

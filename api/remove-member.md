@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.0.0
+version: 1.0.1
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Removes their entry from members-registry.json and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — agent-index does not touch Drive ACLs; Workspace IT handles identity offboarding.
 stateful: false
@@ -115,12 +115,11 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 ### Constraints
 
 - Never write to `members-registry.json` outside this task, `invite-member`, and `member-bootstrap`.
-- Never touch Drive ACLs from this flow — even if it would be technically straightforward. Crossing that line creates a parallel offboarding flow that competes with Workspace IT's and gets out of sync.
+- Never touch Drive ACLs from this flow — even if it would be technically straightforward. Crossing that line creates a parallel offboarding flow that competes with Workspace IT's and gets out of sync. If a future change does require permission modifications from this task (e.g., revoking a specific share that Workspace offboarding can't reach), the change MUST go through the `permission-change-helper` skill per `agent-index-core/standards.md` § "Permission-Modifying Operations" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly.
 - Stale references render at the task layer as historical names. Never rewrite or scrub historical data.
 
 ### Edge Cases
 
 - **Email is not in the registry.** Surface clearly and stop. Don't attempt fuzzy matching — the admin should re-check the email.
 - **Member is mid-task.** Removal does not interrupt any task the departing member is currently running in their own session. Their next session-start will fail at the registry-membership check and surface the standard "You're not registered with this org" path. (This is correct behavior — they've been removed.)
-- **Two admins removing the same member concurrently.** Revision-aware write handles it. Whichever lands second sees REVISION_CONFLICT, re-reads, finds the entry already gone, and surfaces "{email} was already removed from the registry."
-- **Re-invite later.** If this email is later re-invited via `invite-member`, the task detects the existing `/members/{hash}/` directory and asks whether to reuse (per access-control project decision).
+- **Two admins removing the same member concurrently.** Revision-aware wri

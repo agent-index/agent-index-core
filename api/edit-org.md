@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.0.0
+version: 3.0.1
 collection: agent-index-core
 description: Edit org configuration — update the admin list or launch the marketplace to install or manage collections.
 stateful: false
@@ -170,7 +170,8 @@ Proceed immediately to regenerate the bootstrap zip.
 
 **5. Regenerate and redistribute bootstrap zip:**
 
-- Regenerate the bootstrap zip following the same procedure as create-org Step 12 (assemble zip contents, include updated bundle files, include current CLAUDE.md and settings.json, create zip, upload to remote at `/shared/bootstrap/member-bootstrap.zip`)
+- Regenerate the bootstrap zip following the same procedure as create-org Step 12 (assemble zip contents, include updated bundle files, include current CLAUDE.md and settings.json, create zip, upload to remote at `/shared/bootstrap/member-bootstrap.zip`).
+- **Normalize line endings to LF for every shell script and text file in the zip, regardless of the host OS the regen runs on** (added in core 3.3.1, closes bug `20260504-8d20ea22-7`). When the regen runs on a Windows host, the file-write APIs default to applying CRLF — which breaks any shell script in the bundle (notably `mcp-servers/filesystem/aifs-exec.sh` and `mcp-servers/permission-helper/show-plan.sh`) because `bash` cannot parse `\r` characters. Before adding any file to the zip, read its bytes, replace `\r\n` sequences with `\n`, replace standalone `\r` with `\n`, then add the LF-normalized bytes to the zip. Apply this to all text-shaped files in the zip — shell scripts, JS, HTML, JSON, markdown. There is no shipped artifact in the bootstrap zip that legitimately needs `\r`.
 - Surface the member distribution instructions (same format as create-org Step 12):
 
 > "The bootstrap zip has been regenerated with the updated adapter bundle and uploaded to your remote filesystem."
@@ -217,12 +218,4 @@ Never allow the admin list to be emptied. Minimum one admin at all times.
 
 Never allow `org_name`, `org_id`, or remote filesystem configuration to be changed through this task. Those are set at create-org time. Changes to those fields would require a migration process beyond the scope of this task.
 
-Only org admins may execute changes. The admin check in Step 1 is mandatory.
-
-Never allow a `role_id` to be reused after deletion within the same session. If an admin deletes a role and wants to recreate it, they should use edit-org again in a new session to avoid confusion.
-
-### Edge Cases
-
-If `org-config.json` is present but malformed or unparseable: surface "The org configuration file appears to be corrupted. Contact your org admin to repair or recreate it manually." Halt — do not attempt to repair automatically.
-
-If the admin wants to change the org name or remote filesystem configuration: explain these cannot be changed through edit-org and why (changing the storage backend would orphan existing member installations and collection data). Suggest contacting the agent-index support channel if a migration is genuinely needed.
+Only org admins may execute changes. The ad

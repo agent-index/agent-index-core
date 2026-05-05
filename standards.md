@@ -569,6 +569,32 @@ The helper is not a privileged service. It does not hold its own OAuth credentia
 
 This pattern is the canonical answer to bug `20260502-8d20ea22-4` (access-control execution-context mismatch). Future adapters (S3, OneDrive, Dropbox) call into core's permission-helper as a peer; they do not implement adapter-specific helpers.
 
+### Trust contract for the agent in the URL-handler invocation flow
+
+The helper's invocation surface is a custom URL scheme (`agent-index://`) that the user clicks in chat. This section codifies what Claude does and does not do in this flow, so the safety boundary is in writing and testable at preflight.
+
+**The agent does:**
+
+- Build a permission-change spec from task context (data-only generation).
+- Write the spec to `outputs/permission-plan-{timestamp}.json` in the workspace folder.
+- Emit a markdown link in chat of the form `[summary text](agent-index://apply?spec=outputs/permission-plan-{timestamp}.json)`.
+- Wait for the user to report the outcome of clicking the link, or read the helper's structured outcome JSON if it's surfaced through a conversation channel.
+- After the user reports completion, verify the post-state by calling `aifs_get_permissions` on each affected path (read-only, agent-callable directly).
+- Surface concise narration to the user about what was applied and what verification confirmed.
+
+**The agent does not:**
+
+- Auto-fire the URL on the user's behalf. No HTML auto-redirects, no `window.location` injections in any document the user views, no programmatic navigation to `agent-index://...` URLs. The link must require a deliberate user click.
+- Embed pre-authorization tokens in the URL that bypass the review-page Accept step. The URL points to a spec; the binary opens a review page; the user must click Accept on that page. Skipping the review at the URL layer is not allowed.
+- Emit URLs that include the actual permission change as encoded parameters rather than referencing a spec file. Specs live on disk where the user can inspect them; URLs reference them by path.
+- Auto-confirm on the user's behalf. The page's Accept button must require the user's explicit click; the agent does not emit any mechanism that would simulate or pre-trigger that click.
+- Generate URLs targeting spec paths outside the workspace's `outputs/` directory. The helper binary should validate the spec path stays within the workspace and refuse otherwise — this is defense-in-depth against an attacker who can write to the URL bar.
+- Suppress the OS-level "allow this site to open agent-index?" confirmation prompt that the browser shows on first use. That prompt is a user-visible signal; it must remain.
+
+**Why these specific don'ts:** the safety boundary that gates permission writes is the rule "the agent shouldn't be the source of authority for security-changing actions." The URL-handler architecture routes around this by making the privileged action's call stack start at the user's deliberate click, not at the agent's tool call. Any of the listed don'ts would re-collapse the gap by putting the agent's automated emission upstream of the privileged action without the user's deliberate gating step in between. The list above is what makes the architecture honest.
+
+**Implementation enforcement:** preflight checks should grep task workflows for the disallowed patterns (e.g., `<script>.*agent-index://`, `window\.location\s*=\s*['"]agent-index://`, `auto.*click.*Accept`). Any match is an authoring error and fails preflight. This gives the trust contract teeth at release time rather than relying on author memory.
+
 ---
 
 ## Shared Artifacts and Data

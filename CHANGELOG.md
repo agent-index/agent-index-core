@@ -6,6 +6,37 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.3.1] — 2026-05-04
+
+### Added
+
+- **`invite-member` rewritten** to delegate ACL grants through the `permission-change-helper` skill. Pre-1.1.0 invite-member made up to 4 direct `aifs_share` calls in Steps 5 and 6, which the agent's safety boundary now categorically refuses. Post-rewrite: a single batched permission-change spec covers admin + new-member shares across `/members/{hash}/` and `/shared/members/artifacts/{hash}/`; the admin reviews all on one page and clicks Accept once; the helper's apply-script applies them with the admin's existing OAuth token. Pre-state is read via `aifs_get_permissions` to filter no-op shares (re-invite cases). Outcome branching covers all 7 helper terminal states (`applied`, `rejected`, `timed_out`, `page_closed`, `partial_failure`, `apply_error`, `verification_failed`, `binary_not_found`) with concrete recovery paths. Registry write moved to after-shares so a rejection or partial-failure leaves no orphan registry entry. Closes the consumer-rewrite half of bug `20260502-8d20ea22-4`. Per the `admin-tasks-use-permission-plan-pattern` idea — invite-member is the pilot consumer; remove-member and verify-workspace-policy are already correctly designed (no permission writes; constraint sections updated to forbid future direct `aifs_share` calls).
+
+### Fixed
+
+- **`apply-updates` Phase 1 step 6 LF normalization** for shipped shell scripts in `mcp-servers/permission-helper/`. Pre-3.3.1 the install logic on Windows hosts wrote files with the host-native CRLF line endings, which broke `bash mcp-servers/permission-helper/show-plan.sh` because `bash` cannot parse `\r` characters. Closes bug `20260504-8d20ea22-7`. Surfaced during the 2026-05-04 helper smoke testing on dev_install.
+
+- **`apply-updates` Phase 1 step 5 strips stale `remote_filesystem.mcp_server` block** from `org-config.json`. Pre-3.3.1 installs created on 3.0.x carried this v2 leftover field whose `bundle_path` referenced a v3-deleted file (`mcp-servers/filesystem/server.bundle.js`). The block is purely cosmetic today (no runtime reads it) but is a footgun for any future task or human who naively reads `org-config.json` for a bundle path. Migration is non-destructive — only strips the block if `bundle_path` matches the v2 default. Closes bug `20260502-8d20ea22-3`.
+
+- **`edit-org` Step 5 bootstrap regen LF-normalizes** all text-shaped files (shell scripts, JS, HTML, JSON, markdown) before adding them to the bootstrap zip, regardless of host OS. Same fix as the apply-updates change above but at the new-member install path; without it, new members from a Windows-host-published bootstrap would have the same CRLF problem.
+
+### Changed
+
+- `apply-updates` task v3.2.0 → v3.2.1 (LF normalization + mcp_server cleanup; behavior fixes).
+- `edit-org` task v3.0.0 → v3.0.1 (LF normalization in bootstrap regen).
+- `invite-member` task v1.0.0 → v1.1.0 (helper-mediated ACL grants; behavior change but input/output contract unchanged from admin's perspective).
+- `remove-member` task v1.0.0 → v1.0.1 (constraint clarification; no behavior change).
+- `verify-workspace-policy` task v1.0.0 → v1.0.1 (constraint clarification; no behavior change).
+- `collection.json` description rewritten to lead with v3.3.1 changes.
+- All 18 API-member manifests bumped to `collection_version: 3.3.1`.
+
+### Notes
+
+- **Verification status:** Tests 1, 3, and the helper-via-node tests are green on dev_install post-3.3.0. The full y-confirm round-trip (Test 2 + Test 4 with Accept) requires admin authorization and is gated on the gdrive 2.2.1 bundle being live. Once 2.2.1 ships, end-to-end smoke test should run cleanly.
+- **`agent-index-filesystem-gdrive` 2.2.1** is a separate release that delivers the runtime-implementation half of the v2.0 contract ops. Both 3.3.1 and gdrive 2.2.1 should be applied together for the full `invite-member` flow to work end-to-end.
+
+---
+
 ## [3.3.0] — 2026-05-04
 
 ### Added

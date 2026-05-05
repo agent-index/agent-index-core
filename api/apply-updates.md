@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.2.0
+version: 3.2.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -191,9 +191,12 @@ If `core-update` is present:
 3. Overwrite the local core files with the updated versions
 4. Update the local `agent-index.json` version field. Also migrate any new top-level fields that are present in the canonical `agent-index-core/agent-index.json` template (read from remote) but missing locally. Specifically as of 3.1.1: if `infrastructure_directory_url` is missing locally, copy it from the canonical template — without it, `check-updates` cannot determine the latest core or marketplace version. Field migrations are non-destructive: never overwrite a field the member has already set, only add fields that are absent.
 5. **Clean up deprecated v2 artifacts:** If `agent-index-core/tools/aifs-bridge/` exists locally, delete the entire directory (it contains `aifs-bridge.mjs` and `aifs-call.sh` which reference the removed `server.bundle.js`). Also delete `mcp-servers/filesystem/server.bundle.js` if present. These are pre-v3 artifacts that cause errors if Claude discovers and tries to use them.
+
+   **Strip stale `remote_filesystem.mcp_server` block from `org-config.json`** (added in core 3.3.1, closes bug `20260502-8d20ea22-3`): read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`. If `remote_filesystem.mcp_server` exists AND its `bundle_path` field references the v2 default `mcp-servers/filesystem/server.bundle.js`, delete the entire `mcp_server` block from `remote_filesystem`. Write the updated `org-config.json` back via `aifs_write`. Rationale: in v3 the bundle path moved to `agent-index.json → remote_filesystem.exec.bundle_path` and `mcp_server` became obsolete. The block was never read at runtime (the v3 wrapper finds its bundle by walking outward from its own directory) but persists as a footgun for any future task or human who naively reads `org-config.json` to find "the bundle path." Migration is non-destructive: only strips the block if the `bundle_path` is the v2 default; if an admin has manually edited the block, leave it alone and surface a notice. This step runs once per install during the first apply-updates pass after core 3.3.1 lands; subsequent runs are no-ops because the block is already gone.
 6. **Install or refresh `mcp-servers/permission-helper/`** (added in core 3.3.0): If the upgraded `agent-index-core` includes a `lib/permission-helper/` directory at remote (check via `aifs_list("/agent-index-core/lib/permission-helper/")`), populate the corresponding local runtime path. This is the runtime artifact for the new `permission-change-helper` skill — without it, the skill's invocation of `bash mcp-servers/permission-helper/show-plan.sh ...` will fail with "binary not found."
    - Create the local directory `<project_dir>/mcp-servers/permission-helper/` if it does not exist (and `<project_dir>/mcp-servers/permission-helper/templates/`).
    - For every file under `agent-index-core/lib/permission-helper/` on remote, read it via `aifs_read` and write it to the matching local path under `mcp-servers/permission-helper/`. Use a recursive listing (`aifs_list` of `lib/permission-helper/` and then of `lib/permission-helper/templates/`) so the install picks up any files added in future helper releases — do not hard-code the file list.
+   - **Write all files with LF line endings, regardless of host OS** (closes bug `20260504-8d20ea22-7`). When the install runs on a Windows host, the file-write APIs default to applying CRLF — which breaks `show-plan.sh` because `bash` cannot parse `\r` characters. Explicitly normalize line endings to LF before writing every file in `lib/permission-helper/` to its `mcp-servers/permission-helper/` destination. Concretely: read the remote file's bytes, replace any `\r\n` sequence with `\n`, replace any standalone `\r` with `\n`, then write. Apply this to all file types in the directory (shell scripts, JavaScript, HTML, JSON, markdown — all should be LF). The cost is a 1-line transformation per file; the risk of accidentally breaking a file by stripping `\r` is essentially zero because (a) JavaScript and JSON tolerate either convention, (b) HTML treats either as whitespace, (c) markdown treats either as a line break, and (d) shell scripts require LF. There is no shipped artifact in `lib/permission-helper/` that legitimately needs `\r`.
    - Make `show-plan.sh`, `show-plan.js`, and `apply.js` executable (`chmod +x`) on Unix-like systems. On Windows the chmod is a no-op.
    - This install logic is idempotent: running it on an install that already has the helper just overwrites the files with the new versions, which is the desired behavior on upgrade.
 7. **Merge triggers into routing.json.** After updating core files, check the updated `agent-index-core/collection.json` for trigger arrays. If present and `routing.json` exists (or was created by a previous phase in this update), merge new triggers using the same logic as Phase 4 step 4. Core capabilities (org-setup, preferences-management, system-tutorial, apply-updates, author-collection, validate-collection) have triggers that should appear in routing.json alongside member-installed collection triggers.
@@ -376,36 +379,4 @@ Never modify `org-config.json`, `members-registry.json`, or any remote file. The
 
 If the update log exists but is empty (no entries): surface "No update instructions have been published yet." Halt.
 
-If the member's `last_applied_update` points to an entry ID that doesn't exist in the log (log was truncated or rebuilt): treat the cursor as stale. Surface: "Your update history doesn't match the org's update log. I'll check all available updates and build a plan based on your current installed state." Process all entries in the log, using the member's actual installed versions (from `member-index.json`) as the `from_version` for all operations.
-
-If a collection-update references a collection the member has no capabilities from: skip it silently. The upgrade only matters for members who have installed capabilities from that collection.
-
-If a collection-install references a collection the member has already independently installed capabilities from (they ran `@ai:setup` manually between publishes): skip the install and note: "{collection} capabilities are already installed. Checking if they're current..." Then treat it as a collection-update if the versions differ.
-
-If the adapter bundle update file cannot be downloaded from the bootstrap zip location: surface the error and skip the adapter update. Continue with remaining operations. The adapter update is important but not blocking — the member can update it manually later via `@ai:member-bootstrap`.
-
-If a single capability upgrade fails (setup-responses migration error, missing upgrade script): log the failure, skip that capability, continue with the rest. Surface a summary of failures at the end with remediation: "1 capability could not be upgraded: {name}. Say '@ai:setup' to attempt a manual upgrade."
-
-If the member has capabilities from a collection that was both updated and then removed within the pending window: the merge collapses this to a `collection-remove`. Do not upgrade capabilities from a collection that is being removed — just surface the removal notice.
-
-### State File Format
-
-The pending update plan file at `.agent-index/install-state/pending-update-plan.json`:
-
-```json
-{
-  "status": "interrupted",
-  "interrupted_at": "{ISO timestamp}",
-  "target_cursor": "{entry ID}",
-  "completed_phases": ["infrastructure", "claude-md", "adapter-bundle", "routing-init"],
-  "remaining_operations": {
-    "collection_updates": { ... },
-    "collection_installs": { ... },
-    "collection_removes": { ... },
-    "org_config_updates": [ ... ]
-  }
-}
-```
-
-This file is written when the task is interrupted (typically by an adapter bundle restart) and read on the next invocation to resume from where it left off. It is deleted after successful completion.
-
+If the member's `last_applied_update` points to an entry ID that doesn't exist in the log (log was truncated or rebui

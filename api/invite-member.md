@@ -1,18 +1,21 @@
 ---
 name: invite-member
 type: task
-version: 1.0.0
+version: 1.1.0
 collection: agent-index-core
-description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories with appropriate permissions, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
+description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
 produces_artifacts: false
 produces_shared_artifacts: true
 dependencies:
-  skills: []
+  skills:
+    - permission-change-helper
   tasks: []
 external_dependencies:
   - name: Remote filesystem exec bundle (gdrive contract v2.0+)
-    description: Uses aifs_share, aifs_get_permissions, and revision-aware aifs_write — all introduced in adapter contract v2.0. Will fail clearly if the installed adapter declares contract_version < 2.0.0.
+    description: Reads use aifs_get_permissions and revision-aware aifs_write — both introduced in adapter contract v2.0. Permission writes (share, unshare, transfer_ownership) go through the permission-change-helper skill rather than being called directly from this task. Will fail clearly if the installed adapter declares contract_version < 2.0.0.
+  - name: permission-change-helper binary
+    description: The pre-built `agent-index-show-plan` binary at `mcp-servers/permission-helper/show-plan.sh`, installed by core 3.3.0+. The helper renders a review page for the admin and applies the ACLs after a member-confirmed Accept. If not present, the helper skill's setup check surfaces the install issue.
   - name: All-members Google Group
     description: Workspace-maintained Google Group whose membership is the authoritative agent-index member roster. Address is read from org-config.json remote_filesystem.connection.all_members_group. New members must be added to this group at the Workspace level (out-of-band; agent-index does not have Workspace admin credentials).
 reads_from: "/members-registry.json"
@@ -26,7 +29,7 @@ writes_to: "/members-registry.json,/members/,/shared/members/artifacts/"
 The flow is intentionally narrow: agent-index manages team membership; Workspace IT manages identity. This task does **not** create a Google account, add the new member to the Workspace, or grant Drive access at the workspace level. Those are out-of-scope. What it does:
 
 1. Compute the deterministic `member_hash` from the new member's email.
-2. Create the member's private directory (`/members/{hash}/`) and shared-artifact directory (`/shared/members/artifacts/{hash}/`) with explicit shares to admin + the new member only.
+2. Create the member's private directory (`/members/{hash}/`) and shared-artifact directory (`/shared/members/artifacts/{hash}/`). Apply explicit ACLs (admin + new member as writers on both) by handing a batched permission-change spec to the `permission-change-helper` skill — the admin reviews and confirms all shares on a single page, then the helper's apply-script applies them with the admin's existing OAuth token.
 3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) with the new member. In v3.1.0+ orgs configured with an `all_members_group`, the member receives this access automatically by being added to the group; the task verifies group membership and prompts the admin to fix it if missing.
 4. Append the member's entry to `members-registry.json` using a revision-aware write (so two admins inviting members concurrently don't overwrite each other).
 5. Email the new member their install instructions.
@@ -103,25 +106,110 @@ If the admin says reuse: proceed to Step 5, but note the directory already exist
 
 If the admin says stop: surface "Stopped. Let me know how you'd like to proceed and we can retry." and exit cleanly.
 
-### Step 5: Create or refresh `/members/{hash}/`
+### Step 5: Create or refresh the member's directories (structural only)
 
-If the directory does not exist:
-1. Create it: `aifs_write("/members/{hash}/.placeholder", "")` (writing a placeholder is the simplest way to materialize a folder; alternatively use a single create-folder call if the adapter exposes one — Drive's API folds folder creation into the parent-creation chain on write).
-2. Apply ACLs:
-   - `aifs_share("/members/{hash}/", "{admin_email}", "writer")`
-   - `aifs_share("/members/{hash}/", "{new_member_email}", "writer")`
-   - For the path-B model (member is not a Shared Drive member), the explicit share is what makes the folder visible to them under "Shared with me".
-3. After both shares, poll `aifs_get_permissions("/members/{hash}/")` until both subjects appear (Drive's permission API is eventually consistent; up to ~5s of backoff is reasonable).
+This step creates the folders if they don't exist. It performs **no permission writes** — those go through the helper in Step 6.
 
-If the directory already exists (re-invite case):
-1. Skip creation.
-2. `aifs_get_permissions("/members/{hash}/")` to inspect current ACLs.
-3. If `{new_member_email}` already has writer access: skip. Otherwise: `aifs_share("/members/{hash}/", "{new_member_email}", "writer")`.
-4. Confirm admin still has writer; re-share if not.
+For each of the two target paths — `/members/{hash}/` and `/shared/members/artifacts/{hash}/`:
 
-### Step 6: Create or refresh `/shared/members/artifacts/{hash}/`
+- Check `aifs_exists("/members/{hash}/")` (and the same for the artifacts path).
+- If it does not exist: materialize it via `aifs_write("/members/{hash}/.placeholder", "")` (writing a placeholder is the simplest way to materialize a folder; alternatively use a single create-folder call if the adapter exposes one — Drive's API folds folder creation into the parent-creation chain on write).
+- If it already exists (re-invite case): leave the directory untouched. The previous member's content remains in place per the access-control project's re-invite decision.
 
-Same shape as Step 5 but for `/shared/members/artifacts/{hash}/`. Admin + member, both writer.
+Track which paths were freshly created vs. already existing. Used in Step 6 narration.
+
+### Step 6: Apply ACLs via permission-change-helper
+
+The actual access grants for both folders are batched into a single helper invocation. The admin reviews and confirms all four (or fewer, see below) shares on one page; the helper's apply-script applies them with the admin's existing OAuth token. This task never calls `aifs_share` directly — that's prohibited by the agent-side safety boundary the helper exists to navigate.
+
+**Build the spec:**
+
+1. Read pre-state for both target paths to capture the current ACLs (used as the `before` field in the spec for diff visualization, and to filter shares that would be no-ops):
+
+   ```
+   members_pre = aifs_get_permissions("/members/{hash}/")
+   artifacts_pre = aifs_get_permissions("/shared/members/artifacts/{hash}/")
+   ```
+
+   Note: `aifs_get_permissions` is read-only and agent-callable directly — only the *write* ops go through the helper.
+
+2. Build the operations list. For each (path, recipient, role) tuple in the cross-product `{/members/{hash}/, /shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`:
+   - Look up the recipient in the corresponding pre-state.
+   - If the recipient already has the requested role on the path: **omit** this operation from the spec (no-op).
+   - Otherwise: include it.
+
+   For a fresh invite, all 4 shares are included. For a re-invite where the admin already has writer on both folders and only the member needs to be re-added, the spec contains 1–2 shares.
+
+3. Compose the spec:
+
+   ```json
+   {
+     "version": "1.0",
+     "operations": [
+       {
+         "op": "share",
+         "resource": "/members/{hash}/",
+         "recipient": "{admin_email}",
+         "role": "Writer",
+         "before": { "recipients": <members_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/members/{hash}/",
+         "recipient": "{new_member_email}",
+         "role": "Writer",
+         "before": { "recipients": <members_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/shared/members/artifacts/{hash}/",
+         "recipient": "{admin_email}",
+         "role": "Writer",
+         "before": { "recipients": <artifacts_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/shared/members/artifacts/{hash}/",
+         "recipient": "{new_member_email}",
+         "role": "Writer",
+         "before": { "recipients": <artifacts_pre.permissions> }
+       }
+     ],
+     "context": {
+       "requestor": "{admin_member_hash}",
+       "calling_task": "invite-member",
+       "purpose": "Granting {display_name} ({new_member_email}) writer access to their member directories under {org_name}."
+     }
+   }
+   ```
+
+   (Filter out any operations the pre-state read marked as no-ops before submitting.)
+
+4. If the filtered operations list is empty (all 4 grants already in place — uncommon but possible on a re-invite of a member whose ACLs were never cleaned up): skip Step 6 entirely. Surface to the admin: "All required ACLs are already in place; no permission changes needed."
+
+**Invoke the helper:**
+
+Call the `permission-change-helper` skill with the spec. The helper validates, opens a review page in the admin's browser (or its `--cli` fallback), waits for the admin's deliberate Accept, then runs the apply-script which calls the actual `aifs_share` ops. The apply-script's per-op verification reads back the post-state and includes it in the helper's structured outcome.
+
+Surface to the admin before invoking, in the chat:
+
+> I'm opening a review page in your browser. It'll show {N} share operations across `/members/{hash}/` and `/shared/members/artifacts/{hash}/`. Click Accept to apply them with your own credentials.
+
+**Branch on the helper's outcome:**
+
+- **`applied`** — All requested shares succeeded. The helper returns `verified_post_state` with the post-share recipients lists. Continue to Step 7.
+
+- **`rejected`** — The admin clicked Reject. No shares were applied. Surface to the admin: "Invite cancelled. No permissions were modified, no registry entry was written." Halt the task; return without applying any further side effects (registry untouched, no welcome email).
+
+- **`timed_out`** or **`page_closed`** — The admin opened the review page but didn't decide within the helper's idle timeout, or closed the page without deciding. Surface: "The review window closed without your decision. The invite is on hold; nothing has been applied. Want to retry?" If yes, return to the start of Step 6. If no, halt cleanly.
+
+- **`partial_failure`** — Some shares applied, some failed. The helper returns `applied_operations` and `failed_operations`. Surface a per-failure summary using the helper's `error_detail` and the typed error codes from the apply-script (e.g., `INVALID_RECIPIENT` if the email is malformed or in a different Workspace; `ACCESS_DENIED` if the admin's OAuth doesn't permit the share). Offer to retry the failed operations only, or halt. **Do not** continue to Step 7 (registry update) until either all 4 shares are applied or the admin has explicitly accepted the partial state and confirmed they want to proceed anyway. The default should be halt — partial state is typical of cross-Workspace cases where the recipient's email is in a domain the org's external-sharing policy doesn't allow, and the right answer is to fix the Workspace policy first.
+
+- **`apply_error`** or **`verification_failed`** — Hard failure (the apply-script crashed or post-state verification revealed a discrepancy). Surface the error verbatim, halt the task, do not write to the registry.
+
+- **`binary_not_found`** — The helper's binary is missing at `mcp-servers/permission-helper/show-plan.sh`. Indicates the install is incomplete. Surface: "The permission helper isn't installed. Run `@ai:update` to complete the core 3.3.0 install, or `@ai:member-bootstrap` if the install appears broken." Halt.
+
+The helper's verification step replaces the eventual-consistency polling loop the pre-1.1.0 task did manually after each share. Drive's API is still eventually consistent, but the apply-script handles the polling internally; by the time the helper returns `applied`, the post-state has been verified.
 
 ### Step 7: Verify the all-members group includes the new member
 
@@ -189,7 +277,7 @@ If your first session reports "access denied" reading the org infrastructure fil
 Questions? Reply to this email. — {admin_display_name}
 ```
 
-Use the existing email-send capability (or surface the draft for the admin to send themselves if no email integration is available). Drive's "share" sendNotificationEmail flag is intentionally NOT used — this welcome email replaces it.
+Use the existing email-send capability (or surface the draft for the admin to send themselves if no email integration is available). Drive's "share" sendNotificationEmail flag is intentionally NOT used (and the helper's apply-script also leaves it false) — this welcome email replaces it.
 
 ### Step 10: Confirm and log
 
@@ -201,7 +289,7 @@ Surface to the admin:
 > - Registry: appended at revision {new_revision}
 > - Welcome email: {sent | drafted | skipped}
 >
-> Drive's permission API can take seconds to fully propagate. If the new member's first session fails on org-config or registry reads, they should wait two minutes and retry.
+> The shares were applied via the permission-change-helper; you can review the plan that was applied at `outputs/permission-plan-{timestamp}.json` if you want a record of exactly what was approved.
 
 Append an activity event to a local audit hint file (no remote audit log — that comes from Drive Activity directly). The admin can run `view-audit /members/{hash}/` afterwards to see the share events natively.
 
@@ -213,6 +301,7 @@ Append an activity event to a local audit hint file (no remote audit log — tha
 
 - This task is admin-only. The pre-flight check rejects non-admins early.
 - All ACL changes execute under the calling admin's OAuth identity. The new member's identity is never assumed.
+- Permission writes go through the `permission-change-helper` skill, never directly. The helper renders a review page, the admin clicks Accept, and the apply-script applies the changes with the admin's existing credentials. This task is upstream of the privileged action; the admin's deliberate click is what executes it.
 - Re-invite handling reuses the existing `/members/{hash}/` directory by default. The admin can choose to halt instead, but **never** overwrite, archive, or wipe without explicit confirmation.
 - Group membership is verified through admin attestation, not API query. agent-index has no Workspace admin credentials.
 
@@ -220,11 +309,13 @@ Append an activity event to a local audit hint file (no remote audit log — tha
 
 - Never invite an admin to add themselves as a member of their own org. The pre-flight check rejects the case where `email` matches an existing entry in `org-config.json admins[].email` (admin is implicitly already a member).
 - Never write to `/members/{hash}/` outside of this task and `member-bootstrap`.
-- Drive permissions API is eventually consistent — always poll with backoff after a share rather than assuming immediate effect.
+- **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` directly from this task.** All permission writes go through the `permission-change-helper` skill. This is enforced by `agent-index-core/standards.md` § "Permission-Modifying Operations." Direct calls would be both an authoring error (caught by future preflight) and a runtime failure (the agent's safety boundary refuses them).
+- Never write to `members-registry.json` until the helper has confirmed the share batch applied successfully (or the admin has explicitly accepted a partial-state outcome). The registry-after-shares ordering protects against the partial state where a registry entry exists but the new member can't actually access anything.
 
 ### Edge Cases
 
 - **The all-members group doesn't exist yet.** Step 7 surfaces this and gives admin the option to continue or stop. If continuing, the new member's first session may fail until the group is set up — the welcome email warns about this.
-- **The new member's email is in a different domain than the Workspace.** Drive sharing across Workspaces depends on the Workspace's external-sharing policy. If the share fails with `INVALID_RECIPIENT` or `ACCESS_DENIED`, surface clearly and stop — agent-index does not bypass Workspace policy.
-- **Concurrent admin invites.** Two admins running invite-member simultaneously are protected by revision-aware writes on members-registry.json. The retry-on-conflict loop handles the race transparently.
+- **The new member's email is in a different domain than the Workspace.** Drive sharing across Workspaces depends on the Workspace's external-sharing policy. The helper surfaces the failure mode through `partial_failure` outcome with `INVALID_RECIPIENT` or `ACCESS_DENIED` per-op errors. The Step 6 branch logic halts the task in this case rather than proceeding to registry update — agent-index does not bypass Workspace policy.
+- **Concurrent admin invites.** Two admins running invite-member simultaneously are protected by revision-aware writes on members-registry.json. The retry-on-conflict loop in Step 8 handles the race transparently. The helper invocation itself doesn't have a contention concern — each admin's helper session opens its own listener on its own port.
 - **Re-invite of a member whose old data was archived/deleted manually.** If the directory was removed but the registry still contains the old entry (unusual state), the task detects the registry entry, asks the admin to confirm, and re-creates the directory.
+- **Helper times out or admin closes review page mid-decision.** Step 6's `timed_out` and `page_closed` branches handle this — the task asks whether to retry, and on retry it re-reads pre-state (a partial earlier helper run may have applied some shares; the second pre-state read reflects the up-to-date state and the spec is rebuilt accordingly).
