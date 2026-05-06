@@ -6,6 +6,28 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.5.0] — 2026-05-05
+
+### Added
+
+- **`publish-updates` 3.2.0 — `--check-upstream` flag (Step 0a).** Fetches the latest infrastructure source from GitHub before scanning local. For each entry in `infrastructure-directory.json` → `infrastructure[]` whose `current_version > local_version`, prompts the admin to pull (per-entry confirmation, `--all` shortcut for power users), downloads the entry's `zip_url` over HTTPS, extracts to the local source tree (preserving `.git/`, applying LF normalization), then hands off to existing Step 0 scan-and-upload. Closes the manual `git pull` step from the admin's mental model — the entire release flow becomes one verb.
+
+- **`publish-updates` 3.2.0 — smart prerequisite detection (Steps 0b + 0c).** Walks the file-level diff Step 0 produced and uses a lookup table to infer (a) which prerequisites must run before publish (currently: bootstrap-zip regen) and (b) which CHANGELOG entry types should be added (`core-update`, `marketplace-update`, `adapter-bundle-update`, `claude-md-update`, `members-registry-update`, `org-config-update`). Triggers on twelve file-path patterns covering bundle changes, CLAUDE.md, members-registry, the bootstrap-affecting subset of `org-config.json` fields, and per-collection api/manifest changes. Surfaces the aggregated picture for admin Y/N approval, then runs prerequisites as sub-steps. Closes bug `20260504-8d20ea22-6` (publish-updates intelligence). Closes most of the `admin-upstream-upgrade-flow` idea (the `upgrade-collection` for marketplace collections is the remaining sliver).
+
+- **Shared `regenerate-bootstrap` subroutine** at `agent-index-core/templates/regenerate-bootstrap.md`. The bootstrap-zip regeneration procedure (formerly inlined in `edit-org` Step 5) is now a reusable text snippet referenced by both `edit-org` and the new `publish-updates` Step 0c. Takes `<project_dir>`, `<source-trigger>`, `<allow-skip>` parameters. Includes deterministic content hashing for skip-if-unchanged behavior, post-upload all-members re-share verification, and `published-state.json` `bootstrap_content_hash` tracking.
+
+- **`check-updates` 2.2.1 — admin "what to do" guidance updated.** Where infrastructure or adapter upgrade rows surface to admins, the suggested next-step is now `@ai:publish-updates --check-upstream` rather than the pre-3.5.0 manual `git pull → @ai:edit-org → @ai:publish-updates` ritual. Pre-3.5.0 path retained as a fallback for admins who want to inspect the bundle before publishing.
+
+### Changed
+
+- **`edit-org` Step 5 simplified.** The "Regenerate and redistribute bootstrap zip" sub-section now references the shared subroutine at `agent-index-core/templates/regenerate-bootstrap.md` rather than duplicating the procedure inline. Behavior unchanged for callers; the source is just deduplicated.
+
+### Migration notes
+
+3.5.0 itself ships through the pre-3.5.0 release flow (manual `git pull` + the publish-updates Step 0 sync that landed in 3.4.0). Subsequent releases (3.6.0+) use `@ai:publish-updates --check-upstream` end-to-end. This is the same chicken-and-egg pattern as 3.4.0's publish-updates Step 0.
+
+---
+
 ## [3.4.0] — 2026-05-05
 
 ### Added

@@ -42,6 +42,45 @@ Optionally, the admin can provide:
 
 ## Workflow
 
+### Step 0a: Pull Upstream Updates (added in core 3.5.0; only when `--check-upstream` flag is passed)
+
+If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` flag, skip this step entirely and proceed to Step 0.
+
+When `--check-upstream` is present, fetch the latest infrastructure source from GitHub before scanning local. This closes the manual `git pull` step from the admin's mental model — they say one verb and the task pulls upstream + syncs to remote + publishes.
+
+1. Read `agent-index.json` → `infrastructure_directory_url`. HTTPS GET the JSON (30s timeout). Parse.
+2. For each entry in `infrastructure[]` (currently: `agent-index-core`, `agent-index-marketplace`):
+   - Read the local `<project_dir>/<entry-name>/collection.json` → `version` field. If the directory or file is missing locally, treat the local version as "absent."
+   - Compare against the directory's `current_version`.
+   - If `local_version == directory.current_version`: this entry is already at upstream; no fetch needed.
+   - If `local_version` is absent OR `local_version < directory.current_version`: this entry is an upstream-fetch candidate.
+3. Surface the candidates list (or surface "All infrastructure already at upstream — nothing to fetch." and proceed to Step 0):
+
+   ```
+   Upstream updates available:
+
+     agent-index-core           3.4.0 → 3.5.0    https://github.com/.../main.zip
+     agent-index-marketplace    2.2.0 → 2.3.0    https://github.com/.../main.zip
+
+   Pull?  [a]ll  [s]elect each  [n]one
+   ```
+
+4. **Response handling:**
+   - `[a]ll` (or `--all` flag passed at invocation, which auto-answers `a`): pull every candidate without further prompts. Per-entry: HTTPS GET the `zip_url`, save to `<project_dir>/.agent-index/staging/upstream-fetch-<timestamp>/`, extract, then **overwrite the local `<project_dir>/<entry-name>/` directory contents** with the extracted files. Preserve any `.git/` directory present locally. Apply LF normalization to all text-shaped files (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`) before writing — same logic as Step 0 (closes bug `20260504-8d20ea22-7` in this code path too).
+   - `[s]elect`: for each candidate, ask `Pull <name> <local_version> → <directory_version>? [Y/N]`. Y → pull as above. N → skip this entry.
+   - `[n]one`: skip all upstream pulls. Halt with "No fetch performed. Re-run without --check-upstream to publish whatever is currently local, or run with --check-upstream again when ready to fetch upstream." (Don't proceed to Step 0 — admin clearly didn't want any of this.)
+
+5. **Per-entry failure handling during fetch:**
+   - GitHub returns non-2xx: surface error + URL + status code, ask "skip this entry and continue with others? [Y/N]". On Y, skip; on N, halt.
+   - Zip is corrupt or extract fails: same skip-or-halt prompt.
+   - Local `.git/` accidentally clobbered (defensive check after extract): surface, halt — don't continue with a damaged source tree.
+
+6. After Step 0a completes (or is skipped because `--check-upstream` wasn't passed), the local source tree reflects either the pre-existing state or the freshly-pulled upstream. Step 0 then proceeds with that as the basis.
+
+Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> → <target>`).
+
+---
+
 ### Step 0: Sync Local Infrastructure to Remote (added in core 3.4.0)
 
 Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
@@ -96,6 +135,81 @@ After sync completes, the remote `/agent-index-core/` and `/agent-index-marketpl
 **Optional `--no-sync` flag:** for power users or recovery scenarios where the admin wants to skip this step entirely (e.g., if files were already pushed via a script). When passed, Step 0 is skipped and the task starts at Step 1.
 
 **Why limited to `agent-index-core/` and `agent-index-marketplace/`:** Marketplace collections (`projects`, `strategy`, etc.) are managed via `download-collection`/`install-collection`/`upgrade-collection` and have their own update flow. Adapter bundles ship via `edit-org` Step 2. Binary tools ship via the binaries registry (`apply-updates` Phase 1 step 7). Step 0 here only covers the two infrastructure collections that don't have any other shipping path.
+
+---
+
+### Step 0b: Detect Prerequisites Triggered by the Diff (added in core 3.5.0)
+
+Step 0 produced a file-level diff (which files were uploaded, which were deleted, which were synced). Some of those changes have implications beyond just "files changed at remote": they may require the bootstrap zip to be regenerated, or specific CHANGELOG-entry types to be added. This step walks the diff and infers those implications so admins don't have to remember which file changes need which prereq tasks.
+
+Walk the file paths from Step 0's `upload` + `delete` sets. For each path, apply the **prerequisite lookup table**:
+
+| File path matches | Prereq triggered | CHANGELOG entry implication |
+|---|---|---|
+| `mcp-servers/filesystem/aifs-exec.bundle.js` | Bootstrap regen REQUIRED | `adapter-bundle-update` (from→target version from `mcp-servers/filesystem/adapter.json`) |
+| `mcp-servers/filesystem/aifs-exec.sh` | Bootstrap regen REQUIRED | (folded into adapter-bundle-update if bundle.js also changed; otherwise standalone adapter-bundle-update) |
+| `mcp-servers/filesystem/adapter.json` | (no prereq) | (folded into adapter-bundle-update if bundle.js also changed) |
+| `CLAUDE.md` (root) | Bootstrap regen REQUIRED (canonical CLAUDE.md ships in bootstrap) | `claude-md-update` |
+| `members-registry.json` (root) | Bootstrap regen REQUIRED (members-registry ships as bootstrap seed) | `members-registry-update` (new entry type as of 3.5.0 — `update-log.json` consumers must tolerate unknown entry types) |
+| `org-config.json` → `remote_filesystem.connection.all_members_group` change | Bootstrap regen REQUIRED (controls bootstrap zip share recipients) | `org-config-update` with `changes: ["all_members_group"]` |
+| `org-config.json` → `paths.bootstrap_zip_path` change | Bootstrap regen REQUIRED (location changed) | `org-config-update` |
+| `org-config.json` → other fields (`org_name`, `admins[]`, `org_roles[]`, etc.) | NO bootstrap regen | `org-config-update` with the changed fields listed |
+| `agent-index.json` change | NO bootstrap regen (Step 0 already synced it; bootstrap reads from local at next regen anyway) | (folded into `core-update` if version field changed) |
+| `agent-index-core/collection.json` version field changed | NO bootstrap regen | `core-update` |
+| `agent-index-marketplace/collection.json` version field changed | NO bootstrap regen | `marketplace-update` |
+| Any other file under `agent-index-core/` | (folded into `core-update`) | n/a |
+| Any other file under `agent-index-marketplace/` | (folded into `marketplace-update`) | n/a |
+
+Aggregate the results:
+
+- A `Set<prerequisite>` — for 3.5.0 this is just `{bootstrap_regen}` or empty.
+- A `Map<entry_type, entry_payload>` — the set of CHANGELOG entries to be added.
+
+Surface the aggregated picture to the admin:
+
+```
+Detected from your diff:
+
+  Prerequisites:
+    ✓ Bootstrap zip regeneration required
+      Triggered by: mcp-servers/filesystem/aifs-exec.bundle.js (sha A → sha B)
+      Triggered by: CLAUDE.md (sha C → sha D)
+
+  CHANGELOG entries to be written:
+    - core-update           3.4.0 → 3.5.0
+    - adapter-bundle-update 2.2.1 → 2.2.2
+    - claude-md-update      (refresh)
+
+Run prerequisites and proceed to publish? [Y/N]
+```
+
+If no prereqs were detected and at least one CHANGELOG entry was inferred: surface only the entries section and the same Y/N prompt.
+
+If neither prereqs nor entries were detected (Step 0 had no real changes): surface "Nothing has changed since the last publish." and halt cleanly.
+
+On `N`: halt without running prereqs or writing CHANGELOG. Step 0's sync already happened; remote files reflect local state. Subsequent `@ai:publish-updates` re-runs will see no diff (idempotent) and report no-op.
+
+On `Y`: proceed to Step 0c.
+
+---
+
+### Step 0c: Run Prerequisites (added in core 3.5.0)
+
+For each prerequisite in the aggregated set:
+
+**`bootstrap_regen`:** Follow the shared subroutine at `agent-index-core/templates/regenerate-bootstrap.md`. Pass parameters:
+
+- `<project_dir>`: the agent-index install directory.
+- `<source-trigger>`: a concise summary of the changes that triggered the regen, e.g. `"adapter bundle 2.2.1 → 2.2.2"` or `"CLAUDE.md and adapter bundle changed"`.
+- `<allow-skip>`: `true` (publish-updates is OK with a no-op regen if the content hash hasn't actually changed — this happens when files moved through Step 0 but ended up with the same byte-for-byte content as what's already in the deployed bootstrap).
+
+The subroutine handles assembling zip contents, LF normalization, zip creation, upload to `/shared/bootstrap/member-bootstrap.zip`, all-members re-share, and updating `published-state.json`'s `bootstrap_content_hash` field.
+
+If the subroutine reports the bootstrap content was unchanged (the `<allow-skip>` no-op path): surface "Bootstrap content unchanged; existing zip retained." and continue. Don't fail; it's possible for `mcp-servers/filesystem/aifs-exec.bundle.js` to be byte-identical to what's already in the zip even though Step 0 saw it as `differs` (e.g., a checksum-only change in `adapter.json` without a content change in the bundle — unusual but valid).
+
+If the subroutine fails: surface the error and halt. Files from Step 0 stay at remote (idempotent retry-friendly), but no CHANGELOG entry is written. Admin can fix the cause and re-run.
+
+After all prerequisites complete, surface a one-line summary per prereq (`✓ Bootstrap regenerated and uploaded`) and proceed to Step 1.
 
 ---
 

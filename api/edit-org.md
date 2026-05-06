@@ -170,9 +170,15 @@ Proceed immediately to regenerate the bootstrap zip.
 
 **5. Regenerate and redistribute bootstrap zip:**
 
-- Regenerate the bootstrap zip following the same procedure as create-org Step 12 (assemble zip contents, include updated bundle files, include current CLAUDE.md and settings.json, create zip, upload to remote at `/shared/bootstrap/member-bootstrap.zip`).
-- **Normalize line endings to LF for every shell script and text file in the zip, regardless of the host OS the regen runs on** (added in core 3.3.1, closes bug `20260504-8d20ea22-7`). When the regen runs on a Windows host, the file-write APIs default to applying CRLF — which breaks any shell script in the bundle (notably `mcp-servers/filesystem/aifs-exec.sh` and `mcp-servers/permission-helper/show-plan.sh`) because `bash` cannot parse `\r` characters. Before adding any file to the zip, read its bytes, replace `\r\n` sequences with `\n`, replace standalone `\r` with `\n`, then add the LF-normalized bytes to the zip. Apply this to all text-shaped files in the zip — shell scripts, JS, HTML, JSON, markdown. There is no shipped artifact in the bootstrap zip that legitimately needs `\r`.
-- Surface the member distribution instructions (same format as create-org Step 12):
+Follow the shared subroutine at `agent-index-core/templates/regenerate-bootstrap.md`. Pass these parameters:
+
+- `<project_dir>`: the agent-index install directory (the directory containing `agent-index.json` at root).
+- `<source-trigger>`: `"adapter bundle updated to <new_version>"` (or, if the regen was forced without an actual bundle change, `"admin-requested regen"`).
+- `<allow-skip>`: `false` (always regenerate when triggered from edit-org — admins are running this deliberately).
+
+The subroutine handles assembling zip contents, LF normalization (closes bug `20260504-8d20ea22-7`), zip creation, upload, the all-members re-share, and updating `published-state.json`.
+
+After the subroutine completes, surface the member distribution instructions:
 
 > "The bootstrap zip has been regenerated with the updated adapter bundle and uploaded to your remote filesystem."
 >
