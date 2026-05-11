@@ -1,8 +1,9 @@
 ---
 title: Pin Binary Version
 slug: pin-binary-version
+name: pin-binary-version
+version: 1.0.0
 collection: agent-index-core
-collection_version: 3.4.0
 type: task
 admin_only: true
 inputs:

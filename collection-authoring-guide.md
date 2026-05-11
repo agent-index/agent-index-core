@@ -613,6 +613,8 @@ During member setup, `credentials.json` is copied from the remote filesystem to 
 
 This pattern generalizes to any OAuth2 service where the "app" is an org-level decision but the "user authorization" is per-member. Slack OAuth, Google Drive, Microsoft Graph, and similar APIs all follow this shape.
 
+**Documented exception: filesystem-backend credentials are inline.** The OAuth client credentials for the **filesystem adapter itself** (currently `gdrive`) live inline in `org-config.json` under `remote_filesystem.connection.client_id` / `client_secret`, NOT at `/org-config/apps/{app}/credentials.json`. The reason is bootstrap order: the filesystem must authenticate before any `aifs_*` path resolves, so its credentials must be readable from the local file directly (via `agent-index.json` and `org-config.json` on disk), not from a path that requires `aifs_read`. This is the one documented exception to the split pattern. Every other OAuth-using collection (`email-triage`, `slack-triage`, future Microsoft Graph / Drive / etc.) follows the split pattern. Schema note in `org-config-schema.json` documents this inline.
+
 ### Dependency management
 
 Include a `requirements.txt` (Python) or equivalent in the `/apps/` directory with pinned version ranges. Don't leave dependency versions unspecified — upstream libraries break.

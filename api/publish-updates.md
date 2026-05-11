@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.0.0
+version: 3.3.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -85,19 +85,26 @@ Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> →
 
 Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
 
+**Source-tree skip-list (applied symmetrically to upload AND delete decisions; revised in core 3.6.0).** The following paths are filtered out of the diff entirely — neither uploaded nor proposed for deletion. Step 0 is a **source-tree** sync; non-source files are out of scope in both directions:
+
+- `.git/`, `node_modules/`, `dist/` (Go build output for permission-helper-go)
+- Any path containing `/.` (hidden files except for explicitly-shipped ones — `.claude/`, `.gitkeep`)
+- Editor and temp files: `*.swp`, `*.swo`, `*.bak`, `*.tmp`
+- Compiled binaries: `*.exe`, `*.dll`, `*.so`, `*.dylib` — these ship via the binaries registry, not via `aifs_write`
+- OS metadata: `.DS_Store`, `Thumbs.db`
+- Ephemeral scratch files: `test_*.{txt,md,json}`, `tmp_*` — these are common scratch/test artifacts; the friction is intentional. Authors who DO want to ship a file matching one of these patterns can rename it.
+
+The principle: **Step 0 only manages files it would itself upload. If a file's path pattern means Step 0 wouldn't upload it, Step 0 won't delete it either.** Pre-3.6.0 the skip-list was applied only on the upload side, which produced spurious "delete this remote .exe?" prompts when leftover binaries lingered at remote. Post-3.6.0 the filter is symmetric — those files are filtered out of both walks.
+
 For each of the two infrastructure roots (`agent-index-core/`, `agent-index-marketplace/`):
 
-1. **Walk the local directory recursively.** For each file, compute the relative path from the directory root and the SHA-256 of the local file's content. Skip:
-   - `.git/`, `node_modules/`, `dist/` (Go build output for permission-helper-go)
-   - Any path containing `/.` (hidden files except for explicitly-shipped ones — `.claude/`, `.gitkeep`)
-   - Editor swap files (`*.swp`, `*.bak`, `*.tmp`)
-   - Compiled binaries (`*.exe`, `*.dll`, `*.so`, `*.dylib`) — these ship via the binaries registry, not via aifs_write
+1. **Walk the local directory recursively.** For each file, compute the relative path from the directory root and the SHA-256 of the local file's content. Apply the skip-list above; filtered files are excluded entirely (they will not appear as `local_only`, `differs`, or `synced`).
 2. **Read the corresponding remote file** via `aifs_read("/{collection_root}/{relative_path}")`. If the remote file exists, compute its SHA-256. If it does not exist (NOT_FOUND), treat as "missing remotely."
 3. **Classify each local file:**
    - `local_only` — local exists, remote missing → upload
    - `differs` — local exists, remote exists, hashes differ → upload (overwrite)
    - `synced` — hashes match → no-op
-4. **Detect remote files that no longer exist locally.** List the remote directory recursively via `aifs_list`. For each remote file with no local counterpart, mark `remote_only`. These are candidates for deletion (e.g., a file that was renamed or removed on a `git pull`).
+4. **Detect remote files that no longer exist locally.** List the remote directory recursively via `aifs_list`. **Apply the skip-list above to the remote walk as well** — a remote file matching any skip-list pattern is filtered out (not flagged as `remote_only`, not proposed for deletion). For each remaining remote file with no local counterpart, mark `remote_only`. These are candidates for deletion (e.g., a file that was renamed or removed on a `git pull`).
 
 Aggregate counts for both roots:
 

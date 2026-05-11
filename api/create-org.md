@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.0.1
+version: 3.0.2
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -501,12 +501,6 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
   "last_updated": "{today YYYY-MM-DD}",
   "remote_filesystem": {
     "backend": "{backend}",
-    "exec": {
-      "adapter": "{backend}",
-      "adapter_version": "1.0.0",
-      "bundle_path": "mcp-servers/filesystem/aifs-exec.bundle.js",
-      "shell_wrapper": "mcp-servers/filesystem/aifs-exec.sh"
-    },
     "auth": {
       "method": "per-member"
     },
@@ -514,6 +508,12 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
       // Backend-specific connection fields from Step 3
     }
   },
+  // Note: in v3, the adapter exec config (bundle_path, shell_wrapper, adapter_version)
+  // lives in agent-index.json → remote_filesystem.exec — NOT here. org-config.json
+  // only carries org-level metadata (backend identifier, auth method, connection
+  // bootstrap fields). The v2-era `mcp_server` block and the misplaced `exec` block
+  // were both removed in core 3.6.0 (closes bug 20260502-8d20ea22-3). The strip
+  // step in apply-updates Phase 1 step 5 catches existing installs.
   "paths": {
     "library_root": "/",
     "shared_root": "/shared/",
