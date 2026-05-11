@@ -6,6 +6,19 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.6.1] — 2026-05-11
+
+### Fixed
+
+- **`apply-updates` 3.3.0 → 3.3.1: hoist `manifest_sync` drift-detection sweep out of Phase 4's per-collection-update loop into a new unconditional Phase 4.5** (closes bug `20260511-8d20ea22`). The 3.6.0 spec placed the manifest_sync drift check inside Phase 4 step 3.5, which only fires when an apply-updates batch contains a `collection-update` operation. The 3.6.0 release itself shipped only `core-update` and `marketplace-update` operations, so the very upgrade that introduced the feature couldn't trigger its own backfill — every installed collection's local files stayed at the pre-3.6.0 versions and `manifest_sync` never got populated. The 3.6.1 fix extracts the file-content sync mechanics into a standalone subroutine, calls it from both Phase 4 step 3.5 (per-collection-update, same semantics as 3.6.0) AND from a new Phase 4.5 that runs unconditionally on every apply-updates invocation. Phase 4.5 reads `org-config.json` once, compares `installed_collections[].version` against `member-index.json`'s `manifest_sync` map, and invokes the subroutine for any collection that's missing or drifted. On a no-op run the cost is one remote read; on a drifted run it's bounded by the number of out-of-sync collections × capabilities each.
+
+### Notes
+
+- Bill's dev_install hit the bug as the first install to apply 3.6.0. A one-shot backfill script (`backfill-manifest-sync.js` in the outputs scratch dir) was run manually to recover; 7 collections / 45 capabilities synced, `manifest_sync` populated. The 3.6.1 release ships the spec fix so the next install upgrading from 3.5.x → 3.6.1 (or beyond) gets the backfill automatically.
+- All API manifests' `collection_version` bumped 3.6.0 → 3.6.1. `apply-updates` task version 3.3.0 → 3.3.1. No other tasks changed.
+
+---
+
 ## [3.6.0] — 2026-05-07
 
 ### Fixed

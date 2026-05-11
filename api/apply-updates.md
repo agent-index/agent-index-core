@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.3.0
+version: 3.3.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -270,36 +270,7 @@ For each `collection-update` where the member has capabilities installed from th
    - Delegate to the org-setup skill's upgrade flow (Phase 4 steps 1–9 of org-setup's "Upgrading an Installed Capability" section)
    - This handles: reading the new definition from remote, reading the existing setup responses, running the upgrade script's migration, presenting reset parameters to the member for input, writing updated files, updating `member-index.json`
 
-3.5. **Sync local capability files with the upgraded collection** (added in core 3.6.0; closes bugs `20260502-8d20ea22-5` and `20260507-8d20ea22`). Pre-3.6.0 Phase 4 bumped `member-index.json`'s recorded versions but didn't actually rewrite the local `.md`, `-setup.md`, and `-manifest.json` files for capabilities. Local file content silently drifted from the bookkeeping. The fix: after step 3 above runs (which handles reset-parameter prompts and `member-index.json` updates), explicitly resync every capability the member has installed from this upgraded collection.
-
-   **Granular tracking.** `member-index.json` carries a top-level `manifest_sync` object: `{ "<collection>": "<last_synced_version>", ... }`. After this step completes for collection X at version V, set `manifest_sync[X] = V`. The next apply-updates run uses `manifest_sync` to detect drift: if `manifest_sync[X]` is missing OR less than `installed_collections[X].version` from `org-config.json`, this step re-runs the sync for X. This subsumes the "one-time backfill" pattern — historical drift, partial-failure recovery, and ongoing sync are all the same code path.
-
-   For each capability `name` of `type` (skill or task) the member has installed from this collection:
-
-   1. **Read the three canonical files from remote:**
-      - `def_md = aifs_read("/{collection}/api/{name}.md")`
-      - `setup_md = aifs_read("/{collection}/api/{name}-setup.md")` — if the file exists; some capabilities have no setup template, in which case skip this read.
-      - `manifest_json = aifs_read("/{collection}/api/{name}-manifest.json")`
-
-   2. **LF-normalize text content** — apply the same normalization Phase 1 step 6 uses for shell scripts, applied to all `.md` and `.json` content here. Replace `\r\n` and standalone `\r` with `\n` before writing.
-
-   3. **Write each file to the member-local install path(s).** The current install layout is `members/{member_hash}/installed/{type}/{name}/`. While the legacy layout `members/{member_hash}/{type}/{name}/` still exists on a given install, write to **both** paths to keep them in sync (the migration to single-layout is tracked separately and is not in scope here). Specifically write:
-      - `{install_dir}/{name}.md` (from `def_md`)
-      - `{install_dir}/{name}-setup.md` (from `setup_md`, if read)
-      - `{install_dir}/manifest.json` (from `manifest_json`)
-
-   4. **Synchronize manifest.json fields** that are mechanically derivable from authoritative sources elsewhere:
-      - `manifest.json` `version` ← the value of `version` in the freshly-written `{name}.md` frontmatter (parsed from the `.md` file just written).
-      - `manifest.json` `collection_version` ← the value of `version` in the upgraded `collection.json` (read from `aifs_read("/{collection}/collection.json")`; a single fetch shared across all capabilities in this collection upgrade is sufficient — no need to re-read per capability).
-      - Idempotent: read current values, write only if different. No-op if both already match.
-
-   After all the collection's capabilities have been resynced, **update `member-index.json`** to set `manifest_sync[<collection>] = <new_collection_version>`. Write the updated `member-index.json`.
-
-   **Idempotent first-run behavior.** Existing installs (pre-3.6.0) have no `manifest_sync` field — every collection in `installed_collections[]` will look like drift on the first 3.6.0 apply-updates run. That's intentional: the first run sweeps every installed collection's capabilities into a synced state, then `manifest_sync` is populated and subsequent runs only sync collections that actually changed. For a typical 7-collection / ~45-capability install, the first sweep is ~135 `aifs_read` calls plus the corresponding writes — bounded and acceptable.
-
-   **Partial-failure recovery.** If the sync fails partway through a collection (network glitch, a single `aifs_read` errors), `manifest_sync[<collection>]` is NOT advanced. The next apply-updates run detects the same drift and retries. This is more robust than a single boolean gate — failures don't poison the system into a "we ran the backfill, no need to retry" state.
-
-   **Setup-responses are NOT touched.** This step writes `{name}.md`, `{name}-setup.md`, and `manifest.json`. It does NOT touch any per-member or per-org state files like setup-responses. The org-setup upgrade flow in step 3 above is the one place that mutates setup state, with the appropriate carry-forward / reset-parameter logic. This file-content sync is purely about keeping the canonical capability artifact in sync with what the collection ships.
+3.5. **Sync local capability files for this specific upgraded collection** (added in core 3.6.0; revised in core 3.6.1 to delegate the actual sync mechanics to the standalone subroutine described below). After step 3 above runs (which handles reset-parameter prompts and `member-index.json` upgraded_date stamps), invoke the **manifest-sync subroutine** (defined at the end of this section) for this collection at its target version. The subroutine handles the file reads, LF-normalization, local writes, manifest field synchronization, and `manifest_sync[<collection>]` bookkeeping. In 3.6.0 the mechanics lived inline here, but that placement made step 3.5 unreachable when an apply-updates batch contained no collection-update operations (so the manifest_sync backfill described in the original spec never ran on the very upgrade that introduced the feature — closes bug `20260511-8d20ea22` filed against 3.6.0). In 3.6.1 the mechanics moved to a standalone subroutine called from both here AND from a new Phase 4.5 that runs unconditionally — see below.
 
 4. **Merge new triggers into routing.json.** After upgrading all capabilities from a collection, read the updated `collection.json` from remote and check whether it contains trigger arrays (object-format `api` entries with a `triggers` field). If it does:
    - Read the member's existing `routing.json` from `members/{member_hash}/profile/routing.json`. If it does not exist, initialize it with an empty `mappings` array (version `"1.0.0"`, member_hash, timestamp).
@@ -311,6 +282,59 @@ For each `collection-update` where the member has capabilities installed from th
 5. Surface: "{collection} capabilities upgraded to {target_version}."
 
 If a capability's upgrade requires member input (reset parameters or new required parameters): pause, gather input, then continue. The member is not asked about preserved parameters — those carry forward silently.
+
+**Phase 4.5 — manifest_sync drift sweep (added in core 3.6.1)**
+
+This phase runs **unconditionally** on every `apply-updates` invocation that reaches Phase 4 (i.e. any run with at least one operation in the merged plan, regardless of operation type — `core-update`, `marketplace-update`, `collection-update`, `adapter-bundle-update`, or `binary-update`). It detects drift between the member's locally-synced capability files and the org's currently-installed collection versions, and re-runs the manifest-sync subroutine for any collection that's out of sync. This is the structural fix for the 3.6.0 spec bug where step 3.5's drift-detection prose described a one-time backfill that was never reachable because it lived inside Phase 4's per-collection-update loop.
+
+1. Read `member-index.json`'s `manifest_sync` object (default to `{}` if the field is absent — pre-3.6.1 installs won't have it).
+2. Build the org's collection-version map: read `aifs_read("/org-config.json")` and extract `installed_collections[]`. For each entry `{ name, version, status }` with `status: "installed"`, record `orgCollectionVersions[name] = version`. (Skip entries that are removed/deprecated.)
+3. Build the member's effective collection set: union of the collections appearing in `member-index.installed.skills[].collection` and `member-index.installed.tasks[].collection`. (Members may have a subset of the org's installed collections.)
+4. For each collection `C` in the effective set:
+   - Let `orgVersion = orgCollectionVersions[C]` (the version the org has installed). If absent (collection is in member's installs but not in org-config — this is an inconsistency; surface a notice and skip).
+   - Let `syncedVersion = manifest_sync[C]` (may be undefined).
+   - If `syncedVersion` is undefined OR `syncedVersion !== orgVersion`: this collection is drifted. Invoke the manifest-sync subroutine for `(C, orgVersion)`.
+   - If `syncedVersion === orgVersion`: this collection is up to date; skip.
+5. After the loop, the `manifest_sync` field reflects the current synced state of every collection the member has installed.
+
+**First-run sweep behavior on pre-3.6.1 installs.** On the very first 3.6.1 apply-updates run, no collection has a `manifest_sync` entry, so every installed collection is detected as drifted. The subroutine runs for each — for a typical 7-collection / 45-capability install that's ~135 `aifs_read` calls plus writes. Bounded, acceptable, and idempotent (subsequent runs only sweep collections that actually changed). This is the same backfill behavior promised in the 3.6.0 CHANGELOG but couldn't deliver due to the spec bug; the 3.6.1 placement actually delivers it.
+
+**Partial-failure recovery.** If the subroutine fails partway through a collection (e.g. one `aifs_read` errors), `manifest_sync[C]` is left at its prior value (NOT advanced). The next apply-updates run detects the same drift and retries. More robust than a one-shot boolean gate.
+
+**Cost on a no-op run.** If everything is already synced, Phase 4.5 reads `org-config.json` (one remote read) and compares the resulting map against `manifest_sync` in memory. No file reads, no file writes — just the one config read. Cheap enough to run every invocation.
+
+---
+
+**Subroutine: sync local capability files for a collection at a target version** (called from Phase 4 step 3.5 and from Phase 4.5)
+
+Given `(collection, targetVersion)`:
+
+1. **Identify the capabilities to sync.** Read `member-index.json`'s `installed.skills[]` and `installed.tasks[]`, filter to entries with `collection === <collection>`. Each entry has `name` and (implicit by which array) `type`.
+
+2. **Read the three canonical files from remote** for each capability (these can be issued in parallel per capability):
+   - `def_md = aifs_read("/{collection}/api/{name}.md")`
+   - `setup_md = aifs_read("/{collection}/api/{name}-setup.md")` — if the file exists; some capabilities have no setup template, in which case `setup_md` is null.
+   - `manifest_json = aifs_read("/{collection}/api/{name}-manifest.json")`
+
+3. **Read the collection.json once** for this collection: `coll = aifs_read("/{collection}/collection.json")`. Use `coll.version` as the authoritative collection version for the manifest field sync below. (This is the value the org has on remote, which equals `targetVersion` in steady state.)
+
+4. **LF-normalize text content** — apply the same normalization Phase 1 step 6 uses for shell scripts, applied to all `.md` and `.json` content here. Replace `\r\n` and standalone `\r` with `\n` before writing.
+
+5. **Write each file to the member-local install path(s).** The current install layout is `members/{member_hash}/installed/{type}/{name}/`. While the legacy layout `members/{member_hash}/{type}/{name}/` still exists on a given install, write to **both** paths to keep them in sync (the migration to single-layout is tracked separately and is not in scope here). Specifically write:
+   - `{install_dir}/{name}.md` (from `def_md`)
+   - `{install_dir}/{name}-setup.md` (from `setup_md`, if read)
+   - `{install_dir}/manifest.json` (from `manifest_json`)
+
+6. **Synchronize manifest.json fields** that are mechanically derivable from authoritative sources elsewhere:
+   - `manifest.json` `version` ← the value of `version` in the freshly-written `{name}.md` frontmatter (parsed from the `.md` file just written).
+   - `manifest.json` `collection_version` ← `coll.version` from step 3.
+   - Idempotent: read current values, write only if different. No-op if both already match.
+
+7. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` in `member-index.json` and write the file. If any capability failed in steps 2–6, do NOT advance `manifest_sync[<collection>]`; the failure leaves the entry at its prior value, and the next apply-updates run retries.
+
+**Setup-responses are NOT touched.** This subroutine writes `{name}.md`, `{name}-setup.md`, and `manifest.json`. It does NOT touch any per-member or per-org state files like setup-responses. The org-setup upgrade flow (called from Phase 4 step 3) is the one place that mutates setup state, with the appropriate carry-forward / reset-parameter logic. This file-content sync is purely about keeping the canonical capability artifact in sync with what the collection ships.
+
+---
 
 **Phase 5 — Natural language routing initialization**
 
