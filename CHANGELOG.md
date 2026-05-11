@@ -6,6 +6,25 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.0] — 2026-05-11
+
+### Added
+
+- **`apply-updates` 3.3.1 → 3.4.0: Edge Cases section restored and extended.** The `apply-updates.md` Edge Cases section was truncated mid-word at "(log was truncated or rebui" across every commit in the file's history — a long-standing documentation gap. 3.7.0 restores the missing tail and adds five new edge-case specifications: cursor pointing at a missing log entry (reset-vs-advance disambiguation), authentication failure mid-Phase-1, partial Phase 4 failure (cursor non-advancement and per-collection success tracking), network errors during Step 0 / Step 5, Phase 2/3 split-success semantics, Phase 4.5 with missing `installed_collections[]`, and the admin-publishing-their-own-update case. Closes idea `apply-updates-edge-cases-tail-restoration`. The Constraints section is also consolidated and extends to make the Phase 1 step 5 strip the documented exception to the "never modify org-level remote files" rule.
+
+- **`apply-updates` 3.3.1 → 3.4.0 + `org-setup` 3.2.1 → 3.2.2: member-index `installed[].version` drift fix.** Two-pronged. (a) Spec clarification in `org-setup.md` — Phase 4 step 11 (install flow) and Upgrading flow step 9 now explicitly say "use the `.md` frontmatter version, not the collection version" when writing the per-capability `version` field in `member-index.json`. Historically this was ambiguous and the agent often wrote the collection-level version, producing the "44 local ahead of remote" rows in `check-updates` reports. (b) Data repair in `apply-updates.md` — the Phase 4.5 manifest-sync subroutine (introduced in 3.6.1) gains a new step 7 that also reconciles `member-index.installed[].version` with the freshly-read `.md` frontmatter version for every capability synced. On the first 3.7.0 apply-updates run, the subroutine's drift detection treats every collection as drifted (because the data shape changes), runs the sweep, and reconciles all 44 entries in one pass. Subsequent runs no-op.
+
+- **Admin disambiguation for ambiguous "check for updates" routing** (`CLAUDE.md.template`). The natural-language phrase "check for updates" maps to two distinct intents — member-apply (`apply-updates`) and admin-available (`check-updates` in marketplace) — that look identical from the surface but answer different questions. The routing layer now surfaces a one-question clarifying prompt for admins issuing ambiguous phrases, presenting both options and routing the response. Non-admins always route to `apply-updates`; explicit `@ai:update` / `@ai:check-updates` aliases bypass the prompt. Closes idea `check-updates-admin-disambiguation`.
+
+### Notes
+
+- All API manifests' `collection_version` bumped 3.6.1 → 3.7.0. `apply-updates` manifest 3.3.1 → 3.4.0. `org-setup` manifest 3.2.1 → 3.2.2.
+- Companion release: `agent-index-marketplace` 2.3.0 → 2.4.0 (adds the Available-to-Install section to `check-updates`). `agent-index-marketplace-developer` 1.2.4 → 1.3.0 (ships `lib/preflight-cli.js`, the runnable preflight CLI used by 3.7.0's push script as a mandatory pre-step).
+- The Phase 4.5 subroutine extension means the first 3.7.0 apply-updates run does N capability writes per drifted collection — bounded, idempotent, surfaced in the per-cap progress output.
+
+---
+
+
 ## [3.6.1] — 2026-05-11
 
 ### Fixed

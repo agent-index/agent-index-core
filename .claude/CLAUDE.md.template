@@ -83,7 +83,8 @@ The general pattern: all task and skill definitions live at `/{collection}/api/{
 | Request pattern | Route to |
 |---|---|
 | `@ai:setup` or "set up my workspace" | org-setup skill |
-| `@ai:update` or "check for updates" | apply-updates task |
+| `@ai:update` (explicit alias only) | apply-updates task |
+| "check for updates", "are there updates available", "what's new", "am I up to date" | **see disambiguation below** |
 | `@ai:tutorial` or "how does this work" | system-tutorial skill |
 | `@ai:member-bootstrap` or "fix my connection" | member-bootstrap skill |
 | `@ai:preferences` / `@ai:prefs` or "change my preferences" | preferences-management skill |
@@ -96,6 +97,28 @@ The general pattern: all task and skill definitions live at `/{collection}/api/{
 | `@ai:view-audit` or "show audit trail", "view activity" | view-audit task (v3.1.0+) |
 | `@ai:verify-workspace-policy` or "verify workspace policy", "check workspace setup" | verify-workspace-policy task (admin only, v3.1.0+) |
 | `@ai:upload-install-log` | upload-install-log task |
+
+### "Check for updates" disambiguation (added in core 3.7.0)
+
+The phrase "check for updates" (and near-paraphrases — "are there updates available", "what's new", "am I up to date", "check {something} for updates") maps to **two distinct intents** that look identical from the surface:
+
+1. **Member-apply intent.** "Are there pending org updates I need to apply to my local workspace?" → `apply-updates` task. Source of truth: the org's `/shared/updates/` log. Answers in terms of *what's been published for me*.
+2. **Admin-available intent.** "Are there newer versions available upstream than what my org has installed?" → `check-updates` task (in `agent-index-marketplace`). Source of truth: the resource-listings directory files (which broadcast the latest GitHub releases). Answers in terms of *what's available for the org to publish*.
+
+**Routing rule:**
+
+- If the request uses an **explicit alias** (`@ai:update` or `@ai:check-updates`), route directly — the alias is the unambiguous signal of intent.
+- If the request uses a **natural-language phrase**:
+  - **Non-admin member:** route to `apply-updates`. Members don't publish for the org, so the admin-available intent is not actionable for them.
+  - **Admin** (member_hash appears in `org-config.json` → `admins[]`): surface a one-question clarifying prompt before executing:
+    > "Two ways to interpret that:
+    > 1. **Apply pending updates to your local install** — pull anything your org has published that you haven't applied yet. (`@ai:update`)
+    > 2. **See what's available to publish for your org** — compare your org's installed versions against what's available upstream. (`@ai:check-updates`)
+    >
+    > Which one?"
+  - Route the response: "1" / "apply" / "apply pending" → `apply-updates`; "2" / "available" / "what's available" → `check-updates`.
+
+The prompt is suppressed for non-admins and for explicit `@ai:` invocations. This adds one round-trip for ambiguous admin requests but prevents the common failure mode where admins ask "are there updates?" and get a member-side "you're up to date" answer that doesn't reflect what they actually wanted to know.
 
 ### Marketplace aliases (available when `agent-index-marketplace` is installed)
 

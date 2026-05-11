@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.3.1
+version: 3.4.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -330,7 +330,9 @@ Given `(collection, targetVersion)`:
    - `manifest.json` `collection_version` ← `coll.version` from step 3.
    - Idempotent: read current values, write only if different. No-op if both already match.
 
-7. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` in `member-index.json` and write the file. If any capability failed in steps 2–6, do NOT advance `manifest_sync[<collection>]`; the failure leaves the entry at its prior value, and the next apply-updates run retries.
+7. **Synchronize `member-index.json` `installed[].version` for this capability** (added in core 3.7.0). Locate the member-index entry for `{type: <type>, name: <name>}` and set its `version` field to the value of `version` in the `.md` frontmatter (the same value just written to `manifest.json` in step 6). This is the data-repair counterpart to the spec clarification in `org-setup` Phase 4 step 11 and Upgrading flow step 9 (also added in 3.7.0): both flows record the `.md` frontmatter version, not the collection version. Pre-3.7.0 installs frequently recorded the collection version here, producing spurious "local ahead of remote" rows in `check-updates`. The Phase 4.5 first-run sweep on a 3.6.x install will reconcile every capability's recorded version with its frontmatter. Idempotent: write only if different from the current value. If the member-index entry is missing (the capability was uninstalled out-of-band): skip the write and surface a notice that the local install directory exists for a capability not in member-index.
+
+8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` in `member-index.json` and write the file. If any capability failed in steps 2–7, do NOT advance `manifest_sync[<collection>]`; the failure leaves the entry at its prior value, and the next apply-updates run retries.
 
 **Setup-responses are NOT touched.** This subroutine writes `{name}.md`, `{name}-setup.md`, and `manifest.json`. It does NOT touch any per-member or per-org state files like setup-responses. The org-setup upgrade flow (called from Phase 4 step 3) is the one place that mutates setup state, with the appropriate carry-forward / reset-parameter logic. This file-content sync is purely about keeping the canonical capability artifact in sync with what the collection ships.
 
@@ -463,10 +465,26 @@ Never advance the cursor without completing or explicitly declining all operatio
 
 Never force-install a new collection. Collection installs from `collection-install` operations are always optional. The member chooses whether to install capabilities from newly available collections.
 
-Never modify `org-config.json`, `members-registry.json`, or any remote file. The only remote reads are the update log and collection definitions.
+Never modify `org-config.json`, `members-registry.json`, or any remote file. The only remote reads are the update log and collection definitions. **Exception:** Phase 1 step 5 strips the deprecated `mcp_server` and `exec` blocks from `org-config.json` if present (the documented org-level write, gated on those blocks existing).
+
+This task is the sole authority for advancing `member-index.json`'s `last_applied_update` field. No other task should touch that field. Tasks that change individual capabilities (org-setup install/upgrade/remove) update the per-capability `installed[]` entries; only this task advances the cursor.
+
+This task must be re-runnable. Every write is either idempotent (re-running the same operation produces the same state) or guarded by cursor advancement (re-running with a fresh cursor skips already-applied operations). A crash, a network error, or an abort-on-prompt at any point should leave the install in a state that the next `@ai:update` invocation can resume cleanly.
 
 ### Edge Cases
 
 If the update log exists but is empty (no entries): surface "No update instructions have been published yet." Halt.
 
-If the member's `last_applied_update` points to an entry ID that doesn't exist in the log (log was truncated or rebui
+**Cursor points to a missing log entry.** If the member's `last_applied_update` points to an entry ID that doesn't exist in the log (log was truncated or rebuilt by an admin, or the cursor is otherwise out of sync), do not silently halt and do not silently advance. Surface: "Your local cursor points at update #{cursor}, but that entry is no longer in the org's update log. The log's earliest entry is #{first_id}. Either (a) reset your cursor to before #{first_id} to re-process all available updates, or (b) advance your cursor to #{latest_id} to accept the current state without reprocessing. Which would you like?" On (a): set `last_applied_update` to `null` and re-enter the task from Step 2 (all pending entries become applicable). On (b): set `last_applied_update` to the latest entry ID and exit cleanly. Do not pick a default; the choice is destructive in different ways and the member needs to make it consciously.
+
+**Authentication failure mid-Phase-1.** If any `aifs_*` call inside Phase 1 returns `NOT_AUTHENTICATED`, the auto-re-auth flow from session-start will be invoked. If auto-re-auth succeeds, retry the failing call and continue. If auto-re-auth fails: halt Phase 1 at the failed call (do not advance the cursor, do not partially-write `member-index.json`), surface "Authentication to the remote filesystem failed during Phase 1. Your local install is partially updated; the cursor has NOT advanced so the next `@ai:update` run will resume from where this one stopped. To restore the connection, say `@ai:member-bootstrap`."
+
+**Partial Phase 4 failure.** If one collection's upgrade succeeds and a subsequent collection's upgrade fails (the org-setup delegate throws, a single `aifs_read` fails, etc.), record which collections succeeded in a scratch field on `pending-update-plan.json` (collection-level granularity is fine — half-completed collections roll back to their pre-upgrade state via the `manifest_sync` no-advancement rule). Do **not** advance the cursor. Surface: "{N of M} collection upgrades applied. {failed_collection} did not upgrade: {error}. Your cursor remains at #{prior_cursor} so the next `@ai:update` run will retry. The {N} collections that did upgrade are recorded; we won't re-do them on retry."
+
+**Network errors during Step 0 (pending-plan read) or Step 5 (capability sync).** Treat as fail-safe: do not write `member-index.json`, do not advance the cursor. Surface the underlying error and the suggestion: "Network error reading {path}. Your install is unchanged. Re-run `@ai:update` when the connection is restored."
+
+**Phase 2 (CLAUDE.md) succeeds, Phase 3 (adapter bundle) fails.** The two phases write different artifacts and are independently recoverable. Phase 2's write of the new CLAUDE.md is durable as-is (the member is not in a broken state by virtue of a newer CLAUDE.md). Phase 3's adapter-bundle install failing leaves the existing local bundle in place — also a safe state. Continue with later phases (Phase 4 collection upgrades, etc.) and at the end surface: "Phase 3 (adapter bundle update from {from_v} → {to_v}) did not complete: {error}. Your existing adapter bundle ({current_v}) is still in place. The cursor has been advanced (the rest of the update applied cleanly); to retry just the adapter portion, say `@ai:edit-org` and choose 'Update Adapter Bundle' from the menu." Cursor advancement here is intentional and asymmetric with the Phase 4 case above — adapter bundles have a dedicated admin re-run path; collection upgrades do not.
+
+**Phase 4.5 reads org-config.json but org-config.json has no `installed_collections[]`.** Pre-3.4.0 org-config schema didn't include `installed_collections[]`. On such installs the field will be missing. Treat as empty array and surface a one-line notice: "Phase 4.5 manifest_sync sweep: org-config.json has no installed_collections[]; skipping. Run `@ai:edit-org` and populate installed_collections to enable Phase 4.5." This is rare in practice — every install since 3.4.0 has the field — but worth handling cleanly.
+
+**The member is also the admin who just published the update.** If `last_applied_update` and `latest_id` are equal because the member just published this update themselves (i.e., the admin running publish-updates is also a member), apply-updates should still run normally — it's the symmetric flow that brings the admin's local install into the same state any other member would reach by applying the update. The admin should not be silently no-op'd.

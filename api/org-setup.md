@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.2.1
+version: 3.2.2
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -176,6 +176,7 @@ For each skill and task in the determined installation order:
 9. Write the personalized installed instance to the member workspace
 10. Write `manifest.json` with version, provenance, parameter provenance map, and dependency status
 11. Write the entry to `member-index.json`:
+    - **`version` field:** use the `version` value from the `.md` frontmatter parsed in step 3 — the same value written to `manifest.json` in step 10. Do NOT use the collection's `collection.json` version. Capabilities version independently of their parent collection; the member-index entry tracks the per-capability frontmatter version. (This was historically ambiguous in the spec; clarified in core 3.7.0. The Phase 4.5 manifest_sync sweep in apply-updates 3.4.0 reconciles existing installs that wrote the wrong value.)
     - Check for alias collisions against all existing entries in the member index
     - If no collision: write the collection-assigned default alias
     - If collision: surface it to the member and resolve before writing (see Alias Collision Handling)
@@ -279,7 +280,7 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
 8. **Write the new version's content to the member's local installed instance.** This is a content-replacement step, not a bookkeeping step:
    - Write the contents read in step 2 to the corresponding local files at `members/{member_hash}/installed/{type}/{name}/` — `{name}.md`, `{name}-setup.md`, `{name}-manifest.json`. The local file content must match what's on remote at the new version.
    - Write the migrated `setup-responses.md`.
-9. Update the version in `member-index.json`
+9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4 step 11's wording; same data-shape principle.)
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
 
 **If no upgrade script exists for this version boundary (MINOR or PATCH upgrade):** still perform steps 2 and 8 — read the new content from remote and write it to the local install path. Carry all existing setup responses forward unchanged. Update the version in `member-index.json`. The "no upgrade script" branch is *not* a bookkeeping-only operation — the actual file content must be replaced. Skipping step 8 leaves the local file stale relative to what `member-index.json` claims is installed (which is the failure mode in bug `20260502-8d20ea22-5`).
