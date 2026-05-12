@@ -6,6 +6,26 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.1] — 2026-05-12
+
+### Fixed
+
+- **`apply-updates` 3.4.0 → 3.4.1: Phase 4.5 sentinel-trigger fix** (closes bug `20260512-8d20ea22`). The 3.7.0 release added step 7 to the manifest-sync subroutine (reconcile `member-index.installed[].version` with the `.md` frontmatter version). The intent was for the first 3.7.0 apply-updates run on a 3.6.x install to sweep all installed collections and apply the new step. It didn't work for installs with already-populated `manifest_sync` (from a 3.6.1+ backfill where values matched `org-config.installed_collections`) — the outer drift detector classified all collections as "synced" and the subroutine never ran. Same structural pattern as bug `20260511-8d20ea22` (Phase 4.5 unreachable from per-collection-update loop): the outer trigger doesn't know about new subroutine steps.
+
+  The fix introduces a `CURRENT_SUBROUTINE_REVISION` constant (currently `2` for the 3.7.0 step-7 shape) and a `manifest_sync_subroutine_revision[<collection>]` tracking field in `member-index.json`. Phase 4.5 now classifies a collection as drifted if `manifest_sync` is missing OR mismatched OR if the recorded revision is less than the current constant. Future subroutine-step additions just bump the constant; the trigger fires automatically on existing installs the next time they apply-updates. Belt-and-suspenders against the structural bug class.
+
+- **`publish-updates` 3.3.0 → 3.4.0: writes back to `org-config.installed_collections[]`** (closes bug `20260512-8d20ea22-2`). Pre-3.4.0 publish-updates wrote the update-log entry, published-state snapshot, and latest.json pointer — but never updated `org-config.installed_collections[]` for infrastructure (core / marketplace) version bumps. The entries advanced only for marketplace-collection installs via `install-collection`. Result: the org's record of "what's installed" drifted from the actual collection.json versions on remote across every infrastructure release. Surfaced as "version mismatch" notes in `check-updates` reports. Also broke the 3.7.0 Phase 4.5 drift detector, which used `installed_collections[X].version` as the "should be synced to" target — with stale data, drift detection was unreliable.
+
+  The fix: after the update-log + state + latest writes succeed, publish-updates now also reads `org-config.json`, walks the new entry's operations, and updates `installed_collections[]` entries to reflect the new `target_version` and `upgraded_date` (for upgrades) or adds/marks-removed entries (for installs / removes). Writes are idempotent. Failure here does NOT roll back the update-log entry — log is authoritative; org-config drift is recoverable on the next publish.
+
+### Notes
+
+- All API manifests' `collection_version` bumped 3.7.0 → 3.7.1. `apply-updates` task version 3.4.0 → 3.4.1. `publish-updates` task version 3.3.0 → 3.4.0. No other tasks changed.
+- Companion data-shape change: `member-index.json` gains a `manifest_sync_subroutine_revision` object (sibling to `manifest_sync`). Pre-3.7.1 installs treat its absence as "revision 0" everywhere, which triggers a one-time sweep across every installed collection on the first 3.7.1 apply-updates run. For Bill's install — which already had a manual one-shot reconcile of `installed[].version` done out-of-band — this sweep is effectively a no-op (the subroutine writes the same values that are already there) but advances the recorded revision to 2, closing the bookkeeping loop.
+
+---
+
+
 ## [3.7.0] — 2026-05-11
 
 ### Added

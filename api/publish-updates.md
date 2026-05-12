@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.3.0
+version: 3.4.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -444,6 +444,20 @@ Write a lightweight pointer file at `/shared/updates/latest.json` via `aifs_writ
 ```
 
 This file exists so that lightweight checks (session-start) can read a single small file to determine whether updates are pending, rather than reading the full update log.
+
+**Write back to `org-config.json` `installed_collections[]`** (added in core 3.7.1; closes bug `20260512-8d20ea22-2`):
+
+After the update log, state snapshot, and latest.json are all written successfully, update `org-config.json`'s `installed_collections[]` to reflect what was just published. This keeps the org's record of "what's installed" in sync with what publish-updates has actually shipped — pre-3.7.1 these entries advanced only for marketplace-collection installs and never for infrastructure (core / marketplace) version bumps, producing the long-standing drift between `installed_collections[X].version` and the actual `/{collection}/collection.json` files at remote.
+
+Read `aifs_read("/org-config.json")`. For each operation in the new entry:
+- **`core-update`:** Find the `installed_collections[]` entry with `name: "agent-index-core"`. Update its `version` to the operation's `target_version`. Update its `upgraded_date` to today (`YYYY-MM-DD`). If the entry doesn't exist (corrupt or hand-edited org-config), surface a notice and skip.
+- **`marketplace-update`:** Same for the `name: "agent-index-marketplace"` entry.
+- **`collection-update`:** Find the `installed_collections[]` entry with `name: <operation.details.collection>`. Update `version` to `target_version`, `upgraded_date` to today.
+- **`collection-install`:** Add a new entry to `installed_collections[]` if not present: `{ name, version, installed_date: today, repo_url: <from operation>, status: "installed" }`. If an entry exists (e.g. it was previously installed-and-removed), update its `version` + `upgraded_date` and flip `status` back to `"installed"`.
+- **`collection-remove`:** Find the entry and either remove it from `installed_collections[]` OR set its `status` to `"removed"` (preserve historical record). Choose preservation: keep the entry, flip `status`. This is the symmetric counterpart to the install path.
+- **Other operation types** (`claude-md-update`, `adapter-bundle-update`, `binary-update`, `members-registry-update`, `org-config-update`): no `installed_collections[]` write — these don't track here.
+
+Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...)`. Idempotent: re-running publish-updates with the same target_version is a no-op for these fields. The write is atomic with respect to one entry — if it fails after the update log was written, surface the failure but do NOT roll back the log entry (members can still apply the update; org-config drift is a bookkeeping issue, recoverable on the next publish).
 
 **On success:** Surface confirmation:
 

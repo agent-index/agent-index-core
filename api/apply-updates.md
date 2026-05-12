@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.4.0
+version: 3.4.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -283,19 +283,26 @@ For each `collection-update` where the member has capabilities installed from th
 
 If a capability's upgrade requires member input (reset parameters or new required parameters): pause, gather input, then continue. The member is not asked about preserved parameters — those carry forward silently.
 
-**Phase 4.5 — manifest_sync drift sweep (added in core 3.6.1)**
+**Phase 4.5 — manifest_sync drift sweep (added in core 3.6.1, sentinel-trigger added in core 3.7.1)**
 
 This phase runs **unconditionally** on every `apply-updates` invocation that reaches Phase 4 (i.e. any run with at least one operation in the merged plan, regardless of operation type — `core-update`, `marketplace-update`, `collection-update`, `adapter-bundle-update`, or `binary-update`). It detects drift between the member's locally-synced capability files and the org's currently-installed collection versions, and re-runs the manifest-sync subroutine for any collection that's out of sync. This is the structural fix for the 3.6.0 spec bug where step 3.5's drift-detection prose described a one-time backfill that was never reachable because it lived inside Phase 4's per-collection-update loop.
 
-1. Read `member-index.json`'s `manifest_sync` object (default to `{}` if the field is absent — pre-3.6.1 installs won't have it).
+**Subroutine revision constant.** The manifest-sync subroutine (defined below) has a `CURRENT_SUBROUTINE_REVISION` constant that bumps whenever a step is added or its data-shape semantics change. As of core 3.7.1 this constant is **`2`** (revision 1 was the 3.6.1 release with steps 1–6 and step 8; revision 2 added step 7 in 3.7.0, which reconciles `member-index.installed[].version` with the `.md` frontmatter version). Phase 4.5 uses this constant alongside `manifest_sync[C]` to decide when to re-run the subroutine — this protects against the structural bug `20260512-8d20ea22` where a 3.7.0 install with already-populated `manifest_sync` (from a 3.6.1+ backfill) had the new step 7 silently skipped.
+
+1. Read `member-index.json`'s `manifest_sync` object (default to `{}` if the field is absent — pre-3.6.1 installs won't have it). Also read `manifest_sync_subroutine_revision` (default to `{}` if absent — pre-3.7.1 installs won't have it; effectively all entries default to revision 0).
 2. Build the org's collection-version map: read `aifs_read("/org-config.json")` and extract `installed_collections[]`. For each entry `{ name, version, status }` with `status: "installed"`, record `orgCollectionVersions[name] = version`. (Skip entries that are removed/deprecated.)
 3. Build the member's effective collection set: union of the collections appearing in `member-index.installed.skills[].collection` and `member-index.installed.tasks[].collection`. (Members may have a subset of the org's installed collections.)
 4. For each collection `C` in the effective set:
    - Let `orgVersion = orgCollectionVersions[C]` (the version the org has installed). If absent (collection is in member's installs but not in org-config — this is an inconsistency; surface a notice and skip).
    - Let `syncedVersion = manifest_sync[C]` (may be undefined).
-   - If `syncedVersion` is undefined OR `syncedVersion !== orgVersion`: this collection is drifted. Invoke the manifest-sync subroutine for `(C, orgVersion)`.
-   - If `syncedVersion === orgVersion`: this collection is up to date; skip.
-5. After the loop, the `manifest_sync` field reflects the current synced state of every collection the member has installed.
+   - Let `syncedRevision = manifest_sync_subroutine_revision[C]` (may be undefined; treat as 0).
+   - **This collection is drifted if ANY of:**
+     - `syncedVersion` is undefined (never synced), OR
+     - `syncedVersion !== orgVersion` (collection version advanced since last sync), OR
+     - `syncedRevision < CURRENT_SUBROUTINE_REVISION` (subroutine logic has new steps that haven't run on this collection yet).
+   - If drifted: invoke the manifest-sync subroutine for `(C, orgVersion)`.
+   - If not drifted: skip.
+5. After the loop, both `manifest_sync` and `manifest_sync_subroutine_revision` fields reflect the current synced state and the subroutine revision that last completed for every collection the member has installed.
 
 **First-run sweep behavior on pre-3.6.1 installs.** On the very first 3.6.1 apply-updates run, no collection has a `manifest_sync` entry, so every installed collection is detected as drifted. The subroutine runs for each — for a typical 7-collection / 45-capability install that's ~135 `aifs_read` calls plus writes. Bounded, acceptable, and idempotent (subsequent runs only sweep collections that actually changed). This is the same backfill behavior promised in the 3.6.0 CHANGELOG but couldn't deliver due to the spec bug; the 3.6.1 placement actually delivers it.
 
@@ -332,7 +339,7 @@ Given `(collection, targetVersion)`:
 
 7. **Synchronize `member-index.json` `installed[].version` for this capability** (added in core 3.7.0). Locate the member-index entry for `{type: <type>, name: <name>}` and set its `version` field to the value of `version` in the `.md` frontmatter (the same value just written to `manifest.json` in step 6). This is the data-repair counterpart to the spec clarification in `org-setup` Phase 4 step 11 and Upgrading flow step 9 (also added in 3.7.0): both flows record the `.md` frontmatter version, not the collection version. Pre-3.7.0 installs frequently recorded the collection version here, producing spurious "local ahead of remote" rows in `check-updates`. The Phase 4.5 first-run sweep on a 3.6.x install will reconcile every capability's recorded version with its frontmatter. Idempotent: write only if different from the current value. If the member-index entry is missing (the capability was uninstalled out-of-band): skip the write and surface a notice that the local install directory exists for a capability not in member-index.
 
-8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` in `member-index.json` and write the file. If any capability failed in steps 2–7, do NOT advance `manifest_sync[<collection>]`; the failure leaves the entry at its prior value, and the next apply-updates run retries.
+8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` AND `manifest_sync_subroutine_revision[<collection>] = CURRENT_SUBROUTINE_REVISION` (currently 2) in `member-index.json` and write the file. Both fields advance together; if any capability failed in steps 2–7, do NOT advance either field; the failure leaves them at their prior values, and the next apply-updates run retries.
 
 **Setup-responses are NOT touched.** This subroutine writes `{name}.md`, `{name}-setup.md`, and `manifest.json`. It does NOT touch any per-member or per-org state files like setup-responses. The org-setup upgrade flow (called from Phase 4 step 3) is the one place that mutates setup state, with the appropriate carry-forward / reset-parameter logic. This file-content sync is purely about keeping the canonical capability artifact in sync with what the collection ships.
 
@@ -483,8 +490,4 @@ If the update log exists but is empty (no entries): surface "No update instructi
 
 **Network errors during Step 0 (pending-plan read) or Step 5 (capability sync).** Treat as fail-safe: do not write `member-index.json`, do not advance the cursor. Surface the underlying error and the suggestion: "Network error reading {path}. Your install is unchanged. Re-run `@ai:update` when the connection is restored."
 
-**Phase 2 (CLAUDE.md) succeeds, Phase 3 (adapter bundle) fails.** The two phases write different artifacts and are independently recoverable. Phase 2's write of the new CLAUDE.md is durable as-is (the member is not in a broken state by virtue of a newer CLAUDE.md). Phase 3's adapter-bundle install failing leaves the existing local bundle in place — also a safe state. Continue with later phases (Phase 4 collection upgrades, etc.) and at the end surface: "Phase 3 (adapter bundle update from {from_v} → {to_v}) did not complete: {error}. Your existing adapter bundle ({current_v}) is still in place. The cursor has been advanced (the rest of the update applied cleanly); to retry just the adapter portion, say `@ai:edit-org` and choose 'Update Adapter Bundle' from the menu." Cursor advancement here is intentional and asymmetric with the Phase 4 case above — adapter bundles have a dedicated admin re-run path; collection upgrades do not.
-
-**Phase 4.5 reads org-config.json but org-config.json has no `installed_collections[]`.** Pre-3.4.0 org-config schema didn't include `installed_collections[]`. On such installs the field will be missing. Treat as empty array and surface a one-line notice: "Phase 4.5 manifest_sync sweep: org-config.json has no installed_collections[]; skipping. Run `@ai:edit-org` and populate installed_collections to enable Phase 4.5." This is rare in practice — every install since 3.4.0 has the field — but worth handling cleanly.
-
-**The member is also the admin who just published the update.** If `last_applied_update` and `latest_id` are equal because the member just published this update themselves (i.e., the admin running publish-updates is also a member), apply-updates should still run normally — it's the symmetric flow that brings the admin's local install into the same state any other member would reach by applying the update. The admin should not be silently no-op'd.
+**Phase 2 (CLAUDE.md) succeeds, Phase 3 (adapter bundle) fails.** The two phases write different artifacts and are independently recoverable. Phase 2's write of the new CLAUDE.md is durable as-is (the member is not in a broken state by virtue of a newer CLAUDE.md). Phase 3's adapter-bundle install failing leaves the existing local bundle in place — also a safe state. Continue with later phases (Phase 4 collection upgrades, etc.) and at the end surface: "Phase 3 (adapter bundle update from {from_v} → {to_v}) did not complete: {e
