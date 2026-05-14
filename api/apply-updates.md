@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.4.1
+version: 3.5.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -253,9 +253,10 @@ If `claude-md-update` is present:
 If `adapter-bundle-update` is present:
 1. Read `/shared/bootstrap/member-bootstrap.zip` from the remote filesystem (or the adapter bundle files directly if the admin has published them to a known location)
 2. Extract and overwrite `mcp-servers/filesystem/aifs-exec.bundle.js` and `aifs-exec.sh` and `adapter.json`
-3. Write a pending plan file at `.agent-index/install-state/pending-update-plan.json` containing the remaining operations (collection upgrades, installs, etc.) and the `target_cursor`
-4. Surface: "Adapter bundle updated to {target_version}. The new executor bundle is ready to use immediately. Say '@ai:update' and I'll continue with the remaining updates."
-5. Continue to Phase 4 in this session.
+3. **Sync `agent-index.json`'s `remote_filesystem.exec.adapter_version`** (added in core 3.7.2; closes idea `bundle-vs-config-adapter-drift`). After step 2 writes the new `adapter.json`, parse the freshly-installed `mcp-servers/filesystem/adapter.json` and read its `version` field. If `agent-index.json`'s `remote_filesystem.exec.adapter_version` differs from this value, rewrite `agent-index.json` to bring them into agreement. The `adapter.json` `version` is the authoritative source — it ships with the bundle and is what the bundle implementation actually exposes; `agent-index.json`'s field is denormalized metadata that historically wasn't kept in sync. Idempotent: same-value no-op. Without this step, the two files can drift indefinitely (the bundle gets updated by this phase but the config field stays at install-time value), which breaks downstream code that reads `agent-index.json` to gate behavior on the adapter version.
+4. Write a pending plan file at `.agent-index/install-state/pending-update-plan.json` containing the remaining operations (collection upgrades, installs, etc.) and the `target_cursor`
+5. Surface: "Adapter bundle updated to {target_version}. The new executor bundle is ready to use immediately. Say '@ai:update' and I'll continue with the remaining updates."
+6. Continue to Phase 4 in this session.
 
 **Phase 4 — Collection upgrades (already-installed collections)**
 

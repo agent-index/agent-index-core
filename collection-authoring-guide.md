@@ -367,7 +367,7 @@ These task frontmatter fields are documentation and input for the access-control
 
 ### Adapter contract version awareness
 
-Tasks that use `aifs_share` / `aifs_unshare` / `aifs_get_permissions` / `aifs_search` / `aifs_transfer_ownership` should declare a pre-flight check that the local adapter's `contract_version` is at `2.0.0` or higher. The pattern:
+Tasks that use `aifs_share` / `aifs_unshare` / `aifs_get_permissions` / `aifs_search` / `aifs_transfer_ownership` / revision-aware writes should declare a pre-flight check that the local adapter's `contract_version` is at `2.0.0` or higher. The pattern:
 
 ```markdown
 ### Pre-flight: adapter contract check
@@ -376,6 +376,30 @@ Read local `mcp-servers/filesystem/adapter.json`. Verify `contract_version` is `
 ```
 
 This protects members on partially-upgraded installs from confusing errors deep inside an op call.
+
+### Declaring adapter contract requirements
+
+Beyond the per-task pre-flight, the collection as a whole should declare its **minimum required adapter contract version** in `collection.json` so admins running `@ai:check-updates` see a contract-gap blocker rather than discovering the gap by capability failure at runtime. Pattern:
+
+```json
+{
+  "name": "your-collection",
+  "version": "1.0.0",
+  "requires_contract_version": "2.0.0",
+  "api": [ ... ]
+}
+```
+
+`requires_contract_version` is an **optional, top-level, semver string** field. Collections that don't declare it default to `"1.0.0"` (the floor every supported adapter implements). Set it to `"2.0.0"` if any of your collection's tasks or skills use any of:
+
+- `aifs_share`, `aifs_unshare`, `aifs_get_permissions` (permission-modifying / inspection ops)
+- `aifs_search` (search op)
+- `aifs_transfer_ownership` (ownership transfer op)
+- Revision-aware writes (`if_revision` parameter on `aifs_write`)
+
+When `@ai:check-updates` runs (post-marketplace-2.5.0), it computes `max(requires_contract_version)` across all installed collections and compares against the local adapter's `contract_version`. If the local adapter is below the max, the report surfaces a top-of-report BLOCKER naming your collection as one of the drivers. Without `requires_contract_version`, your collection's capabilities will fail silently at runtime on installs running an old adapter — surfacing the gap proactively is much better UX.
+
+Future iteration may move `requires_contract_version` down to per-API-member granularity (a single task in your collection might use contract-2.0 ops while others stay on 1.0). For now, the per-collection grain is enough to surface the blocker class. If your collection is split-purpose enough that the per-cap distinction matters, file an idea.
 
 
 ## Writing Skill Directives

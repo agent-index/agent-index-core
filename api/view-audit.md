@@ -1,7 +1,7 @@
 ---
 name: view-audit
 type: task
-version: 1.0.0
+version: 1.1.0
 collection: agent-index-core
 description: Surface the audit trail for a resource — who shared with whom, when, what changed. v1.0 navigates the caller to the backend's native activity UI (Drive Activity for gdrive); v2 will wrap the Drive Activity API directly once the OAuth scope is expanded.
 stateful: false
@@ -61,43 +61,52 @@ file_id = lookup_in_path_cache(path) OR aifs_search(scope=parent, name_contains=
 
 If the path cannot be resolved: surface "I can't find a Drive file for `{path}`. Either it doesn't exist or you don't have read access to discover it." and stop.
 
-### Step 3: Construct the Drive Activity URL
+### Step 3: Construct the Drive URLs (revised in v1.1.0)
+
+Google does not expose a direct URL for the per-file Activity feed; the Activity view is only reachable via the in-app info-panel sidebar after opening the file/folder in Drive. Earlier versions of this task surfaced `https://drive.google.com/drive/activity/?fileId={file_id}` URLs that returned 404 (closes bug `20260513-8d20ea22-2`). In v1.1.0 we surface two working paths instead:
+
+**(a) The resource URL — for activity on this specific file/folder:**
 
 ```
-url = `https://drive.google.com/drive/activity/?fileId={file_id}`
+resource_url = `https://drive.google.com/drive/folders/{file_id}`   # if folder
+resource_url = `https://drive.google.com/file/d/{file_id}/view`     # if file
 ```
 
-If the org is on a Shared Drive, also surface the drive-level activity URL:
+The admin opens this URL in their browser, then clicks the **info icon (ⓘ)** at the top right of the Drive UI, then selects the **Activity** tab. That shows the chronological event stream (share/unshare events, edits, ownership changes, deletions, moves) for the resource.
+
+**(b) The org-wide admin audit URL — for cross-resource forensic queries:**
 
 ```
-drive_url = `https://drive.google.com/drive/activity/?driveId={shared_drive_id}`
+admin_audit_url = `https://admin.google.com/ac/reporting/audit/drive`
 ```
+
+Workspace admins can filter by date, actor, event type (e.g., `ACL_CHANGE`, `OWNERSHIP_TRANSFER`), and target. Non-admin members will see a permission-denied page — surface this URL only when the caller is in `org-config.json` `admins[]`.
 
 ### Step 4: Surface to the admin
 
 ```
 Audit trail for `{path}` (Drive file ID `{file_id}`):
 
-  → {url}
+  → {resource_url}
 
-Open this in your browser. Drive Activity will show the chronological event stream for this resource — share/unshare events, edits, ownership changes, deletions, etc.
+Open this in your browser. Then click the **info icon (ⓘ)** at the top right and select the **Activity** tab. That shows the chronological event stream for this resource — share/unshare events, edits, ownership changes, deletions, moves.
 
-For a security review, filter to:
+For a security review, scan the Activity tab for:
   • Permission changes (share, unshare, role updates)
   • Ownership transfers
   • Create/delete events
   • Move events (if folders changed parent)
 
-For everything (forensic mode), use the unfiltered view.
+{if caller is admin:}
+For org-wide forensic queries (cross-resource, by actor, by event type):
+  → {admin_audit_url}
 
-{if Shared Drive:}
-You can also see drive-level activity at:
-  → {drive_url}
+Filter by date and event type (e.g., `ACL_CHANGE`) for permission events; by `OWNERSHIP_TRANSFER` for ownership changes; etc.
 
-Note: agent-index does not maintain its own audit log. Drive Activity is the canonical record and is admin-tamper-evident. A future v2.0 of this task will surface filtered activity directly here without you needing to leave the conversation.
+Note: agent-index does not maintain its own audit log. Drive Activity (per-resource) and the Workspace Admin Audit log (org-wide) are the canonical records and are admin-tamper-evident. A future v2.0 of this task will fetch and filter Drive Activity events inline via the Drive Activity API and surface them directly here without you needing to leave the conversation.
 ```
 
-If the caller is not an admin and the resource isn't theirs, Drive will gate access at the API layer when v2.0 reads activity, but for v1.0 the URL works for anyone who has read access to the resource (Drive Activity for an item you can read is visible to you).
+If the caller is not an admin, the `admin_audit_url` is omitted; the resource URL alone gives them everything they can legitimately see. Drive Activity for an item the caller can read is visible to them via the info panel.
 
 ---
 

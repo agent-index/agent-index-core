@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.0.1
+version: 1.1.0
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Removes their entry from members-registry.json and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — agent-index does not touch Drive ACLs; Workspace IT handles identity offboarding.
 stateful: false
@@ -70,6 +70,33 @@ Confirm to the admin:
 >
 > Continue?
 
+### Step 2.5: Revoke the explicit member-directory grants (added in v1.1.0)
+
+Before removing the registry entry, revoke the two writer grants that `invite-member` explicitly granted at member creation. This is symmetric with `invite-member` (which creates exactly these two grants via the permission-helper). Closes bug `20260513-8d20ea22-3`.
+
+**Bounded scope.** This step revokes ONLY the two specific grants this collection's `invite-member` task is known to have applied:
+
+- `/members/{member_hash}/` — writer for the departing member
+- `/shared/members/artifacts/{member_hash}/` — writer for the departing member
+
+It does NOT walk the broader ACL graph looking for orphan grants on project resources, idea folders, shared artifacts, or anywhere else. Those remain Workspace IT's responsibility per Step 4's checklist; the broader cleanup is too expensive to do here and competes with Workspace's standard offboarding flow.
+
+**Skip conditions.** Two cases where this step is a no-op:
+
+1. **Grant doesn't exist.** Read `aifs_get_permissions(path)` for each of the two paths. If the departing member doesn't appear in the result (e.g., they were invited before v1.1.0 and a manual one-shot revoked the grants, or they never had explicit grants because the invite was a partial run), skip that path silently.
+2. **Departing member is also being offboarded from Workspace this session.** This is a hint, not a hard signal — if the admin has already confirmed they're deleting the Google account, surface a notice that Workspace deletion will revoke ALL grants org-wide and ask whether to skip the per-resource revoke. On confirm: skip. On default: proceed with the per-resource revoke as a belt-and-suspenders.
+
+**Procedure:**
+
+1. **Read pre-state** for both paths via `aifs_get_permissions`. Filter to entries where the recipient subject matches the departing member's email.
+2. **Build a permission-change spec** with one `unshare` op per existing grant (zero, one, or two ops total). Same JSON shape as `invite-member`'s spec.
+3. **Hand the spec to the `permission-change-helper` skill.** Surface the `agent-index://apply?spec={path}` URL in chat per the canonical pattern in `agent-index-core/standards.md` § "Permission-Modifying Operations". Admin reviews and accepts in the browser review page.
+4. **Verify post-state.** Re-read `aifs_get_permissions` for both paths and confirm the departing member is no longer present (either as explicit subject or via the removed permission_id).
+5. **On verification success:** proceed to Step 3.
+6. **On verification failure or admin cancellation:** halt before Step 3. The member-index entry is NOT removed; their grants are in an indeterminate state. Surface what's still in place and the next steps. Re-running `@ai:remove-member` is safe (the unshare ops are idempotent — the second run skips paths where the grant is already gone, per the skip condition above).
+
+**Why this is bounded vs. unbounded ACL cleanup.** Walking every resource on the org's Drive to find any grant featuring the departing member is an expensive operation (potentially thousands of file lookups) and competes with Workspace IT's standard offboarding flow (which already revokes all grants on Google account deletion). The narrow scope of this step — only the two paths agent-index's own `invite-member` is known to have granted — is the symmetric counterpart of what we created, no more.
+
 ### Step 3: Remove the entry (revision-aware)
 
 ```
@@ -109,13 +136,15 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 ### Behavior
 
 - This task is admin-only. Admin self-removal-as-sole-admin is refused.
-- Drive-side cleanup is explicitly NOT this task's job. The IT checklist tells the admin what to do at the Workspace level.
+- **Drive-side cleanup is bounded to the grants `invite-member` explicitly created** (the two writer grants on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`) — see Step 2.5. The broader ACL cleanup (project resources, idea folders, etc.) remains Workspace IT's job per Step 4's checklist.
 - The members-registry write is revision-aware to handle the unlikely-but-possible concurrent removal case.
 
 ### Constraints
 
 - Never write to `members-registry.json` outside this task, `invite-member`, and `member-bootstrap`.
-- Never touch Drive ACLs from this flow — even if it would be technically straightforward. Crossing that line creates a parallel offboarding flow that competes with Workspace IT's and gets out of sync. If a future change does require permission modifications from this task (e.g., revoking a specific share that Workspace offboarding can't reach), the change MUST go through the `permission-change-helper` skill per `agent-index-core/standards.md` § "Permission-Modifying Operations" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly.
+- **MAY revoke the two specific ACLs `invite-member` explicitly created** (writer on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`) per Step 2.5. These two grants are bounded, known, and symmetric with their creation; revoking them here closes a real correctness gap where a member who's been removed from the registry retains agent-index-issued Drive access until Workspace IT runs full account offboarding (which may never happen, e.g., for contractors).
+- **MUST NOT walk the broader ACL graph** looking for orphan grants the departing member may have accumulated through project membership, idea collaboration, shared-artifact creation, etc. Those remain Workspace IT's responsibility — either through full Workspace offboarding (which auto-revokes everything) or through project-scoped removal via `@ai:edit-project`.
+- **MUST go through the `permission-change-helper` skill** for the Step 2.5 unshare ops per `agent-index-core/standards.md` § "Permission-Modifying Operations". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly from this task.
 - Stale references render at the task layer as historical names. Never rewrite or scrub historical data.
 
 ### Edge Cases

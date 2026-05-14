@@ -6,6 +6,26 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.2] — 2026-05-13
+
+### Fixed
+
+- **`apply-updates` 3.4.1 → 3.5.0: Phase 3 now syncs `agent-index.json`'s `remote_filesystem.exec.adapter_version` with the freshly-installed `mcp-servers/filesystem/adapter.json` `version`** (closes idea `bundle-vs-config-adapter-drift`). Pre-3.5.0 Phase 3 wrote the new adapter bundle + adapter.json but didn't update the denormalized `adapter_version` field in `agent-index.json`. Result: the two files could drift indefinitely — bundle gets refreshed every adapter-bundle-update, the config field stays at install-time value. Downstream code that reads `agent-index.json` to gate behavior on the adapter version would make wrong decisions. New step 3 in Phase 3 parses the just-installed `adapter.json` and rewrites `agent-index.json` to match. Idempotent (same-value no-op).
+
+- **`remove-member` 1.0.1 → 1.1.0: now revokes the explicit member-directory grants `invite-member` created** (closes bug `20260513-8d20ea22-3`). New Step 2.5: build a permission-change spec with `unshare` ops for the two grants `invite-member` is known to have applied (writer on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`), hand it to the permission-change-helper, surface the `agent-index://apply?spec=...` URL, admin reviews and accepts, helper applies via OAuth-as-self, post-state verified. Symmetric with `invite-member`. Bounded scope: only the two grants `invite-member` is known to have created; broader ACL cleanup (project/idea grants) still falls to Workspace IT per the existing checklist. Constraints section revised to permit this specific revocation while preserving the "never walk the broader ACL graph" rule.
+
+- **`view-audit` 1.0.0 → 1.1.0: replaces non-functional Drive Activity URLs with working folder URLs + admin audit URLs** (closes bug `20260513-8d20ea22-2`). The previous URL pattern `https://drive.google.com/drive/activity/?fileId={file_id}` returned 404 — Google never exposed a public direct URL for the per-file Activity feed. v1.1.0 surfaces two working paths instead: (a) the folder/file URL (`https://drive.google.com/drive/folders/{id}` or `https://drive.google.com/file/d/{id}/view`) plus instructions to click the info icon → Activity tab in the Drive UI; and (b) for admins only, the org-wide Workspace audit URL (`https://admin.google.com/ac/reporting/audit/drive`) for cross-resource forensic queries. The "v2.0 will surface filtered activity inline" promise stays.
+
+- **`permission-helper/validate.js` cleaned of trailing debris**. The canonical source at `lib/permission-helper/validate.js` had ~16 lines of botched-write debris (duplicate `applyExclusions` definition, second `module.exports`, stray fragment `esent, must be a boolean.` from an earlier draft) past the legitimate file end at line 146. The corrupt file was being copied to every member's local install via apply-updates Phase 1 step 6, breaking the Node permission-helper fallback. v3.7.2 ships the cleaned version; Step 0 sync will push it to remote; the next `@ai:update` for every member will rewrite the local file with clean content.
+
+### Notes
+
+- All API manifests' `collection_version` bumped 3.7.1 → 3.7.2. `apply-updates` task 3.4.1 → 3.5.0. `remove-member` task 1.0.1 → 1.1.0. `view-audit` task 1.0.0 → 1.1.0.
+- Companion releases: `agent-index-marketplace` 2.4.0 → 2.5.0 (contract-version-aware surfacing in check-updates). `agent-index-marketplace-bug-reports` 1.1.0 → 1.2.0 (view-bugs reconcile-on-read closes `20260513-8d20ea22`). `agent-index-marketplace-developer` 1.3.0 → 1.3.1 (preflight-cli JS-integrity heuristic catches the validate.js debris class).
+
+---
+
+
 ## [3.7.1] — 2026-05-12
 
 ### Fixed
