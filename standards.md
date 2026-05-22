@@ -578,7 +578,8 @@ The helper's invocation surface is a custom URL scheme (`agent-index://`) that t
 - Build a permission-change spec from task context (data-only generation).
 - Write the spec to `outputs/permission-plan-{timestamp}.json` in the workspace folder.
 - Emit a markdown link in chat of the form `[summary text](agent-index://apply?spec=outputs/permission-plan-{timestamp}.json)`.
-- Wait for the user to report the outcome of clicking the link, or read the helper's structured outcome JSON if it's surfaced through a conversation channel.
+- **Also emit the same URL inside a fenced code block**, immediately after the markdown link, as a fallback for clients that strip or hide custom-scheme links (e.g., current Cowork desktop builds as of 2026-05-20). The fenced URL still requires deliberate user action (copy → paste into browser address bar), so the trust boundary is preserved. The dual emission is normative — preflight enforces it (see "Implementation enforcement" below). Added in core 3.7.3 to close bug `20260519-8d20ea22`.
+- Wait for the user to report the outcome of clicking the link, or read the helper's structured outcome JSON if it's surfaced through a conversation channel. The outcome file is written by the binary on terminal state to `outputs/permission-plan-{timestamp}-outcome.json` (alongside the spec file; same timestamp).
 - After the user reports completion, verify the post-state by calling `aifs_get_permissions` on each affected path (read-only, agent-callable directly).
 - Surface concise narration to the user about what was applied and what verification confirmed.
 
@@ -593,7 +594,7 @@ The helper's invocation surface is a custom URL scheme (`agent-index://`) that t
 
 **Why these specific don'ts:** the safety boundary that gates permission writes is the rule "the agent shouldn't be the source of authority for security-changing actions." The URL-handler architecture routes around this by making the privileged action's call stack start at the user's deliberate click, not at the agent's tool call. Any of the listed don'ts would re-collapse the gap by putting the agent's automated emission upstream of the privileged action without the user's deliberate gating step in between. The list above is what makes the architecture honest.
 
-**Implementation enforcement:** preflight checks should grep task workflows for the disallowed patterns (e.g., `<script>.*agent-index://`, `window\.location\s*=\s*['"]agent-index://`, `auto.*click.*Accept`). Any match is an authoring error and fails preflight. This gives the trust contract teeth at release time rather than relying on author memory.
+**Implementation enforcement:** preflight checks should grep task workflows for the disallowed patterns (e.g., `<script>.*agent-index://`, `window\.location\s*=\s*['"]agent-index://`, `auto.*click.*Accept`). Any match is an authoring error and fails preflight. Preflight also verifies the **positive** pattern added in core 3.7.3: every task that emits an `agent-index://apply` markdown link must be paired (within ~5 lines) with a fenced code block containing the same URL. A markdown link without the code-fence twin is an authoring warning — preflight surfaces it. This gives the trust contract teeth at release time rather than relying on author memory.
 
 ### Trust contract for binary-tool downloads (added in core 3.4.0)
 

@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.0.2
+version: 3.1.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -169,29 +169,30 @@ Store the collected values. Do not write anything yet — all writes happen afte
 
 ### Step 3b: Network Reachability Check
 
-Before proceeding, verify that ALL domains needed for setup are reachable from this environment. There are two groups of required domains:
+Before proceeding, verify that ALL domains needed for setup are reachable from this environment. The canonical host list lives in `agent-index-core/templates/network-allowlist.template.json` — this step reads that file and iterates every entry. (Pre-3.7.3 versions of this step listed three infrastructure hosts in prose and tested only one. The data-driven approach was introduced in core 3.7.3 to close bug `20260515-8d20ea22` and idea `setup-time-network-allowlist-verification`.)
 
-**Infrastructure domains** (needed to download the adapter bundle in Step 3c):
-- `raw.githubusercontent.com` — adapter bundle download
-- `github.com` — adapter repository access (if cloning)
-- `api.github.com` — adapter directory lookup (if using API)
+**If the admin invoked with `--skip-network-check`:** log a warning ("Network reachability check skipped at admin request — first collection install may fail if allowlist is incomplete") and proceed to Step 3c. The flag is intended for air-gapped environments, internal mirrors, or development scenarios where the standard public hosts aren't applicable.
 
-Determine the actual infrastructure domains by inspecting the `filesystem_adapter_directory_url` in `agent-index.json` and the chosen adapter's `zip_url` from the adapter directory. At minimum, test `raw.githubusercontent.com`.
+**Otherwise, run the reachability check:**
 
-**Telemetry domains** (needed for optional install log upload in Step 16):
-- Parse the hostname from `log_collector_url` in `agent-index.json` (e.g., `v1.logs.agent-index.ai`). If `log_collector_url` is empty, skip this group.
+1. Read `agent-index-core/templates/network-allowlist.template.json` from the freshly-downloaded core (this file is part of the adapter-bundle-pair download flow that Step 3a sets up). If absent, fail with a clear error — the canonical file is required for setup.
 
-These domains are not required for the install to succeed — log upload is optional. Include them in the allowlist instructions so the admin doesn't need a third session, but do not block the install if only telemetry domains are unreachable.
+2. Build the host list to test:
+   - **Infrastructure tier:** every entry in `infrastructure[]` with `tested_by: "setup-time-reachability-check"`.
+   - **Telemetry tier:** if `agent-index.json` has a non-empty `log_collector_url`, parse the hostname and include it. Marked as `required: false` — failures don't block the install.
+   - **Backend tier:** if `backend.{chosen_backend_id}` is enumerated in the canonical file, use those entries. Otherwise, dynamic-read the chosen adapter's `adapter.json` `required_domains` field (available in the adapter directory or the downloaded adapter repo) and treat each domain as `required: true, tested_by: setup-time-reachability-check`.
 
-**Backend domains** (needed for authentication and filesystem access in Phase 3):
+3. Test each host. For each, issue an HTTPS GET against `https://{host}/` (or a known-200 endpoint per host if needed) with a 10-second timeout. Acceptance: any response other than connection-refused, connection-timeout, or proxy-403 (zero content-length, no upstream headers) is treated as reachable.
 
-Read the `required_domains` field from the chosen adapter's `adapter.json` (available in the adapter directory or the downloaded adapter repo).
+4. Collect results into two sets:
+   - `blocked_required`: hosts with `required: true` that didn't pass.
+   - `blocked_optional`: hosts with `required: false` (i.e., telemetry) that didn't pass.
 
-- **Google Drive:** `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`
-- **Microsoft OneDrive/SharePoint:** `login.microsoftonline.com`, `graph.microsoft.com`
-- **Amazon S3:** `*.amazonaws.com` (specifically `s3.{region}.amazonaws.com` and `sts.{region}.amazonaws.com` for the configured region)
+5. **If `blocked_required` is empty:** Proceed to Step 3c. If `blocked_optional` is non-empty, surface a soft notice ("Optional telemetry hosts are not reachable: {...}. Install diagnostics will be skipped. Allowlist these hosts if you want diagnostics enabled.") but do not block.
 
-Test ALL domains from both groups for network reachability (see Step 0 for the test method).
+6. **If `blocked_required` is non-empty:** Proceed to the allowlisting flow below. Surface each blocked host along with its `purpose` annotation from the canonical file so the admin understands what each host is for.
+
+For documentation purposes, the canonical file currently enumerates the following infrastructure hosts: `raw.githubusercontent.com`, `github.com`, `api.github.com`, `codeload.github.com` (the last added in core 3.7.3 to close bug `20260515-8d20ea22`). Telemetry: derived dynamically from `log_collector_url`. Backend (gdrive): `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`. Other backends (OneDrive, S3) are not enumerated in the canonical file; their hosts come from each adapter's `adapter.json`. Reading directly from the canonical file is the source of truth; this paragraph is a snapshot at the time of authoring.
 
 **If all domains are reachable:** Proceed to Step 3c.
 

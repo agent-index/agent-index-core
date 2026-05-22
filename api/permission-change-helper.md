@@ -1,9 +1,9 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.0.0
+version: 1.1.0
 collection: agent-index-core
-description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by preparing a review page in the member's browser, waiting for member-applied execution via the existing OAuth token, and verifying post-state. The canonical agent-callable surface for any task that needs to modify access controls.
+description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
 always_on_eligible: false
 dependencies:
@@ -56,12 +56,13 @@ Members should not directly invoke this skill. If a member says "share this with
 
 This skill is invoked with a permission-change spec. The full schema is documented in `/shared/projects/access-control/artifacts/permission-change-helper-tech-design.md`. Briefly, the spec is JSON with:
 
-- `version` (string) — schema version (currently `"1.0"`)
+- `version` (string) — schema version (`"1.0"` for the original shape; `"1.1"` for specs that use the `inherit` field added in core 3.7.3). Both versions are accepted; `"1.1"` enables `inherit` validation, `"1.0"` rejects `inherit` if present.
 - `operations` (array, non-empty) — list of operations, each one of `op: "share"` / `"unshare"` / `"transfer_ownership"` with `resource`, `recipient`, and `role` (for shares). May include a `before` field with current permission state for diff visualization.
+- `operations[].inherit` (boolean, optional, share operations only) — added in core 3.7.3. When `true` (the default if omitted, matching v1.0 behavior), the share is additive on top of parent-folder inheritance. When `false`, the share is applied as an explicit override: the recipient sees only this resource, not the parent. Used for narrower-than-parent ACLs (per-instance grants in client-intelligence, per-idea ACLs in access-control Phase 5, etc.). Requires `organizer` role on the Shared Drive (or `owner` on My Drive) to set — the adapter surfaces an `AccessDeniedError` with an actionable message if the applying user lacks the role. Backward-compatible: specs without `inherit` behave exactly as v1.0.
 - `context` (object) — `requestor` member_hash, `calling_task` slug, plain-English `purpose` string for display.
 - `mode` (optional) — `"fail_soft"` (default) or `"all_or_nothing"`.
 
-If the calling task hands you anything that doesn't match this shape, fail fast with a clear error before invoking the binary. Do not attempt to repair or normalize malformed specs — that's the calling task's responsibility.
+If the calling task hands you anything that doesn't match this shape, fail fast with a clear error. Do not attempt to repair or normalize malformed specs — that's the calling task's responsibility.
 
 ### Behavior
 
@@ -69,7 +70,7 @@ When invoked with a valid spec, perform these steps in order:
 
 **Step 1 — Validate the spec.**
 
-Run schema validation. Required fields must be present. `operations` must be non-empty. Each operation's `op` must be one of the allowed values. `resource` must start with `/`. `recipient` must look like a valid email or group address. If validation fails, return immediately to the calling task with `{ outcome: "validation_error", error_detail: <description> }`. Do not invoke the binary.
+Run schema validation. Required fields must be present. `operations` must be non-empty. Each operation's `op` must be one of the allowed values. `resource` must start with `/`. `recipient` must look like a valid email or group address. For specs with `version: "1.1"`, validate `inherit` on share operations: must be boolean if present; rejected on non-share operations. For `version: "1.0"` specs that include `inherit`, reject with a clear error pointing at the version bump. If validation fails, return immediately to the calling task with `{ outcome: "validation_error", error_detail: <description> }`. Do not emit the URL.
 
 **Step 2 — Capture pre-state if not already provided.**
 
@@ -79,55 +80,67 @@ For each operation in the spec, if the `before` field is missing or empty, call 
 
 Write the spec to `outputs/permission-plan-{ISO-timestamp}.json` using a native file write. The agent-index project_dir's `outputs/` directory is the standard location for tool inputs/outputs. The timestamp ensures uniqueness if the calling task generates multiple plans in the same session.
 
-**Step 4 — Detect and invoke the binary.**
+**Step 4 — Emit the canonical URL surface in chat.** (Rewritten in core 3.7.3 to realign with `standards.md` § "Trust contract for the agent in the URL-handler invocation flow" — closes bug `20260519-8d20ea22`.)
 
-Check for a Go binary first, fall back to Node:
+The agent does **not** invoke the binary directly. Instead, it emits two paired outputs in chat that the user clicks (or copies) to trigger the URL-scheme handler, which is what actually invokes the binary in the user's deliberate-action context. This keeps the privileged call out of the agent's call stack, per the safety boundary documented in standards.md.
 
-1. **Go binary path** (preferred as of core 3.4.0):
-   - `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan.exe` on Windows
-   - `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan` on macOS / Linux
-2. **Node fallback path:** `<project_dir>/mcp-servers/permission-helper/show-plan.sh`.
+Emit, in this order:
 
-If the Go binary exists, invoke it directly: `<go-binary> <absolute-path-to-spec.json>`. The Go binary launches the listener, opens the browser, and behaves identically to the Node helper from the agent's perspective (same exit codes, same stdout JSON status report shape, same SSE event stream to the page).
+1. A markdown link summarizing the action:
+   ```
+   [Review and apply N permission changes for {calling_task}](agent-index://apply?spec=outputs/permission-plan-{timestamp}.json)
+   ```
+   Where `N` is the operation count, `{calling_task}` is the slug of the task that invoked this skill, and `{timestamp}` matches the spec file's filename.
 
-If only the Node helper exists, invoke: `bash <project_dir>/mcp-servers/permission-helper/show-plan.sh <absolute-path-to-spec.json>`.
+2. The same URL inside a fenced code block, as a fallback for clients that strip or hide custom-scheme links (e.g., current Cowork desktop builds as of 2026-05-20):
+   ```
+   agent-index://apply?spec=outputs/permission-plan-{timestamp}.json
+   ```
+   The fenced URL still requires deliberate user action (copy → paste into browser address bar), preserving the trust boundary. This dual-emission is normative per standards.md § "The agent does" — preflight enforces it.
 
-Capture stdout, stderr, and exit code. Either binary will:
-- Open the member's default browser to a localhost URL displaying the review page.
-- Wait for the member's action (Accept, Reject, or page-close).
-- If Accept: spawn the apply-script which calls the appropriate Drive ops (Go binary: directly via the Drive API using the member's stashed OAuth token. Node helper: via the existing `aifs-exec.sh` wrapper.)
-- Stream progress to the page via Server-Sent Events.
-- On terminal state, write a final JSON status report to stdout and exit with a meaningful exit code.
+3. A single-sentence narration:
+   > "Review the proposed changes and click Accept to apply with your own credentials. If the link above doesn't open a review page, your OS URL-scheme handler may not be registered — copy the URL from the code block into your browser, or run `@ai:member-bootstrap` to verify your install."
 
-The agent-side narrative during this wait should be minimal — something like: "I'm opening a review page in your browser. Review the proposed changes there and click Accept to apply them with your own credentials." Then wait for the binary's exit. Do not poll or interfere; the binary owns the user interaction surface during this window.
+The Go binary is what the URL-scheme handler invokes. As of core 3.4.0+ the binary lives at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. The Node fallback at `<project_dir>/mcp-servers/permission-helper/show-plan.sh` is still shipped for orgs that haven't opted into the binary registry but is **not** invoked through the URL-scheme path; the future removal of the Node fallback is tracked in idea `remove-node-permission-helper-fallback`.
 
-If neither binary is found, return immediately with `{ outcome: "binary_not_found", error_detail: "Permission helper not installed. Run @ai:update to install it, or @ai:member-bootstrap if the install appears broken." }`.
+**Step 5 — Wait for the user to report the outcome.**
 
-**Step 5 — Parse the binary's exit.**
+Per standards.md line 582. The agent does not poll, does not invoke the binary, does not navigate the user. It waits for the user's next message in chat. Expected reports include "done", "accepted", "applied", "rejected", "canceled", "didn't work", or any natural-language signal that the review flow has reached terminal state. The agent interprets the report and proceeds to Step 6.
 
-Branch on exit code:
+If the user reports something ambiguous ("hmm", "interesting"), ask one clarifying question — "Did the changes apply, or are you still reviewing?" — and wait. Don't assume.
 
-| Exit code | Meaning | Outcome |
-|---|---|---|
-| 0 | Apply completed successfully | Proceed to Step 6 (verification) |
-| 1 | User clicked Reject | Return `{ outcome: "rejected" }` |
-| 2 | Idle timeout reached | Return `{ outcome: "timed_out" }` |
-| 3 | Apply-script reported failure | Parse stdout JSON for partial vs total failure detail, return `{ outcome: "partial_failure"|"apply_error", failed_operations: [...], applied_operations: [...] }` |
-| 4 | Page closed without action | Return `{ outcome: "page_closed" }` |
-| 5 | Validation error before browser launch | Return `{ outcome: "binary_validation_error", error_detail: <stderr> }` |
-| 130 / 143 | SIGINT / SIGTERM | Return `{ outcome: "terminated" }` |
+**Step 6 — Read the outcome JSON file.**
 
-For exit code 0, the stdout JSON includes `applied_operations` (all successful) and any user edits the page captured (e.g., recipient changes from inline editing). Pass these through to the calling task.
+The URL-scheme-launched binary writes a structured outcome file on terminal state. Path: `outputs/permission-plan-{timestamp}-outcome.json` (alongside the spec file, same timestamp).
 
-**Step 6 — Verify post-state.**
+Read the outcome file. Expected schema:
 
-For exit code 0 (or 1 in fail-soft mode for partially-applied operations), call `aifs_get_permissions` on each affected resource and confirm the resulting permission state matches what the apply-script reported. Discrepancies (apply-script said success, but `aifs_get_permissions` shows the change wasn't applied) are treated as failure even if the apply-script reported success — return `{ outcome: "verification_failed", verified_state: [...], expected_state: [...] }`.
+```json
+{
+  "outcome": "applied" | "rejected" | "timed_out" | "page_closed" | "partial_failure" | "apply_error" | "validation_error",
+  "applied_operations": [<op spec>, ...],
+  "failed_operations": [<op spec + error>, ...],
+  "user_edits": { ... },
+  "completed_at": "<ISO 8601>"
+}
+```
 
-This is defense-in-depth. Drive's API occasionally returns success for share operations that don't actually take effect (rare, but documented), and the verification step catches it.
+The `outcome` value mirrors the structured outcome the calling task ultimately receives — see § "Output Contract" below.
 
-**Step 7 — Surface the outcome to the chat.**
+**If the outcome file doesn't exist** after the user reported done: surface a diagnostic to the calling task and the user:
+> "I expected an outcome file at `outputs/permission-plan-{timestamp}-outcome.json` but didn't find it. Likely causes: the OS URL-scheme handler isn't registered (most common — run `@ai:member-bootstrap`), the binary failed before writing the outcome, or the click never reached the binary. The spec file at `outputs/permission-plan-{timestamp}.json` is preserved if you want to retry."
 
-Produce concise narration for the member based on the outcome:
+Return `{ outcome: "outcome_file_missing", error_detail: "..." }` to the calling task. Don't assume any state was applied or not applied — the actual Drive state is unknown until verified.
+
+**Step 7 — Verify post-state.**
+
+For `outcome: applied` (or `partial_failure` with at least one successful operation), call `aifs_get_permissions` on each affected resource and confirm the resulting permission state matches what the outcome file reported. Discrepancies (outcome said success, but `aifs_get_permissions` shows the change wasn't applied) are treated as failure even if the binary reported success — return `{ outcome: "verification_failed", verified_state: [...], expected_state: [...] }`.
+
+This is defense-in-depth. Drive's API occasionally returns success for share operations that don't actually take effect (rare, but documented), and the verification step catches it. For `inherit: false` operations, verification also confirms that parent inheritance is in fact disabled — `aifs_get_permissions` should show the explicit grant without the inherited entries that the parent folder would otherwise contribute.
+
+**Step 8 — Surface the outcome to the chat.**
+
+Produce concise narration for the member based on the verified outcome:
 
 - **applied:** "Done. Verified that {recipients} now have {roles} on {resources}."
 - **rejected:** "You declined the proposed change. No permissions were modified."
@@ -135,7 +148,8 @@ Produce concise narration for the member based on the outcome:
 - **page_closed:** "The review page was closed before the change could be applied. No permissions were modified. Want to retry?"
 - **partial_failure:** "{N of M} operations applied successfully. The remaining {failed_count} failed: {brief detail}. Want to retry just the failed ones?"
 - **apply_error / verification_failed:** "The change could not be applied: {error}. No partial state remains." (Or: "Partial state may exist; check {affected resources}.")
-- **binary_not_found / validation_error / binary_validation_error:** Surface as a system-level issue rather than a user-action outcome.
+- **outcome_file_missing:** Surface the diagnostic from Step 6.
+- **validation_error / binary_validation_error:** Surface as a system-level issue rather than a user-action outcome.
 
 Then return the structured outcome to the calling task so it can branch on the result.
 
@@ -153,11 +167,13 @@ If the helper fails for an infrastructural reason (binary not found, browser lau
 
 ### Constraints
 
-- **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` directly.** This skill exists specifically because the agent isn't permitted to. The binary is the only path; the binary calls the apply-script; the apply-script calls the ops via `aifs-exec.sh` in the user's environment.
-- **Never modify the spec after the member submits it.** The spec the page POSTs back to the binary is the spec the apply-script runs. Editing it post-submission would defeat the review.
+- **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` directly.** This skill exists specifically because the agent isn't permitted to. The user's click on the `agent-index://` link is what initiates the privileged call; the URL-scheme handler invokes the binary; the binary calls the apply-script using the user's OAuth token.
+- **Never invoke the binary directly from the agent.** Per standards.md § "Trust contract for the agent in the URL-handler invocation flow" and the rewrite that landed in core 3.7.3 (closes bug `20260519-8d20ea22`), the agent emits the markdown link plus the code-fenced URL; the user's click is the privileged-call entry point. Do not bash-invoke `<go-binary> <spec>` from the skill — that would re-collapse the safety boundary the URL-scheme architecture exists to maintain.
+- **Always emit the code-fenced URL alongside the markdown link.** This is normative per standards.md § "The agent does." The pair-emission supports clients that strip custom-scheme links from rendered markdown (current Cowork desktop builds). The fenced URL still requires deliberate user action (copy → paste), so the trust boundary is preserved.
+- **Never modify the spec after the user submits it.** The spec the page POSTs back to the binary is the spec the apply-script runs. Editing it post-submission would defeat the review.
 - **Never retry an operation automatically without explicit member input.** Retries are member-driven via the page's Retry button or a fresh skill invocation. Don't insert auto-retry loops in the agent.
-- **Never poll `aifs_get_permissions` during the apply phase.** The apply-script does its own per-op verification and reports through the SSE channel. Polling from the agent during the wait is wasted tokens and could race with the script.
-- **Always verify post-state on exit code 0.** Even if the apply-script reports success, run the verification step. Discrepancies must be surfaced.
+- **Never poll `aifs_get_permissions` during the apply phase.** The apply-script does its own per-op verification and writes the outcome file at terminal state. Polling from the agent during the wait is wasted tokens and could race with the script.
+- **Always verify post-state on `outcome: applied`.** Even if the outcome file reports success, run the verification step. Discrepancies must be surfaced.
 - **Never invoke this skill recursively.** If a calling task's outcome handling logic concludes "I should retry this share," that's the calling task's decision — it can call this skill again with a new spec. This skill should never call itself.
 
 ### Edge Cases

@@ -263,11 +263,21 @@
     diffEl.appendChild(el('div', { class: 'label' }, 'after:'));
     if (op.op === 'share') {
       const existing = before.find(r => r.subject === e.recipient);
-      const after = before.filter(r => r.subject !== e.recipient);
-      after.forEach(r => diffEl.appendChild(el('div', { class: 'row' }, `${r.subject} (${r.role})`)));
-      diffEl.appendChild(el('div', { class: 'row added' }, `${e.recipient} (${e.role || op.role})`));
-      if (existing) {
-        diffEl.appendChild(el('div', { class: 'row removed' }, `${existing.subject} (${existing.role})`));
+      // For inherit:false, the share OVERRIDES parent-folder inheritance.
+      // Visualize this by collapsing the "currently" set in the after view
+      // and showing only the explicit grant — that's what the recipient
+      // will actually see post-apply. Added in core 3.7.3.
+      if (op.inherit === false) {
+        diffEl.appendChild(el('div', { class: 'row added' }, `${e.recipient} (${e.role || op.role})`));
+        diffEl.appendChild(el('div', { class: 'inherit-override-note', style: 'font-size: 0.85em; color: #93242a; margin-top: 0.4em;' },
+          '(override — recipient will see only this resource. Parent-folder inheritance is disabled for this file.)'));
+      } else {
+        const after = before.filter(r => r.subject !== e.recipient);
+        after.forEach(r => diffEl.appendChild(el('div', { class: 'row' }, `${r.subject} (${r.role})`)));
+        diffEl.appendChild(el('div', { class: 'row added' }, `${e.recipient} (${e.role || op.role})`));
+        if (existing) {
+          diffEl.appendChild(el('div', { class: 'row removed' }, `${existing.subject} (${existing.role})`));
+        }
       }
     } else if (op.op === 'unshare') {
       before.forEach(r => {
@@ -290,6 +300,9 @@
         ...op,
         recipient: edits[i].recipient,
         role: op.op === 'share' ? edits[i].role || op.role : op.role,
+        // inherit (if present, share-ops only) passes through unmodified —
+        // the page does not allow the user to toggle the override semantic;
+        // that's a calling-task decision baked into the spec.
         excluded: edits[i].excluded,
       })),
     };

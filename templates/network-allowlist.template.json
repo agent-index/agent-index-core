@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-05-20",
+  "_notes": [
+    "Canonical network allowlist for agent-index org setup and ongoing operations.",
+    "Read at org-setup time (create-org Step 3b) and on demand (@ai:verify-network-allowlist).",
+    "",
+    "Schema design choices, deliberately deferred:",
+    " - Wildcard hosts (e.g., '*.googleapis.com') not supported in v1; tests specific subhosts only. Add wildcard schema in a future version bump if needed.",
+    " - Periodic auto-verification not implemented. Admin invocation only - no background network calls.",
+    " - Backend-tier hosts for non-gdrive adapters are populated dynamically from filesystem-adapter-{id}/adapter.json required_domains field; only the gdrive section is enumerated here.",
+    "",
+    "Adding a new infrastructure host: add to the infrastructure[] array; the create-org Step 3b loop and @ai:verify-network-allowlist task automatically test it on next invocation."
+  ],
+  "infrastructure": [
+    {
+      "host": "raw.githubusercontent.com",
+      "purpose": "Adapter bundle download; marketplace directory fetches; canonical-listing reads (infrastructure-directory.json, marketplace-directory.json, etc.)",
+      "required": true,
+      "tested_by": "setup-time-reachability-check"
+    },
+    {
+      "host": "github.com",
+      "purpose": "Adapter repository access (clone path); collection-zip 302-redirect origin",
+      "required": true,
+      "tested_by": "setup-time-reachability-check"
+    },
+    {
+      "host": "api.github.com",
+      "purpose": "Collection directory lookup via GitHub API",
+      "required": true,
+      "tested_by": "setup-time-reachability-check"
+    },
+    {
+      "host": "codeload.github.com",
+      "purpose": "Collection zip archive downloads (github.com redirects archive URLs here). Added in core 3.7.3 to close bug 20260515-8d20ea22.",
+      "required": true,
+      "tested_by": "setup-time-reachability-check"
+    }
+  ],
+  "telemetry": [
+    {
+      "host_from_config": "log_collector_url",
+      "purpose": "Install diagnostics and log upload (optional). Derive hostname from agent-index.json log_collector_url; if empty, this entry is skipped.",
+      "required": false,
+      "tested_by": "setup-time-reachability-check"
+    }
+  ],
+  "backend": {
+    "_populated_by": "filesystem-adapter-{backend_id}/adapter.json required_domains field for adapters not enumerated below. The enumeration here is the documented set; the dynamic read is the source of truth for non-enumerated backends.",
+    "_documented_backends": ["gdrive"],
+    "_dynamic_backends": ["onedrive", "s3"],
+    "gdrive": [
+      {
+        "host": "accounts.google.com",
+        "purpose": "OAuth flow (sign-in, consent)",
+        "required": true,
+        "tested_by": "setup-time-reachability-check"
+      },
+      {
+        "host": "oauth2.googleapis.com",
+        "purpose": "OAuth token exchange and refresh",
+        "required": true,
+        "tested_by": "setup-time-reachability-check"
+      },
+      {
+        "host": "www.googleapis.com",
+        "purpose": "Drive API (file read/write/share/list operations)",
+        "required": true,
+        "tested_by": "setup-time-reachability-check"
+      }
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.5.0
+version: 3.6.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -297,19 +297,38 @@ This phase runs **unconditionally** on every `apply-updates` invocation that rea
    - Let `orgVersion = orgCollectionVersions[C]` (the version the org has installed). If absent (collection is in member's installs but not in org-config — this is an inconsistency; surface a notice and skip).
    - Let `syncedVersion = manifest_sync[C]` (may be undefined).
    - Let `syncedRevision = manifest_sync_subroutine_revision[C]` (may be undefined; treat as 0).
+   - Let `canonicalAnchorsMissing` = result of the filesystem-existence sub-check for `C` (see step 4.1 below). Added in core 3.7.3 to close bug `20260519-8d20ea22-2` Layer 1.
    - **This collection is drifted if ANY of:**
      - `syncedVersion` is undefined (never synced), OR
      - `syncedVersion !== orgVersion` (collection version advanced since last sync), OR
-     - `syncedRevision < CURRENT_SUBROUTINE_REVISION` (subroutine logic has new steps that haven't run on this collection yet).
+     - `syncedRevision < CURRENT_SUBROUTINE_REVISION` (subroutine logic has new steps that haven't run on this collection yet), OR
+     - `canonicalAnchorsMissing` (filesystem state doesn't match bookkeeping — added in core 3.7.3).
+   - If drifted via `canonicalAnchorsMissing` (regardless of other criteria): surface the filesystem-drift notice (see step 4.2 below) before invoking the subroutine.
    - If drifted: invoke the manifest-sync subroutine for `(C, orgVersion)`.
    - If not drifted: skip.
+
+   **4.1. Filesystem-existence sub-check for collection C** (added in core 3.7.3). Verifies on-disk presence of the canonical install layout, not just the `manifest_sync` bookkeeping field. Catches two known drift classes: (a) pre-3.6.x installs whose capability files exist only at the legacy path (`members/{member_hash}/{type}/{name}/`) and were never backfilled to the canonical path (`members/{member_hash}/installed/{type}/{name}/`) because dual-write only fires on install/upgrade; (b) any flow that advances `manifest_sync` without writing local files (bookkeeping-without-files state).
+
+   1. Read `member-index.json`'s `installed.skills[]` and `installed.tasks[]`, filter to entries with `collection === C`. This gives the list of `{type, name}` pairs to check.
+   2. For each `{type, name}`: stat the canonical anchor file at `members/{member_hash}/installed/{type}/{name}/{name}.md` via `aifs_stat`. The anchor file is authoritative — other files (manifest.json, setup.md) can be re-derived from the subroutine if missing; the `.md` file is the capability definition.
+   3. Issue the stats in parallel across all capabilities for this collection. Implementations that cannot parallelize fall back to sequential — the result is the same, only the latency differs. For a typical 7-collection install, parallel completes in 1–2 seconds; sequential ~10–20 seconds.
+   4. `canonicalAnchorsMissing` is **true** if ANY stat returns "not found." Errors other than not-found (permission denied, network timeout) are treated as "unknown": skip the filesystem check for this collection this run, do NOT set `canonicalAnchorsMissing`, and let the other drift criteria apply. A transient failure should not cause spurious notices.
+
+   **4.2. Notice format on filesystem-drift detection** (added in core 3.7.3). When `canonicalAnchorsMissing` is what triggers the drift classification, surface this line in the apply-updates progress narration immediately before invoking the subroutine:
+
+   > "Detected filesystem drift on collection `{C}`: {N} of {M} installed capabilities are missing from the canonical install layout (`installed/{type}/{name}/`). Re-syncing now."
+
+   Where `{N}` is the count of capabilities with missing anchor files, `{M}` is the total installed capability count for the collection. The notice is informational; the subroutine then runs and (per its current step 5) dual-writes to both legacy and canonical paths, populating the missing canonical anchors.
+
 5. After the loop, both `manifest_sync` and `manifest_sync_subroutine_revision` fields reflect the current synced state and the subroutine revision that last completed for every collection the member has installed.
 
 **First-run sweep behavior on pre-3.6.1 installs.** On the very first 3.6.1 apply-updates run, no collection has a `manifest_sync` entry, so every installed collection is detected as drifted. The subroutine runs for each — for a typical 7-collection / 45-capability install that's ~135 `aifs_read` calls plus writes. Bounded, acceptable, and idempotent (subsequent runs only sweep collections that actually changed). This is the same backfill behavior promised in the 3.6.0 CHANGELOG but couldn't deliver due to the spec bug; the 3.6.1 placement actually delivers it.
 
 **Partial-failure recovery.** If the subroutine fails partway through a collection (e.g. one `aifs_read` errors), `manifest_sync[C]` is left at its prior value (NOT advanced). The next apply-updates run detects the same drift and retries. More robust than a one-shot boolean gate.
 
-**Cost on a no-op run.** If everything is already synced, Phase 4.5 reads `org-config.json` (one remote read) and compares the resulting map against `manifest_sync` in memory. No file reads, no file writes — just the one config read. Cheap enough to run every invocation.
+**Cost on a no-op run.** If everything is already synced, Phase 4.5 reads `org-config.json` (one remote read) plus N parallel `aifs_stat` calls — one per installed capability, ~45 for a typical install — to power step 4.1's filesystem-existence sub-check. Parallelized, the stat batch completes in 1–2 seconds against the gdrive backend. No file reads, no file writes. Cheap enough to run every invocation. (Pre-3.7.3 the cost was just the single `org-config.json` read; the N stats were added to close bug `20260519-8d20ea22-2`.)
+
+**First-run sweep on pre-3.7.3 installs with legacy-layout-only state.** On the very first 3.7.3 apply-updates run for any install whose canonical install layout (`installed/{type}/{name}/`) is empty for one or more collections — typical of pre-3.6.x installs that never had a collection upgrade trigger the dual-write — step 4.1's filesystem check classifies every such collection as drifted. The subroutine runs for each and dual-writes to both paths via its existing step 5, populating the missing canonical anchors. For an install with all 7 user collections in legacy-only state (~41 capabilities missing canonical anchors), that's ~123 `aifs_read` calls + ~123 `aifs_write` calls, parallelizable per-capability within each collection. Bounded; ~30–60 seconds added latency on first 3.7.3 update; surfaced in the per-cap progress narration. Subsequent runs are clean.
 
 ---
 

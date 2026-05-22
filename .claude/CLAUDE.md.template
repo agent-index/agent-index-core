@@ -97,6 +97,7 @@ The general pattern: all task and skill definitions live at `/{collection}/api/{
 | `@ai:view-audit` or "show audit trail", "view activity" | view-audit task (v3.1.0+) |
 | `@ai:verify-workspace-policy` or "verify workspace policy", "check workspace setup" | verify-workspace-policy task (admin only, v3.1.0+) |
 | `@ai:upload-install-log` | upload-install-log task |
+| `@ai:verify-network-allowlist` or "verify network allowlist", "check my allowlist", "is my network configured", "test network reachability" | verify-network-allowlist task (v3.7.3+) |
 
 ### "Check for updates" disambiguation (added in core 3.7.0)
 

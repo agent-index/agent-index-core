@@ -1,16 +1,16 @@
 {
-  "name": "view-audit",
+  "name": "verify-network-allowlist",
   "type": "task",
-  "display_name": "View Audit Trail",
+  "display_name": "Verify Network Allowlist",
   "collection": "agent-index-core",
   "collection_version": "3.7.3",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
   "produces_artifacts": false,
   "produces_shared_artifacts": false,
-  "setup_template": "view-audit-setup.md",
+  "setup_template": "verify-network-allowlist-setup.md",
   "dependency_status": "complete",
   "missing_dependencies": [],
   "parameter_provenance": {},
@@ -18,10 +18,5 @@
     "skills": [],
     "tasks": []
   },
-  "external_dependencies": [
-    "Backend's native activity service (Drive Activity for gdrive)"
-  ],
-  "optional_external_dependencies": [],
-  "reads_from": null,
-  "writes_to": null
+  "external_dependencies": []
 }
