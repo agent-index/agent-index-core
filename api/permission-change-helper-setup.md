@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper-setup
 type: setup
-version: 1.0.0
+version: 1.1.0
 collection: agent-index-core
 description: Setup for the permission-change-helper skill
 target: permission-change-helper
@@ -11,15 +11,17 @@ upgrade_compatible: true
 
 ## Setup Overview
 
-The Permission-Change Helper is plumbing called by other tasks (typically v3.1.0+ admin tasks like `invite-member`); it has no member-facing configuration of its own. Setup verifies that the helper's external dependency — the pre-built binary at `mcp-servers/permission-helper/show-plan.sh` — is present and executable.
+The Permission-Change Helper is plumbing called by other tasks (typically v3.1.0+ admin tasks like `invite-member`); it has no member-facing configuration of its own. Setup verifies that the helper's external dependency — the pre-built Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` — is present and executable.
+
+(Pre-3.7.4 setup also checked for a Node-helper fallback at `mcp-servers/permission-helper/show-plan.sh`. The Node helper was removed in 3.7.4 — closes idea `remove-node-permission-helper-fallback` — so the setup check is now Go-binary-only.)
 
 ---
 
 ## Pre-Setup Checks
 
-- The pre-built binary exists at `<project_dir>/mcp-servers/permission-helper/show-plan.sh` → if not: "The permission helper binary isn't installed at the expected path. This usually means the agent-index-core install is incomplete. Run '@ai:update' to install or repair core, or '@ai:member-bootstrap' if the install appears broken."
-- The binary is executable (`chmod +x` was applied) → if not, surface and instruct member to chmod or re-run install.
-- Node.js is available on PATH (the binary is a Node script invoked through a shell wrapper that resolves Node) → if not: surface a setup error pointing at the project's Node requirement.
+- The pre-built Go binary exists at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}` → if not: "The permission helper Go binary isn't installed at the expected path. This usually means the agent-index-core install is incomplete or predates 3.4.0. Run '@ai:update' to install the binary, or '@ai:member-bootstrap' if the install appears broken."
+- The binary is executable (`chmod +x` was applied on Unix-like systems; no-op on Windows) → if not, surface and instruct member to chmod or re-run install.
+- The URL-scheme handler (`agent-index://`) is registered with the OS (the binary's `post_install_command` does this automatically when installed via `apply-updates` Phase 1 step 7) → if not registered, surface that the binary is installed but the URL handler isn't, and direct the member to re-run `@ai:update` or to manually invoke the binary's registration command.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.4.0
+version: 3.5.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -71,7 +71,8 @@ When `--check-upstream` is present, fetch the latest infrastructure source from 
    - `[n]one`: skip all upstream pulls. Halt with "No fetch performed. Re-run without --check-upstream to publish whatever is currently local, or run with --check-upstream again when ready to fetch upstream." (Don't proceed to Step 0 — admin clearly didn't want any of this.)
 
 5. **Per-entry failure handling during fetch:**
-   - GitHub returns non-2xx: surface error + URL + status code, ask "skip this entry and continue with others? [Y/N]". On Y, skip; on N, halt.
+   - **Allowlist-blocked signature** (added in core 3.7.4 to close section D of idea `allowlist-failure-mode-warnings-in-tasks`): HTTP 403 with empty body and no upstream-server headers, OR connection-refused, OR connection-timeout against `raw.githubusercontent.com`, `github.com`, or `codeload.github.com`. Surface the canonical Allowlist Failure Recognition message (see `agent-index-core/collection-authoring-guide.md` § "Allowlist failure recognition") naming the blocked host. Recommend `@ai:verify-network-allowlist` to test all required hosts at once. Halt (do not offer skip — the admin almost certainly wants all infrastructure pulled, and a half-pulled state is risky).
+   - GitHub returns non-2xx (with body and upstream headers — i.e., a real GitHub error, not a proxy block): surface error + URL + status code, ask "skip this entry and continue with others? [Y/N]". On Y, skip; on N, halt.
    - Zip is corrupt or extract fails: same skip-or-halt prompt.
    - Local `.git/` accidentally clobbered (defensive check after extract): surface, halt — don't continue with a damaged source tree.
 
@@ -445,21 +446,67 @@ Write a lightweight pointer file at `/shared/updates/latest.json` via `aifs_writ
 
 This file exists so that lightweight checks (session-start) can read a single small file to determine whether updates are pending, rather than reading the full update log.
 
-**Write back to `org-config.json` `installed_collections[]`** (added in core 3.7.1; closes bug `20260512-8d20ea22-2`):
+**On success:** Proceed to Step 6.
 
-After the update log, state snapshot, and latest.json are all written successfully, update `org-config.json`'s `installed_collections[]` to reflect what was just published. This keeps the org's record of "what's installed" in sync with what publish-updates has actually shipped — pre-3.7.1 these entries advanced only for marketplace-collection installs and never for infrastructure (core / marketplace) version bumps, producing the long-standing drift between `installed_collections[X].version` and the actual `/{collection}/collection.json` files at remote.
+---
 
-Read `aifs_read("/org-config.json")`. For each operation in the new entry:
+### Step 6: Write Back to `org-config.json`
+
+Added in core 3.7.1 (closed bug `20260512-8d20ea22-2`); clarified, fixed, and extended in core 3.7.4 (closes bug `20260522-8d20ea22-4`).
+
+Pre-3.7.1 this writeback didn't exist. Pre-3.7.4 the spec described it but lived as a sub-section inside Step 5 alongside a Constraints contradiction (the old Constraints line forbade ALL `org-config.json` writes, including the documented one) — the agent correctly hit the contradiction and the writeback never ran. The 3.7.4 release corrects the constraint, promotes the writeback to its own clearly-named step, and extends it to cover the top-level `agent_index_version` field.
+
+After Step 5's writes succeed, update `org-config.json` to reflect the just-published state. This keeps the org's record of "what's installed" in sync with what publish-updates has actually shipped.
+
+#### 6a. Per-operation `installed_collections[]` writeback
+
+Read `aifs_read("/org-config.json")`. For each operation in the new update-log entry:
+
 - **`core-update`:** Find the `installed_collections[]` entry with `name: "agent-index-core"`. Update its `version` to the operation's `target_version`. Update its `upgraded_date` to today (`YYYY-MM-DD`). If the entry doesn't exist (corrupt or hand-edited org-config), surface a notice and skip.
 - **`marketplace-update`:** Same for the `name: "agent-index-marketplace"` entry.
 - **`collection-update`:** Find the `installed_collections[]` entry with `name: <operation.details.collection>`. Update `version` to `target_version`, `upgraded_date` to today.
-- **`collection-install`:** Add a new entry to `installed_collections[]` if not present: `{ name, version, installed_date: today, repo_url: <from operation>, status: "installed" }`. If an entry exists (e.g. it was previously installed-and-removed), update its `version` + `upgraded_date` and flip `status` back to `"installed"`.
-- **`collection-remove`:** Find the entry and either remove it from `installed_collections[]` OR set its `status` to `"removed"` (preserve historical record). Choose preservation: keep the entry, flip `status`. This is the symmetric counterpart to the install path.
-- **Other operation types** (`claude-md-update`, `adapter-bundle-update`, `binary-update`, `members-registry-update`, `org-config-update`): no `installed_collections[]` write — these don't track here.
+- **`collection-install`:** Add a new entry to `installed_collections[]` if not present: `{ name, version, installed_date: today, repo_url: <from operation>, status: "installed" }`. If an entry exists but is marked `status: "removed"`, update its `version` + `upgraded_date` and flip `status` back to `"installed"`.
+- **`collection-remove`:** Find the entry and set its `status` to `"removed"` (preserve historical record).
+- **Other operation types** (`claude-md-update`, `adapter-bundle-update`, `binary-update`, `members-registry-update`, `org-config-update`): no `installed_collections[]` write.
 
-Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...)`. Idempotent: re-running publish-updates with the same target_version is a no-op for these fields. The write is atomic with respect to one entry — if it fails after the update log was written, surface the failure but do NOT roll back the log entry (members can still apply the update; org-config drift is a bookkeeping issue, recoverable on the next publish).
+#### 6b. Top-level `agent_index_version` writeback
 
-**On success:** Surface confirmation:
+Added in core 3.7.4 to close the `agent_index_version` portion of bug `20260522-8d20ea22-4`. Pre-3.7.4 this field drifted because nothing wrote it on a `core-update`; check-updates, session-start, and other tasks read it as "what agent-index version is the org at," producing stale data. On Bill's install at 3.7.4 publish time, the field was at `3.5.0` — multi-version drift; the one-time backfill in Step 6c handles this.
+
+- If the new update-log entry contains a `core-update` operation, update `agent_index_version` (top-level field in `org-config.json`) to the `core-update`'s `target_version`. Otherwise leave `agent_index_version` unchanged.
+- **Drift source for the Step 6c backfill comparison:** `published-state.json` does NOT have a top-level `agent_index_version` field. Its `infrastructure` object is shaped `{ "agent-index-core": "<version>", "agent-index-marketplace": "<version>" }`. The backfill comparison reads `published-state.infrastructure["agent-index-core"]` as the authoritative "what core version is the org at right now per the published record." The semantic intent of `org-config.agent_index_version` IS the core version, so this is the correct read; no schema bump on published-state is needed.
+
+#### 6c. One-time backfill prompt on detected drift
+
+Added in core 3.7.4. Before completing Step 6, compare the current `org-config.json` `installed_collections[]` and `agent_index_version` values against what `published-state.json` records:
+
+- For each collection in `published-state.installed_collections[]`: compare `org-config.installed_collections[name].version` to `published-state.installed_collections[where name==name].version`. Mismatch in either direction (stale or ahead-of-published) is drift.
+- For `agent_index_version`: compare `org-config.agent_index_version` to `published-state.infrastructure["agent-index-core"]`. Mismatch in either direction is drift.
+- For each infrastructure collection in `published-state.infrastructure` (currently `agent-index-core` and `agent-index-marketplace`): compare `org-config.installed_collections[name].version` to `published-state.infrastructure[name]`. Mismatch is drift.
+
+If any drift is detected, surface a prompt:
+
+> *"Detected `org-config.json` drift between the org's record and what's actually been published. Affected:*
+> *{for each drift entry:}*
+> *- `installed_collections[{name}].version`: `{current}` → `{published}` ({reason: stale | ahead-of-published})*
+> *{if agent_index_version drifts:}*
+> *- `agent_index_version`: `{current}` → `{published}` ({reason})*
+>
+> *This typically results from pre-3.7.4 publish-updates runs that hit a spec contradiction and skipped the writeback. Reconcile now?"*
+
+On admin **confirmation:** apply the backfill values together with the per-operation updates from 6a/6b. The single write to `/org-config.json` is atomic. Re-running publish-updates after a successful backfill is a no-op (no drift detected; nothing to prompt about).
+
+On admin **decline:** skip the backfill but still apply the per-operation updates from 6a/6b for the current publish. The drift state persists; next publish-updates run will surface the same prompt.
+
+#### Write semantics
+
+Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...)`. Idempotent: re-running publish-updates with the same target_version is a no-op for these fields. If the write fails after Step 5's writes succeeded, surface the failure but do NOT roll back the log entry (members can still apply the update; org-config drift is a bookkeeping issue, recoverable on the next publish).
+
+---
+
+### Step 7: Confirm to Admin
+
+After both Step 5 and Step 6 succeed, surface confirmation:
 
 > "Update instructions published (entry #{id}). Members will see these on their next session start and can apply them with '@ai:update'."
 >
@@ -491,7 +538,15 @@ Only org admins may run this task. The admin check in Step 1 is mandatory.
 
 Never invent operations that don't correspond to actual state changes. The diff in Step 3 is strictly mechanical — compare current state to previous state, generate operations for differences, nothing else.
 
-Never modify `org-config.json`, collection directories, or any file outside `/shared/updates/`. This task writes only to the update log, the published state snapshot, and the latest pointer file.
+Never modify collection directories or any file outside the documented write surfaces. The documented write surfaces are:
+
+- `/shared/updates/update-log.json`
+- `/shared/updates/latest.json`
+- `/shared/updates/published-state.json`
+- `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
+- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6 — no other org-config fields are mutated)
+
+The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
 
 Never auto-publish. The admin must confirm every publish action. The `--dry-run` flag exists for admins who want to preview before committing.
 

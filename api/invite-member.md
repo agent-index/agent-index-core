@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.1.0
+version: 1.2.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -14,8 +14,8 @@ dependencies:
 external_dependencies:
   - name: Remote filesystem exec bundle (gdrive contract v2.0+)
     description: Reads use aifs_get_permissions and revision-aware aifs_write — both introduced in adapter contract v2.0. Permission writes (share, unshare, transfer_ownership) go through the permission-change-helper skill rather than being called directly from this task. Will fail clearly if the installed adapter declares contract_version < 2.0.0.
-  - name: permission-change-helper binary
-    description: The pre-built `agent-index-show-plan` binary at `mcp-servers/permission-helper/show-plan.sh`, installed by core 3.3.0+. The helper renders a review page for the admin and applies the ACLs after a member-confirmed Accept. If not present, the helper skill's setup check surfaces the install issue.
+  - name: permission-change-helper Go binary
+    description: The pre-built Go binary `agent-index-show-plan` at `mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`, installed by core 3.4.0+ via `apply-updates` Phase 1 step 7. The helper renders a review page for the admin and applies the ACLs after a member-confirmed Accept. If not present, the helper skill's setup check surfaces the install issue. (Pre-3.7.4 also shipped a Node fallback; removed in 3.7.4 — closes idea `remove-node-permission-helper-fallback`.)
   - name: All-members Google Group
     description: Workspace-maintained Google Group whose membership is the authoritative agent-index member roster. Address is read from org-config.json remote_filesystem.connection.all_members_group. New members must be added to this group at the Workspace level (out-of-band; agent-index does not have Workspace admin credentials).
 reads_from: "/members-registry.json"
@@ -207,7 +207,7 @@ Surface to the admin before invoking, in the chat:
 
 - **`apply_error`** or **`verification_failed`** — Hard failure (the apply-script crashed or post-state verification revealed a discrepancy). Surface the error verbatim, halt the task, do not write to the registry.
 
-- **`binary_not_found`** — The helper's binary is missing at `mcp-servers/permission-helper/show-plan.sh`. Indicates the install is incomplete. Surface: "The permission helper isn't installed. Run `@ai:update` to complete the core 3.3.0 install, or `@ai:member-bootstrap` if the install appears broken." Halt.
+- **`binary_not_found`** — The helper's Go binary is missing at `mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. Indicates the install is incomplete or predates 3.4.0. Surface: "The permission helper Go binary isn't installed. Run `@ai:update` to install or upgrade it, or `@ai:member-bootstrap` if the install appears broken." Halt.
 
 The helper's verification step replaces the eventual-consistency polling loop the pre-1.1.0 task did manually after each share. Drive's API is still eventually consistent, but the apply-script handles the polling internally; by the time the helper returns `applied`, the post-state has been verified.
 
@@ -271,6 +271,8 @@ You've been invited to {org_name}'s agent-index install. Here's what you need to
 1. Download the bootstrap kit: {bootstrap_zip_share_link}
 2. Unpack it to a folder of your choice (this becomes your local agent-index workspace).
 3. Open Claude (Cowork or Claude Desktop with the folder selected). On first run, Claude will guide you through authenticating to {backend_display_name} as yourself.
+
+A note on access: your account isn't a member of the org's Shared Drive itself — that's by design. Instead, you have reader access to org-readable files (CLAUDE.md, org-config.json, the marketplace cache, etc.) via the all-members group, plus writer access on your own member directory via an explicit per-file share. Practically: everything you need works; you'll just notice you can't see the Shared Drive in your Drive UI's left sidebar, which is correct. If you have questions about the access model, ask your admin.
 
 If your first session reports "access denied" reading the org infrastructure files, wait two minutes and retry — Workspace group membership propagation can lag a couple of minutes.
 

@@ -208,6 +208,32 @@ If Slack delivery fails and delivery_method is `slack`, fall back to outputting 
 
 The pattern is: **fail gracefully, log the error, continue where possible, inform the member.** Never let a single email or a single API call abort the entire run.
 
+### Allowlist failure recognition
+
+Network-dependent tasks (anything that fetches from `raw.githubusercontent.com`, `codeload.github.com`, an adapter's `required_domains`, etc.) can hit a proxy-allowlist-blocked failure. The canonical host list lives in `agent-index-core/templates/network-allowlist.template.json` (shipped in core 3.7.3). When a task's fetch fails, distinguish allowlist-blocked failures from real HTTP errors and surface a specific actionable message naming the missing host.
+
+**Detection heuristic.** Treat as allowlist-blocked when the failure presents as ANY of:
+- HTTP 403 with empty body and no upstream-server headers (the proxy's own block response)
+- Connection-refused
+- Connection-timeout
+
+A "real" 403 from the destination host (e.g., GitHub API rate limit) has a response body and upstream headers; the heuristic distinguishes these correctly in practice.
+
+**Canonical error message format.** Use this wording verbatim in every task that detects an allowlist-blocked failure:
+
+> *"Download blocked by your Cowork network allowlist. Required host: `{host}`. To fix:*
+>
+> *1. Go to **claude.ai** → **Admin Settings** → **Capabilities** → **Network access**.*
+> *2. Add `{host}` to the allowlist.*
+> *3. Save and start a **new Cowork session** (allowlist changes require a new session to take effect).*
+> *4. Re-run this command, or run `@ai:verify-network-allowlist` to test all required hosts at once."*
+
+Substitute `{host}` with the actual host the task was trying to fetch. Don't add extra context — the message above is the contract.
+
+**Where the branch lives.** Add the detection at the failure-path branch in each task spec — not as a wrapper around the fetch call. The spec text describes the expected branch; the agent following the spec recognizes the failure shape and surfaces the canonical message.
+
+**Closes:** section D of idea `allowlist-failure-mode-warnings-in-tasks` (3.7.4).
+
 ### Batch processing pattern
 
 If your task processes a variable number of items, use the batch loop pattern:

@@ -6,6 +6,44 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.4] — <RELEASE_DATE> — "Closing the Loop"
+
+Closes four gaps surfaced by 3.7.3's install-layer reliability work plus the non-admin onboarding blocker. After 3.7.4 every claim 3.7.3 made about end-to-end functionality is actually true. Scope decision recorded at `/shared/projects/core-improvements/decisions/2026-05-24-release-3.7.4-scope.md`.
+
+### Fixed
+
+- **Non-admin onboarding blocker** (closes bug `20260522-8d20ea22`, high severity). Two gdrive adapter defects plus an `org-setup` spec change. Adapter pieces (in `agent-index-filesystem-gdrive` 2.4.0): `_getRootId()` no longer calls `drives.get(drive_id)` (the call's result was unused; the 404 it returned for non-Drive-members halted adapter init); `aifs_list` uses `corpora: 'allDrives'` with `includeItemsFromAllDrives: true` and a `driveId` filter at all four call sites (was `corpora: 'drive'`, which required Drive membership). Core piece: `org-setup` 3.3.0 catalog assembly rewritten to iterate `org-config.installed_collections[]` instead of `aifs_list('/')`. Defensive read semantics added — if a collection's `collection.json` can't be read, the entry is skipped with a notice rather than halting bootstrap.
+
+- **Node permission-helper removed** (closes bug `20260522-8d20ea22-2` via removal and implements idea `remove-node-permission-helper-fallback`). The `lib/permission-helper/` source tree is deleted; the Go binary at `mcp-servers/permission-helper-go/` (installed by `apply-updates` Phase 1 step 7 since core 3.4.0) is now the only permission-helper implementation. `apply-updates` Phase 1 step 6 — previously the Node-helper install — is replaced by an orphan-cleanup step that removes the local `mcp-servers/permission-helper/` directory on existing installs. Skill spec, setup spec, `invite-member`'s `external_dependencies`, and `standards.md` § "Permission-Modifying Operations" all updated to Go-binary-only language. Rationale per Bill: "We shouldn't be maintaining multiple solutions for exactly this reason."
+
+- **`publish-updates` org-config writeback regression** (closes bug `20260522-8d20ea22-4`). Pre-3.7.4 the spec described the writeback to `org-config.installed_collections[]` as a sub-section inside Step 5, but a precisely-conflicting Constraints line forbade ALL `org-config.json` writes; the agent correctly hit the contradiction and the writeback never ran. 3.7.4 rewrites the Constraints section with a precisely-scoped write surface list (only `/shared/updates/*`, `/shared/bootstrap/member-bootstrap.zip`, and `/org-config.json`'s `installed_collections[]` + `agent_index_version` fields per Step 6), promotes the writeback to a clearly-named Step 6 with subsections 6a (per-operation `installed_collections[]` writeback), 6b (new top-level `agent_index_version` writeback), and 6c (one-time backfill prompt on detected drift). Drift source for `agent_index_version` backfill comparison: `published-state.infrastructure["agent-index-core"]` (verified pre-build; no schema change to published-state). `publish-updates` 3.4.0 → 3.5.0.
+
+- **Apply-updates manifest-sync subroutine no longer cross-references the deleted Phase 1 step 6.** The LF-normalization mechanic — previously borrowed by reference from the Node-helper-install step's normalization — is now inlined directly into the subroutine step 4. Self-contained; no future caller has to trace back to a step that no longer exists. `apply-updates` 3.6.0 → 3.7.0.
+
+### Added
+
+- **Allowlist failure-mode recognition pattern** (implements section D of idea `allowlist-failure-mode-warnings-in-tasks`). New "Allowlist failure recognition" section in `collection-authoring-guide.md` documents the detection heuristic (HTTP 403 with empty body + no upstream headers, OR connection-refused, OR connection-timeout) and the canonical error message format. `publish-updates` Step 0a (when invoked with `--check-upstream`) gets an error-path branch for the GitHub-fetch surface. Marketplace 2.7.0 ships parallel branches for `refresh-marketplace-cache`, `download-collection`, `download-and-install-collection`, and `check-updates`. (SP5 originally listed `apply-updates` Phase 0 and `install-collection`; neither does HTTP fetches — both operate on `aifs_*` over the remote filesystem. Substituted `publish-updates` Step 0a as the actual upstream-fetch surface.)
+
+### Notes
+
+- **Verification gap from this build:** the WS1 empirical pre-commit test against actual gdrive credentials (Bill's Drive-member case + testproduction's non-Drive-member case) wasn't runnable from the build session (no OAuth credentials available there). Bundle build mechanics were verified — the new bundle contains `corpora: 'allDrives'` at all four sites and no longer contains `drives.get(params)`. Full credential-driven end-to-end verification moves to the rehearsal-install verification step.
+- **Transitional ordering for new non-admin members:** after applying 3.7.4, admins should run `@ai:publish-updates` to reconcile any `installed_collections[]` drift (the writeback bug fixed in this release will fire the new one-time backfill prompt) before inviting new non-admin members. The defensive read semantics in `org-setup` Phase 3 ensure new-member onboarding doesn't halt on stale entries, but the prompt-and-backfill closes the gap properly.
+- **Companion releases:** marketplace 2.7.0 (allowlist failure branches in 4 tasks); filesystem-gdrive 2.4.0 (non-admin onboarding adapter fixes); client-intelligence 1.1.1 (V1 data-floor doc correction — `inherit: false` resolves immediate-parent leak but NOT ancestor leak; new idea `data-visibility-floor-ancestor-leak` files the real-fix design options for 3.8.0+); developer 1.4.0 (preflight Check 8 for `inherit: false` against pre-2.0 adapters).
+- **Two new ideas filed** during release prep: `data-visibility-floor-ancestor-leak` (real fix for bug `-3`, three design options captured); `preflight-bundle-vs-config-drift-detection` (the "manifest claims, implementation discards" recurring pattern — explicitly deferred from 3.7.4 to keep theme crisp).
+- **Process changes applied universally** per the 3.7.3 retro: cross-component dependency verification step caught three issues pre-build (Check 8 bash logic conflated `adapter_version` with `contract_version`; TD4 referenced a non-existent "Step 4a"; TD4's `agent_index_version` writeback assumed a published-state field that doesn't exist). All resolved before build kicked off.
+
+### Bumped
+
+- `apply-updates` task 3.6.0 → 3.7.0 (Phase 1 step 6 swap; LF-normalization inlining)
+- `publish-updates` task 3.4.0 → 3.5.0 (Step 6 split + writeback fix + backfill prompt)
+- `permission-change-helper` skill 1.1.0 → 1.2.0 (Go-binary-only)
+- `permission-change-helper-setup` 1.0.0 → 1.1.0
+- `org-setup` skill 3.2.2 → 3.3.0 (catalog assembly rewrite)
+- `invite-member` task 1.1.0 → 1.2.0 (welcome-email access-model paragraph + Go-binary path references)
+- All `*-manifest.json` `collection_version` fields bumped to 3.7.4
+
+---
+
 ## [3.7.3] — 2026-05-20 — "Install-Layer Reliability"
 
 Theme: fix the three problems a new admin most reliably hits on day one. Three tightly-coupled work-streams: allowlist reconciliation + setup-time verification; permission-helper trust-contract realignment + inherit passthrough; Phase 4.5 filesystem-drift detector. Decision record: `/shared/projects/core-improvements/decisions/2026-05-20-release-3.7.3-scope.md`.

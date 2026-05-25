@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.2.2
+version: 3.3.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -66,19 +66,21 @@ Maintain a running progress state throughout any multi-step operation. If the se
 
 ### Reading the Collections Catalog
 
-The collections catalog is assembled at runtime from the remote filesystem — not a single file, but derived from what is installed on the org's remote storage.
+The collections catalog is assembled at runtime from `org-config.installed_collections[]` — the authoritative record of what's installed (maintained by `publish-updates` Step 6's writeback, fixed in core 3.7.4 — see bug `20260522-8d20ea22-4`).
 
-To build the catalog:
-1. Read `agent-index.json` to get `library_root`
-2. List all directories at the remote library root via `aifs_list("/")`
-3. For each directory, attempt to read `collection.json` via `aifs_read("/{directory}/collection.json")`
-4. If `collection.json` is readable and valid: include this collection in the catalog
-5. Skip `agent-index-core/` and `agent-index-marketplace/` — these are infrastructure, not user-installable capabilities
-6. For each included collection, list the `api/` directory via `aifs_list("/{directory}/api/")` to enumerate available public skills and tasks
+To build the catalog (revised in core 3.7.4 to close bug `20260522-8d20ea22` — the previous `aifs_list("/")` approach required Drive-level membership and broke for non-admin members):
+
+1. Read `aifs_read("/org-config.json")` and parse `installed_collections[]`.
+2. For each entry where `status: "installed"`:
+   - Skip `agent-index-core` and `agent-index-marketplace` — these are infrastructure, not user-installable capabilities.
+   - Read the collection's manifest directly via `aifs_read("/{name}/collection.json")` to get `display_name`, `category`, `description`, `version`, and the `api[]` list.
+   - The `api[]` entries name each public capability; no separate `aifs_list("/{name}/api/")` is needed (the catalog is fully described by `collection.json` itself).
+
+**Defensive read semantics** (added in 3.7.4): if any individual `aifs_read("/{name}/collection.json")` fails (NOT_FOUND, permission denied, or returns invalid JSON), do NOT halt the bootstrap. Skip that collection with a one-line notice: *"Skipped collection `{name}`: collection.json not readable ({error reason}). The collection's capabilities will not be available in this session; ask your admin to verify the install."* Continue to the next entry. This handles transitional cases where `org-config.installed_collections[]` is stale relative to the remote filesystem (e.g., between a 3.7.4 ship and the admin running publish-updates' new writeback for the first time — see bug `20260522-8d20ea22-4`'s fix in this same release), as well as any genuine drift where a collection was hand-removed from remote without updating `org-config`.
 
 The result is a structured catalog: collection name, display name, category, description, and list of available API skills and tasks with their descriptions.
 
-If no collections are found beyond the infrastructure collections: surface this to the member. There is nothing to install yet. The org admin needs to install collections via the marketplace before members can set up capabilities.
+If no collections are found beyond the infrastructure collections (or all entries were skipped via defensive reads): surface this to the member. There is nothing to install yet. The org admin needs to install collections via the marketplace before members can set up capabilities.
 
 ### First-Time Onboarding Sequence
 

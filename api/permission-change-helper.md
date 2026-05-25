@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.1.0
+version: 1.2.0
 collection: agent-index-core
 description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
@@ -11,7 +11,7 @@ dependencies:
   tasks: []
 external_dependencies:
   - name: Permission-helper binary
-    description: The pre-built `agent-index-show-plan` helper. As of core 3.4.0 the canonical implementation is the native Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows), distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. The legacy Node helper at `mcp-servers/permission-helper/show-plan.sh` ships as a fallback for orgs that have not yet opted into the binary registry. If neither is present, the helper cannot run — surface an error and direct the member to '@ai:update' or '@ai:member-bootstrap'.
+    description: The pre-built `agent-index-show-plan` helper. The canonical implementation is the native Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows), distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. Pre-3.7.4 versions also shipped a Node fallback at `mcp-servers/permission-helper/show-plan.sh`; this was removed in 3.7.4 (closes idea `remove-node-permission-helper-fallback`). If the Go binary is not present, the helper cannot run — surface a `binary_not_found` outcome and direct the member to `@ai:update` (to install the binary on pre-3.4.0 installs) or `@ai:member-bootstrap` (to repair a broken install).
   - name: Browser
     description: The member's default browser. The helper opens a localhost URL for the member to review the proposed change. Headless contexts can use the `--cli` fallback.
 ---
@@ -22,12 +22,9 @@ The Permission-Change Helper is the canonical agent-callable surface for any tas
 
 The reason for the layering is documented in `agent-index-core/standards.md` under "Permission-Modifying Operations" and in the access-control project's decision record at `/shared/projects/access-control/decisions/permission-change-via-plan-page.md`. In short: agents are prohibited from making security-changing calls on the user's behalf, even with authorization, because agents can be manipulated. The helper sidesteps this by keeping the privileged call out of the agent's call stack — the agent prepares a structured proposal and surfaces it in the member's browser; the member's deliberate Accept click triggers a script that uses the member's existing OAuth token to make the actual call. The agent is upstream of the privileged action, never inside it.
 
-This skill is the agent-side bookend to the pre-built `agent-index-show-plan` binary. As of core 3.4.0 there are two implementations of the binary, with the skill preferring the native one when present:
+This skill is the agent-side bookend to the pre-built `agent-index-show-plan` binary. The canonical implementation is the native Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows). It's distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. Production-quality: real Drive API integration, OAuth refresh, custom URL scheme handler (`agent-index://`), per-platform installers.
 
-1. **Native Go binary** at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows). Distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. Production-quality: real Drive API integration, OAuth refresh, custom URL scheme handler (`agent-index://`), per-platform installers.
-2. **Legacy Node helper** at `mcp-servers/permission-helper/show-plan.sh`. Shipped from `agent-index-core/lib/permission-helper/` during `apply-updates` Phase 1 step 6. Same wire protocol, same page UI, same trust contract — kept as a fallback for orgs that have not yet opted into the binary registry. Slated for removal in a future release once the Go binary has been deployed widely.
-
-The skill's job is to detect which is installed, invoke whichever is present (preferring Go), branch on its outcome, verify post-state, and surface clear narration to the member at each phase.
+Pre-3.7.4 also shipped a Node fallback at `mcp-servers/permission-helper/show-plan.sh` from `agent-index-core/lib/permission-helper/` during `apply-updates` Phase 1 step 6. That fallback was removed in 3.7.4 (closes idea `remove-node-permission-helper-fallback`) — see the [3.7.4 scope decision record](/shared/projects/core-improvements/decisions/2026-05-24-release-3.7.4-scope.md) for rationale. The skill's job is now: detect that the Go binary is present, emit the canonical `agent-index://` markdown link (with code-fenced URL fallback per the trust contract) for the user to click, parse the structured outcome JSON the binary writes, verify post-state via `aifs_get_permissions`, and surface clear narration to the member at each phase.
 
 ### When This Skill Is Active
 
@@ -101,7 +98,7 @@ Emit, in this order:
 3. A single-sentence narration:
    > "Review the proposed changes and click Accept to apply with your own credentials. If the link above doesn't open a review page, your OS URL-scheme handler may not be registered — copy the URL from the code block into your browser, or run `@ai:member-bootstrap` to verify your install."
 
-The Go binary is what the URL-scheme handler invokes. As of core 3.4.0+ the binary lives at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. The Node fallback at `<project_dir>/mcp-servers/permission-helper/show-plan.sh` is still shipped for orgs that haven't opted into the binary registry but is **not** invoked through the URL-scheme path; the future removal of the Node fallback is tracked in idea `remove-node-permission-helper-fallback`.
+The Go binary is what the URL-scheme handler invokes. The binary lives at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. Pre-3.7.4 also shipped a Node fallback at `<project_dir>/mcp-servers/permission-helper/show-plan.sh`; that fallback was removed in 3.7.4 (closes idea `remove-node-permission-helper-fallback`). If the Go binary isn't present at the expected path, surface a `binary_not_found` outcome and direct the member to `@ai:update` or `@ai:member-bootstrap`.
 
 **Step 5 — Wait for the user to report the outcome.**
 
