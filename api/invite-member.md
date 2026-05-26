@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.2.0
+version: 1.3.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -120,27 +120,43 @@ Track which paths were freshly created vs. already existing. Used in Step 6 narr
 
 ### Step 6: Apply ACLs via permission-change-helper
 
-The actual access grants for both folders are batched into a single helper invocation. The admin reviews and confirms all four (or fewer, see below) shares on one page; the helper's apply-script applies them with the admin's existing OAuth token. This task never calls `aifs_share` directly — that's prohibited by the agent-side safety boundary the helper exists to navigate.
+The access grants are batched into a single helper invocation. The admin reviews and confirms all shares on one page; the helper's apply-script applies them with the admin's existing OAuth token. This task never calls `aifs_share` directly — that's prohibited by the agent-side safety boundary the helper exists to navigate.
+
+**Two share-set categories** (extended in core 3.7.4 to close bug `20260522-8d20ea22` properly):
+
+**Category A — Member-directory writer grants (existing through 1.2.0):** the new member + admin both need writer on the new member's private directory and shared-artifact directory.
+
+**Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-Drive-member access to org folders only works through DIRECT shares, not group-mediated inheritance. The Google Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even when the user has full read rights on the contents. Direct shares are required for `aifs_list` to surface entries to non-admin members. Verified empirically with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG for the empirical-test details. This share set is what bug `20260522-8d20ea22` was missing in its original 3.7.4 attempt.
+
+The Category B set covers every top-level path a non-admin member needs to walk:
+- `/shared/` — folder; enables listing all org-shared subtrees (projects, marketplace-cache, updates, bug-reports, members artifacts, installed-collection-specific subfolders)
+- For each `installed_collections[]` entry in `org-config.json` with `status: "installed"`, EXCEPT `agent-index-core` and `agent-index-marketplace` (which are infrastructure-only — collection.json read via global name search by ID): `/{name}/` → reader. Enables listing `api/`, reading `collection.json`, and walking into the collection's tree.
 
 **Build the spec:**
 
-1. Read pre-state for both target paths to capture the current ACLs (used as the `before` field in the spec for diff visualization, and to filter shares that would be no-ops):
+1. Read pre-state for ALL target paths (Category A + B) to capture current ACLs (used as the `before` field for diff visualization, and to filter shares that would be no-ops):
 
    ```
-   members_pre = aifs_get_permissions("/members/{hash}/")
+   members_pre   = aifs_get_permissions("/members/{hash}/")
    artifacts_pre = aifs_get_permissions("/shared/members/artifacts/{hash}/")
+   shared_pre    = aifs_get_permissions("/shared/")
+   # For each installed user-facing collection {coll_name}:
+   coll_pre[{coll_name}] = aifs_get_permissions("/{coll_name}/")
    ```
 
-   Note: `aifs_get_permissions` is read-only and agent-callable directly — only the *write* ops go through the helper.
+   Note: `aifs_get_permissions` is read-only and agent-callable directly — only *write* ops go through the helper.
 
-2. Build the operations list. For each (path, recipient, role) tuple in the cross-product `{/members/{hash}/, /shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`:
-   - Look up the recipient in the corresponding pre-state.
-   - If the recipient already has the requested role on the path: **omit** this operation from the spec (no-op).
-   - Otherwise: include it.
+2. Build the operations list:
 
-   For a fresh invite, all 4 shares are included. For a re-invite where the admin already has writer on both folders and only the member needs to be re-added, the spec contains 1–2 shares.
+   **Category A (4 entries cross-product):** `{/members/{hash}/, /shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`.
 
-3. Compose the spec:
+   **Category B (1 + N entries):** for each path in `{/shared/} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_email, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
+
+   For each tuple, look up the recipient in the corresponding pre-state. If the recipient already has the requested role on the path: **omit** this operation (no-op). Otherwise: include it.
+
+   For a fresh invite to an org with 8 installed user-facing collections, the spec contains: 4 (Category A) + 1 (`/shared/`) + 8 (collection roots) = 13 operations. For a re-invite where the admin already has access on the Category A folders and only the member needs to be re-added, the spec is correspondingly smaller.
+
+3. Compose the spec. The example below shows the shape for a fresh invite on an org with 2 installed user-facing collections (`projects`, `client-intelligence`). Adapt the Category B `share` operations to whatever set of `installed_collections[]` entries with `status: "installed"` the org actually has, excluding `agent-index-core` and `agent-index-marketplace`.
 
    ```json
    {
@@ -173,19 +189,40 @@ The actual access grants for both folders are batched into a single helper invoc
          "recipient": "{new_member_email}",
          "role": "writer",
          "before": { "recipients": <artifacts_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/shared/",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <shared_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/projects/",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <coll_pre[projects].permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/client-intelligence/",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <coll_pre[client-intelligence].permissions> }
        }
      ],
      "context": {
        "requestor": "{admin_member_hash}",
        "calling_task": "invite-member",
-       "purpose": "Granting {display_name} ({new_member_email}) writer access to their member directories under {org_name}."
+       "purpose": "Onboarding {display_name} ({new_member_email}) under {org_name}: writer on their member directories + reader on org-readable roots so path-walking works (the access-control Phase 4 model relies on direct shares, not group inheritance, for list-visibility — see gdrive 2.4.1 CHANGELOG)."
      }
    }
    ```
 
    (Filter out any operations the pre-state read marked as no-ops before submitting.)
 
-4. If the filtered operations list is empty (all 4 grants already in place — uncommon but possible on a re-invite of a member whose ACLs were never cleaned up): skip Step 6 entirely. Surface to the admin: "All required ACLs are already in place; no permission changes needed."
+4. If the filtered operations list is empty (all required grants already in place — uncommon but possible on a re-invite of a member whose ACLs were never cleaned up): skip Step 6 entirely. Surface to the admin: "All required ACLs are already in place; no permission changes needed."
 
 **Invoke the helper:**
 
