@@ -6,6 +6,35 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.5] — <RELEASE_DATE> — companion follow-up to 3.7.4
+
+Closes the remaining surface in bug `20260522-8d20ea22` that the 3.7.4 release intended to fix but didn't deliver end-to-end. 3.7.4 published the adapter and `org-setup` changes; gdrive 2.4.1 (published in update entry #028) corrected the Drive-API constraint regression introduced by 2.4.0; this release ships the third leg of the fix — `invite-member` 1.3.0 with the Category B direct-share grants. After 3.7.5, new non-admin onboarding actually works end-to-end. Existing non-admin members still need the one-time backfill runbook (`dev_source/backfill-non-admin-shares-3.7.4.md`).
+
+### Fixed
+
+- **`invite-member` 1.2.0 → 1.3.0 — Category B direct-share grants** (closes the gap in bug `20260522-8d20ea22` that 3.7.4 left open). The helper spec's share-set is now two categories:
+
+  - **Category A (existing):** writer grants on the new member's private directory and shared-artifact directory.
+  - **Category B (new):** direct READER grants for the new member on `/shared/` and on each user-facing entry in `org-config.installed_collections[]` (excluding `agent-index-core` and `agent-index-marketplace` infrastructure collections).
+
+  Category B is what allows gdrive 2.4.1's drive-root fallback to surface those folders for non-Drive-members. Empirical two-account testing during the 2.4.1 cycle established that the all-members group's reader grants do NOT propagate to folder list-visibility through the Drive API, even when the group has reader on the parent. Group-mediated reads work for known file IDs; group-mediated listing does NOT. Direct shares are required.
+
+  Per-share semantics: reader role; no `inherit: false`. For a fresh invite on an org with N user-facing installed collections, the spec contains 4 Category A operations + (1 + N) Category B operations.
+
+### Notes
+
+- **Existing non-admin members are NOT automatically backfilled by this release.** Runbook at `dev_source/backfill-non-admin-shares-3.7.4.md` walks the admin through it via the permission-change-helper (one Accept click per member). Run once after applying 3.7.5.
+- **gdrive 2.4.1 was published independently as update entry #028** before this release; admins who applied #027 + #028 already have the corrected adapter. 3.7.5 only needs to broadcast the core changes.
+- **Companion (out-of-band):** `agent-index-filesystem-gdrive` 2.4.1 (already published; see its CHANGELOG for the 2.4.0 → 2.4.1 post-mortem).
+- **Verification:** empirical two-account test (`test-final.mjs`) ran as part of the 2.4.1 cycle. 13 of 13 ops pass with the adapter 2.4.1 + simulated Category B share. Real end-to-end verification of `invite-member` 1.3.0 happens when the admin invites a new test account after 3.7.5 lands.
+
+### Bumped
+
+- `invite-member` task 1.2.0 → 1.3.0 (Category B direct-share grants)
+- All `*-manifest.json` `collection_version` fields bumped to 3.7.5
+
+---
+
 ## [3.7.4] — <RELEASE_DATE> — "Closing the Loop"
 
 Closes four gaps surfaced by 3.7.3's install-layer reliability work plus the non-admin onboarding blocker. After 3.7.4 every claim 3.7.3 made about end-to-end functionality is actually true. Scope decision recorded at `/shared/projects/core-improvements/decisions/2026-05-24-release-3.7.4-scope.md`.
@@ -16,7 +45,7 @@ Closes four gaps surfaced by 3.7.3's install-layer reliability work plus the non
 
   1. **Adapter (`agent-index-filesystem-gdrive` 2.4.1):** drops the broken `corpora: 'allDrives'` + `driveId` combination that 2.4.0 introduced (the Drive API rejects it: "driveId must be specified if and only if corpora is set to drive"). Adds `_detectDriveMembership()` (fail-open `drives.get` probe) and `_listParams()` helper that branches every `files.list` query — members get `corpora: 'drive'` + `driveId` (the pre-2.4.0 admin path); non-members get `corpora: 'user'` (no `driveId`). Adds a drive-root fallback in `_resolvePathToId`: when "in parents = `driveId`" returns 0 for a non-member, falls back to global name search with `corpora: 'allDrives'` (which DOES return entries the user has direct access to).
 
-  2. **`invite-member` 1.3.0:** the helper spec now includes a Category B share-set in addition to the existing per-member-dir writer grants. Category B grants the new member direct READER on `/shared/` and on each user-facing entry in `installed_collections[]` (excluding the infrastructure collections). These direct shares are what allow the adapter's path-walking to surface those folders for non-Drive-members — group-mediated inheritance does NOT propagate to list-visibility through the Drive API (empirically verified).
+  2. **`invite-member`** — in 3.7.4 (1.2.0) ships only the welcome-email + Go-binary-path updates. The Category B direct-share grants that complete the non-admin onboarding fix were added as `invite-member` 1.3.0 in **core 3.7.5** (companion follow-up to gdrive 2.4.1), once the empirical two-account testing established that the all-members group's reader grants don't propagate to folder list-visibility through the Drive API. Without 1.3.0's direct-share grants, the adapter has nothing to find when it falls back to global name search at drive root. See the 3.7.5 entry above for full details.
 
   3. **`org-setup` 3.3.0:** catalog assembly rewritten to iterate `org-config.installed_collections[]` instead of `aifs_list('/')`. Defensive read semantics — if a collection's `collection.json` can't be read, the entry is skipped with a notice rather than halting bootstrap.
 
@@ -49,7 +78,7 @@ Closes four gaps surfaced by 3.7.3's install-layer reliability work plus the non
 - `permission-change-helper` skill 1.1.0 → 1.2.0 (Go-binary-only)
 - `permission-change-helper-setup` 1.0.0 → 1.1.0
 - `org-setup` skill 3.2.2 → 3.3.0 (catalog assembly rewrite)
-- `invite-member` task 1.1.0 → 1.3.0 (welcome-email access-model paragraph + Go-binary path references + Category B direct-share grants for org-readable roots; required by gdrive 2.4.1)
+- `invite-member` task 1.1.0 → 1.2.0 (welcome-email access-model paragraph + Go-binary path references). NOTE: the Category B direct-share grants that gdrive 2.4.1 depends on shipped as `invite-member` 1.3.0 in **core 3.7.5** (follow-up release).
 - All `*-manifest.json` `collection_version` fields bumped to 3.7.4
 
 ---
