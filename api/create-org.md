@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.1.0
+version: 3.1.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -577,6 +577,36 @@ Include entries for ALL admins defined in Step 7.
 If the template file is missing for any reason, fall back to generating the file from the sections above — but the template is the source of truth and should not be skipped lightly. Marketplace aliases in the template apply only when `agent-index-marketplace` is in `installed_collections`; if the marketplace section is irrelevant to this org (extremely rare), it can be omitted from the written file.
 
 **Local writes:**
+
+4.5. **Grant `all@{org_domain}` reader access on the three root-level org-readable files** (added in core 3.7.6 to close the spec half of bug `20260527-8d20ea22-3` — every non-admin member needs read access to these files; pre-3.7.6 the grants had to be applied manually).
+
+After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members Google Group reader access on each. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and other tasks.
+
+**Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and do NOT go through the `permission-change-helper` skill. The admin running `create-org` is the org-creator with organizer authority on the new Shared Drive; the operations are deterministic and a one-time setup. Helper-mediated review would add friction without adding safety in this context.
+
+For each path in `["/CLAUDE.md", "/org-config.json", "/members-registry.json"]`, call:
+
+```
+aifs_share(
+  resource: "<path>",
+  recipient: "{all_members_group}",
+  role: "reader"
+)
+```
+
+Where `{all_members_group}` is the org's all-members Google Group address collected in Step 7 and now persisted in `org-config.json` at `remote_filesystem.connection.all_members_group` (typically `all@{org_domain}` per the access-control Phase 4 design intent).
+
+**Idempotency:** if a grant already exists (e.g., the admin is re-running `create-org` after a partial completion), `aifs_share` for the same recipient + role on the same resource is a no-op. The step is safe to re-run.
+
+**Failure handling:** if any `aifs_share` fails — typically because the all-members Google Group hasn't been created yet at the Workspace level, or because the admin's OAuth scope doesn't include permission management on this drive — surface the failure and halt with admin-actionable instructions:
+
+> "Could not grant `{all_members_group}` reader access on `{path}`: {error_summary}.
+>
+> This usually means the all-members Google Group hasn't been created at the Workspace level yet. Create the group via admin.google.com → Apps → Google Workspace → Groups for Business → create a new group with the address `{all_members_group}`, configured so members of your domain can view content shared with it.
+>
+> Once the group exists, re-run `@ai:create-org` to resume from where this step left off, or run `@ai:repair-org-acls` (future) to apply only the missing grants."
+
+After all three grants are confirmed (either applied successfully or already in place), proceed to item 5.
 
 5. Verify `.claude/settings.json` is present locally (already written in Step 3c). If missing or corrupted, rewrite it.
 

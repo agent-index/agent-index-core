@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.3.0
+version: 3.3.1
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -166,7 +166,7 @@ For each skill and task in the determined installation order:
 1. Announce what is being installed: "Installing {display name}..."
 2. Create the directory structure in the member's LOCAL workspace
 3. Read the canonical definition file from the remote collection via `aifs_read("/{collection}/api/{name}.md")` and write it to the member's local workspace
-4. Inject org-mandated parameter values (from the collection's `collection-setup-responses.md`, read via `aifs_read`) into the setup context
+4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context
 5. Inject role-suggested parameter defaults from `role.md` into the setup context
 6. Read the setup template (`{name}-setup.md`) from the remote collection via `aifs_read("/{collection}/api/{name}-setup.md")`
 7. Conduct the setup interview for this skill or task:
@@ -340,7 +340,7 @@ Never modify `agent-index.json` or any collection directory on the remote filesy
 
 Never write an alias to `member-index.json` that collides with an existing alias without explicit collision resolution. The collision resolution must be completed before the installation entry is written.
 
-If the collection's `collection-setup-responses.md` cannot be read from the remote filesystem via `aifs_read("/{collection}/collection-setup-responses.md")` (the collection was installed but org-level setup was never completed by an admin), surface this as a blocker for any capability from that collection:
+If the collection's `collection-setup-responses.md` cannot be read from the remote filesystem via `aifs_read("/{collection}/setup/collection-setup-responses.md")` (the collection was installed but org-level setup was never completed by an admin), surface this as a blocker for any capability from that collection:
 > "The {collection display name} collection has not been configured by your org admin yet. Skills and tasks from this collection cannot be set up until an admin completes the collection setup. Contact your org admin to resolve this."
 
 ### Edge Cases

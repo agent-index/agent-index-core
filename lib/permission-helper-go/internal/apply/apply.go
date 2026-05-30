@@ -107,7 +107,7 @@ func Apply(s *spec.Spec, emit EventEmitter, drv Driver) listener.StatusReport {
 func applyOne(op spec.Op, drv Driver) error {
 	switch op.Op {
 	case "share":
-		return drv.Share(op.Resource, op.Recipient, op.Role)
+		return drv.Share(op.Resource, op.Recipient, op.Role, op.Inherit)
 	case "unshare":
 		return drv.Unshare(op.Resource, op.Recipient)
 	case "transfer_ownership":

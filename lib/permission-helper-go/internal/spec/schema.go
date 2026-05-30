@@ -8,7 +8,10 @@
 // recipient of this share").
 package spec
 
-const SchemaVersion = "1.0"
+const (
+	SchemaVersion    = "1.0" // legacy spec format
+	SchemaVersionV11 = "1.1" // adds optional Inherit field on share ops
+)
 
 // Spec is the permission-change spec the agent generates and the
 // helper applies. JSON-marshaled to/from disk.
@@ -25,6 +28,7 @@ type Op struct {
 	Resource  string  `json:"resource"`
 	Recipient string  `json:"recipient"`        // the new recipient being granted/transferred
 	Role      string  `json:"role,omitempty"`   // required for op=share; lowercase reader/commenter/writer
+	Inherit   *bool   `json:"inherit,omitempty"` // v1.1+ only; nil/true = default Drive inheritance; false = override inheritance (set inheritedPermissionsDisabled=true)
 	Before    *Before `json:"before,omitempty"`
 	Excluded  bool    `json:"excluded,omitempty"` // set by the page on submit
 }

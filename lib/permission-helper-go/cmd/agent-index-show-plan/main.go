@@ -36,6 +36,13 @@ import (
 
 var Version = "0.1.0-spike" // set at build time via -ldflags
 
+// currentSpecPath is set when running with a known spec file (runFromSpec /
+// runFromURL). When non-empty, emitFinal writes the outcome JSON to disk at
+// deriveOutcomePath(currentSpecPath) in addition to emitting it to stdout.
+// Added in v0.3.0 to fulfill the skill spec's outcome-file contract (closes
+// bug 20260527-8d20ea22-2).
+var currentSpecPath string
+
 func diag(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[helper] "+format+"\n", args...)
 }
@@ -43,6 +50,44 @@ func diag(format string, args ...interface{}) {
 func emitFinal(report listener.StatusReport) {
 	data, _ := json.Marshal(report)
 	fmt.Fprintln(os.Stdout, string(data))
+
+	// v0.3.0: also write to outcome JSON file when we know the spec path.
+	// The agent (skill spec Step 6) reads this file to learn what happened.
+	// Best-effort: write failures are logged but don't override the stdout emit.
+	if currentSpecPath != "" {
+		if err := writeOutcomeFile(currentSpecPath, data); err != nil {
+			diag("warning: could not write outcome file at %s: %v", deriveOutcomePath(currentSpecPath), err)
+		}
+	}
+}
+
+// deriveOutcomePath returns the outcome JSON path for a given spec path.
+// Replaces the ".json" suffix with "-outcome.json"; if the spec path has no
+// ".json" suffix (unusual but defensive), appends "-outcome.json" verbatim.
+func deriveOutcomePath(specPath string) string {
+	return strings.TrimSuffix(specPath, ".json") + "-outcome.json"
+}
+
+// writeOutcomeFile atomically writes the outcome JSON to disk: write to a
+// temp file, fsync, rename. Atomic with respect to the agent reading the
+// file — the agent never sees a partial write.
+func writeOutcomeFile(specPath string, data []byte) error {
+	outcomePath := deriveOutcomePath(specPath)
+	tmpPath := outcomePath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	// Best-effort fsync; if it fails, still proceed with rename.
+	if f, err := os.OpenFile(tmpPath, os.O_RDWR, 0); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	if err := os.Rename(tmpPath, outcomePath); err != nil {
+		// Cleanup tmp file on rename failure; ignore secondary error
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -182,6 +227,9 @@ func runFromURL(rawURL string) {
 }
 
 func runFromSpec(specPath string, cli, stub bool) {
+	// v0.3.0: record the spec path so emitFinal can write the outcome file alongside.
+	currentSpecPath = specPath
+
 	bytes, err := os.ReadFile(specPath)
 	if err != nil {
 		diag("could not read spec at %s: %v", specPath, err)

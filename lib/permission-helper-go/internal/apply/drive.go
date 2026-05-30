@@ -73,11 +73,36 @@ func NewDriveDriver(ctx context.Context, workspaceRoot string, ts oauth2.TokenSo
 }
 
 // Share creates a permission grant on the resource for the subject.
-func (d *DriveDriver) Share(resource, subject, role string) error {
+// When inherit is non-nil and *inherit == false, the call sets
+// inheritedPermissionsDisabled=true on the file resource BEFORE creating the
+// explicit permission, so the recipient sees only the explicit grant and not
+// any inherited grants from parent folders. Order matters: setting the
+// override first prevents any transient window where the recipient briefly
+// has broader (inherited) access. When inherit is nil or *inherit == true,
+// default Drive inheritance applies (existing behavior).
+//
+// This matches the gdrive adapter 2.3.0+ behavior for aifs_share(inherit:false).
+// Added in helper-go v0.3.0 to support v1.1 spec format (closes bug 20260527-8d20ea22).
+func (d *DriveDriver) Share(resource, subject, role string, inherit *bool) error {
 	id, err := d.resolvePath(resource)
 	if err != nil {
 		return err
 	}
+
+	// Step 1 (only when inherit:false explicit): disable inherited permissions on the file.
+	if inherit != nil && !*inherit {
+		updateCall := d.svc.Files.Update(id, &drive.File{
+			InheritedPermissionsDisabled: true,
+		}).Fields("id,inheritedPermissionsDisabled")
+		if d.supportsAllDrv {
+			updateCall = updateCall.SupportsAllDrives(true)
+		}
+		if _, err := updateCall.Do(); err != nil {
+			return wrapDriveErr("share_set_inherit_disabled", err)
+		}
+	}
+
+	// Step 2: create the explicit permission grant.
 	perm := &drive.Permission{
 		Type:         "user",
 		Role:         role,

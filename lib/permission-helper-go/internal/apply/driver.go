@@ -14,7 +14,7 @@ import (
 // implementation (DriveDriver in drive.go) talks to Google Drive's API;
 // StubDriver below returns canned successful results for testing.
 type Driver interface {
-	Share(resource, subject, role string) error
+	Share(resource, subject, role string, inherit *bool) error // inherit added in v0.3.0 to support v1.1 specs; nil = default Drive inheritance; *false = set inheritedPermissionsDisabled=true
 	Unshare(resource, subject string) error
 	TransferOwnership(resource, subject string) error
 	ListPermissions(resource string) ([]spec.Recipient, error)
@@ -38,11 +38,13 @@ func (e *DriveError) Error() string {
 // failure UI).
 type StubDriver struct{}
 
-func (StubDriver) Share(resource, subject, role string) error {
+func (StubDriver) Share(resource, subject, role string, inherit *bool) error {
 	time.Sleep(100 * time.Millisecond)
 	if os.Getenv("AIFS_HELPER_STUB_FAIL") != "" {
 		return &DriveError{Code: "stub_fail", Message: "AIFS_HELPER_STUB_FAIL set"}
 	}
+	// inherit is accepted but not simulated; stub returns success regardless.
+	_ = inherit
 	return nil
 }
 func (StubDriver) Unshare(resource, subject string) error {

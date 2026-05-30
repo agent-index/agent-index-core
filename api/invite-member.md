@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.3.0
+version: 1.4.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -131,6 +131,12 @@ The access grants are batched into a single helper invocation. The admin reviews
 The Category B set covers every top-level path a non-admin member needs to walk:
 - `/shared/` — folder; enables listing all org-shared subtrees (projects, marketplace-cache, updates, bug-reports, members artifacts, installed-collection-specific subfolders)
 - For each `installed_collections[]` entry in `org-config.json` with `status: "installed"`, EXCEPT `agent-index-core` and `agent-index-marketplace` (which are infrastructure-only — collection.json read via global name search by ID): `/{name}/` → reader. Enables listing `api/`, reading `collection.json`, and walking into the collection's tree.
+- **Root-level org-readable files** (added in invite-member 1.4.0 as defense-in-depth backing the `create-org` install-time grants — closes the per-invite half of bug `20260527-8d20ea22-3`):
+  - `/CLAUDE.md` → reader
+  - `/org-config.json` → reader
+  - `/members-registry.json` → reader
+
+  These three files are normally readable to non-admins via the all-members group grants `create-org` 3.1.1+ establishes at install time. The per-member direct shares here are belt-and-suspenders: if the create-org grants somehow get removed (admin manually edits ACLs, group membership semantics change, drift from any other cause), the per-invite direct grants pick up the slack. If the group grants are intact, the per-invite grants are no-ops (the pre-state filter at item 1 below excludes them from the spec).
 
 **Build the spec:**
 
@@ -140,6 +146,10 @@ The Category B set covers every top-level path a non-admin member needs to walk:
    members_pre   = aifs_get_permissions("/members/{hash}/")
    artifacts_pre = aifs_get_permissions("/shared/members/artifacts/{hash}/")
    shared_pre    = aifs_get_permissions("/shared/")
+   # Root-level org-readable files (added in 1.4.0):
+   claude_pre    = aifs_get_permissions("/CLAUDE.md")
+   orgconfig_pre = aifs_get_permissions("/org-config.json")
+   registry_pre  = aifs_get_permissions("/members-registry.json")
    # For each installed user-facing collection {coll_name}:
    coll_pre[{coll_name}] = aifs_get_permissions("/{coll_name}/")
    ```
@@ -150,11 +160,11 @@ The Category B set covers every top-level path a non-admin member needs to walk:
 
    **Category A (4 entries cross-product):** `{/members/{hash}/, /shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`.
 
-   **Category B (1 + N entries):** for each path in `{/shared/} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_email, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
+   **Category B (4 + N entries):** for each path in `{/shared/, /CLAUDE.md, /org-config.json, /members-registry.json} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_email, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
 
-   For each tuple, look up the recipient in the corresponding pre-state. If the recipient already has the requested role on the path: **omit** this operation (no-op). Otherwise: include it.
+   For each tuple, look up the recipient in the corresponding pre-state. If the recipient already has the requested role on the path (via direct grant OR group inheritance through all@): **omit** this operation (no-op). Otherwise: include it.
 
-   For a fresh invite to an org with 8 installed user-facing collections, the spec contains: 4 (Category A) + 1 (`/shared/`) + 8 (collection roots) = 13 operations. For a re-invite where the admin already has access on the Category A folders and only the member needs to be re-added, the spec is correspondingly smaller.
+   For a fresh invite to an org with 8 installed user-facing collections + intact `create-org` 3.1.1+ all@ grants on root-level files, the spec contains: 4 (Category A) + 1 (`/shared/`) + 3 (root-level, all no-ops because of intact group grants) + 8 (collection roots) = 13 effective operations. If the `create-org` grants are missing for any root-level file, those become effective ops (defense-in-depth at work). For a re-invite where the admin already has access on the Category A folders and only the member needs to be re-added, the spec is correspondingly smaller.
 
 3. Compose the spec. The example below shows the shape for a fresh invite on an org with 2 installed user-facing collections (`projects`, `client-intelligence`). Adapt the Category B `share` operations to whatever set of `installed_collections[]` entries with `status: "installed"` the org actually has, excluding `agent-index-core` and `agent-index-marketplace`.
 
@@ -210,6 +220,27 @@ The Category B set covers every top-level path a non-admin member needs to walk:
          "recipient": "{new_member_email}",
          "role": "reader",
          "before": { "recipients": <coll_pre[client-intelligence].permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/CLAUDE.md",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <claude_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/org-config.json",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <orgconfig_pre.permissions> }
+       },
+       {
+         "op": "share",
+         "resource": "/members-registry.json",
+         "recipient": "{new_member_email}",
+         "role": "reader",
+         "before": { "recipients": <registry_pre.permissions> }
        }
      ],
      "context": {

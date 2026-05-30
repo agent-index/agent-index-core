@@ -24,9 +24,19 @@ func Validate(s *Spec) Result {
 		return Result{OK: false, Errors: []string{"spec must not be nil"}}
 	}
 
-	// version
-	if s.Version != SchemaVersion {
-		errs = append(errs, fmt.Sprintf("spec.version must be %q (got: %q)", SchemaVersion, s.Version))
+	// version — accept v1.0 OR v1.1
+	if s.Version != SchemaVersion && s.Version != SchemaVersionV11 {
+		errs = append(errs, fmt.Sprintf("spec.version must be %q or %q (got: %q)", SchemaVersion, SchemaVersionV11, s.Version))
+	}
+
+	// v1.0 specs must not include the inherit field (forward-compatibility discipline:
+	// v1.0 doesn't define inherit; specs using it MUST declare version 1.1)
+	if s.Version == SchemaVersion {
+		for i, op := range s.Operations {
+			if op.Inherit != nil {
+				errs = append(errs, fmt.Sprintf("spec.operations[%d].inherit is not allowed in v1.0 specs (got: %v); use spec.version=%q", i, *op.Inherit, SchemaVersionV11))
+			}
+		}
 	}
 
 	// operations
