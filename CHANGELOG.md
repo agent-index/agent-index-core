@@ -6,6 +6,14 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.7] — 2026-05-31 — collaborative-folder ACL contract (doc)
+
+### Added
+
+- **`standards.md` § "Collaborative Folder ACLs (`collaborative-acls.json`)"** — documents the optional per-collection `collaborative-acls.json` artifact and the provisioning contract: collections whose members must write shared collaborative state declare the required grants (path, recipient, role, inherit); `install-collection` Step 5.5 (agent-index-marketplace 2.8.0) resolves and provisions them via `permission-change-helper` (admin Accept), never `aifs_share` directly. This is the documented, reusable answer to the cross-collection write-access gap (bug `20260531-8d20ea22`), first applied by bug-reports 1.3.0. Doc-only; no runtime/spec behavior change in core. `collection.json` 3.7.6 → 3.7.7.
+
+---
+
 ## [3.7.6] — 2026-05-29 — cascade cleanup of the 3.7.4-era findings
 
 Closes the four-bug cluster discovered during 3.7.4 verification: binary-side helper bugs that meant the v1.1 spec format and `inherit:false` machinery had never actually executed in production, plus the `org-setup` path-correction and `create-org` ACL gaps that meant non-admin members couldn't reliably read root-level org-readable files.

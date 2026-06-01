@@ -137,6 +137,27 @@ Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setu
 
 ---
 
+## Collaborative Folder ACLs (`collaborative-acls.json`)
+
+Under the least-privilege access model (adapter contract v2.0+, core 3.1.0+), a non-admin member is writer only on their own `/members/{hash}/` and `/shared/members/artifacts/{hash}/` and reader on everything else under `/shared/`. A collection whose members must **write shared collaborative state** (e.g., a shared bug log, a shared project tree) must therefore declare the ACLs it needs so they can be provisioned at install time. Collections that only read shared data, or whose members write only their own private namespace, omit this file.
+
+**File:** optional, at the collection root: `/{collection}/collaborative-acls.json`.
+
+**Schema:**
+
+- `version` (string) — `"1.0"`.
+- `acls[]` — each entry:
+  - `path` (string) — target folder; supports `{param}` placeholders resolved at provisioning from `collection-setup-responses.md` and `org-config.json` (e.g., `{bug_log_path}`, `{all_members_group}`).
+  - `recipient` (string) — email or group address (typically `{all_members_group}`).
+  - `role` (string) — `reader` / `commenter` / `writer`.
+  - `inherit` (boolean, optional, default `true`) — `true` = additive grant on top of parent inheritance (the normal collaborative-write case). `false` = explicit override that detaches the resource from parent inheritance (used to *restrict* a subfolder, e.g., keep a secrets dir out of a broad `all@ reader`); requires the applier to hold organizer/owner and the helper binary `permission-helper-go ≥ 0.3.0`.
+  - `restrict` (boolean, optional) — documents that an `inherit:false` entry exists to remove inherited access rather than add it.
+  - `rationale` (string, optional) — human-readable why.
+
+**Provisioning contract:** `install-collection` Step 5.5 reads this file, resolves placeholders, filters already-satisfied entries (idempotent), and routes the remaining grants through the `permission-change-helper` skill for admin review + Accept. Collections and the installer **never** call `aifs_share`/`aifs_unshare`/`aifs_transfer_ownership` directly (see § "Permission-Modifying Operations"). The grant is applied under the admin's OAuth identity; members never grant themselves access. Member-facing task workflows must assume the grant is already in place and must not perform permission changes themselves; on an authorization failure they should direct the member to ask an admin to (re-)run `@ai:install-collection {name}`.
+
+---
+
 ## Versioning Requirements
 
 - All collections must use semantic versioning: `MAJOR.MINOR.PATCH`
