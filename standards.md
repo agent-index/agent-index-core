@@ -137,6 +137,14 @@ Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setu
 
 ---
 
+## Cache-busting directory/version fetches
+
+Any task that fetches a directory or version file from `raw.githubusercontent.com` (`infrastructure_directory_url`, `marketplace_directory_url`, `filesystem_adapter_directory_url`, fallback `*_version_url`, or a `zip_url`) **must append a unique cache-buster query param** — e.g. `?t={current unix epoch seconds}` (`&t=…` if the URL already has a query string).
+
+The fetch layer caches these responses keyed on the exact URL and serves stale bytes for a long time. Without a buster, a fetch shortly after a release silently returns pre-release content: the fetch *succeeds*, so the task reports "✓ up to date" against stale data with no error — the most dangerous failure mode, because nothing signals that an update was missed. This was bug `20260601-8d20ea22-2`; `check-updates`, `refresh-marketplace-cache`, and `publish-updates --check-upstream` were fixed in marketplace 2.9.0 / core 3.7.8. New tasks that read these URLs must follow the same rule.
+
+---
+
 ## Collaborative Folder ACLs (`collaborative-acls.json`)
 
 Under the least-privilege access model (adapter contract v2.0+, core 3.1.0+), a non-admin member is writer only on their own `/members/{hash}/` and `/shared/members/artifacts/{hash}/` and reader on everything else under `/shared/`. A collection whose members must **write shared collaborative state** (e.g., a shared bug log, a shared project tree) must therefore declare the ACLs it needs so they can be provisioned at install time. Collections that only read shared data, or whose members write only their own private namespace, omit this file.

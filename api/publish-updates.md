@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.5.0
+version: 3.6.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -48,7 +48,7 @@ If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` fl
 
 When `--check-upstream` is present, fetch the latest infrastructure source from GitHub before scanning local. This closes the manual `git pull` step from the admin's mental model — they say one verb and the task pulls upstream + syncs to remote + publishes.
 
-1. Read `agent-index.json` → `infrastructure_directory_url`. HTTPS GET the JSON (30s timeout). Parse.
+1. Read `agent-index.json` → `infrastructure_directory_url`. HTTPS GET the JSON (30s timeout), **appending a cache-buster query param** — e.g. `{infrastructure_directory_url}?t={current unix epoch seconds}` (`&t=…` if it already has a query string). **Required:** the fetch layer caches `raw.githubusercontent.com` by exact URL and serves stale bytes long after a push, so without the buster this step reads pre-release versions, concludes "all infrastructure already at upstream," and silently fails to pull a release you just made (bug `20260601-8d20ea22-2`). Also append the same buster to each entry's `zip_url` GET in step 4 so the archive pull isn't served stale. Parse.
 2. For each entry in `infrastructure[]` (currently: `agent-index-core`, `agent-index-marketplace`):
    - Read the local `<project_dir>/<entry-name>/collection.json` → `version` field. If the directory or file is missing locally, treat the local version as "absent."
    - Compare against the directory's `current_version`.

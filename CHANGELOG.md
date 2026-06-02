@@ -6,6 +6,22 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.7.8] — 2026-06-02 — cache-bust directory fetches
+
+### Fixed
+
+- **`publish-updates` 3.5.0 → 3.6.0: Step 0a (`--check-upstream`) now appends a cache-buster (`?t={unix_seconds}`) to the `infrastructure_directory_url` fetch and to each entry's `zip_url` pull** (part of closing bug `20260601-8d20ea22-2`). Without it, the fetch layer's URL-keyed cache of `raw.githubusercontent.com` made `--check-upstream` read pre-release infrastructure versions, conclude "all infrastructure already at upstream," and silently fail to pull a release that was actually live on GitHub. Companion to `agent-index-marketplace` 2.9.0 (`check-updates` 2.6.0 + `refresh-marketplace-cache` 2.3.0).
+
+### Added
+
+- **`standards.md` § "Cache-busting directory/version fetches"** — normative rule that any task fetching a `raw.githubusercontent.com` directory/version URL must append a unique cache-buster, so future authored tasks don't reintroduce the silent-staleness footgun.
+
+### Notes
+
+- `publish-updates` 3.5.0 → 3.6.0; `collection.json` 3.7.7 → 3.7.8. Bootstrapping caveat: this fix can't be auto-detected by the very mechanism it repairs — the first pull of 3.7.8/marketplace 2.9.0 into an org needs a manual cache-busted fetch; thereafter it self-busts.
+
+---
+
 ## [3.7.7] — 2026-05-31 — collaborative-folder ACL contract (doc)
 
 ### Added
