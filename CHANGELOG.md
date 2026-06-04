@@ -6,6 +6,19 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.8.1] — 2026-06-04 — member-state self-heal in apply-updates
+
+### Added
+
+- **`apply-updates` 3.7.1 → 3.8.1 — Step 1.5 "Member-State Self-Heal (standing migrations)".** Runs on EVERY `@ai:update` invocation, even with no pending entries and a current cursor. Idempotent. Migration 1: if local `member-index.json` lacks `member_folder_id`, fetch it from the member's `members-registry.json` entry and cache it; if the registry lacks it too, surface the admin-backfill ask once without blocking the update. Closes post-release finding **F3** (owned-content release): 3.8.0's ensure-cached logic lives in `org-setup`/`member-bootstrap`, which existing members never re-run — so the new field reached only new members. Future member-local schema migrations append here as numbered, idempotent, non-blocking entries.
+
+### Notes
+
+- Companion release: marketplace 2.9.1 (`upgrade-collection` provisioning detection — finding F1).
+- The admin-side registry backfill (3.8.0 CHANGELOG) is still required once per org; this release makes the member-side caching automatic after it.
+
+---
+
 ## [3.8.0] — 2026-06-03 — ID-anchored addressing & member-folder identity
 
 ### Added

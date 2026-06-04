@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.7.1
+version: 3.8.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -55,7 +55,24 @@ Before anything else, check for a local `pending-update-plan.json` in `.agent-in
 3. On confirmation: skip to Step 5 with the remaining operations from the pending plan. The merge has already been done — just execute what's left.
 4. If the member declines: delete the pending plan file and proceed with Step 2 to compute a fresh plan from the update log. This handles the case where the admin has published new updates since the interruption — the fresh plan will incorporate everything.
 
-If no pending plan exists: proceed to Step 2.
+If no pending plan exists: proceed to Step 1.5.
+
+---
+
+### Step 1.5: Member-State Self-Heal (standing migrations)
+
+These checks run on EVERY `@ai:update` invocation — even when no entries are pending and even if the member's cursor is current. They are idempotent and exist because schema additions to member-local files otherwise never reach existing members (ensure-cached logic in org-setup/member-bootstrap only runs for new members).
+
+**Migration 1 — `member_folder_id` (introduced core 3.8.0):**
+
+1. Read local `members/{member_hash}/member-index.json`. If `member_folder_id` is present and non-empty: done, proceed.
+2. If missing: read `/members-registry.json` (remote) and look up the member's entry by `member_hash`.
+   - If the registry entry has `member_folder_id`: write it into local `member-index.json`. Surface one line: "✓ Cached your member folder ID (one-time migration)."
+   - If the registry entry lacks it too: do not guess. Surface once (not blocking): "Your org's registry doesn't record your member folder ID yet — your admin needs to run the member_folder_id backfill (core 3.8.0 CHANGELOG). Capabilities that share from your member space won't work until then." Proceed with the rest of the update normally.
+
+Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
+
+Proceed to Step 2.
 
 ---
 
