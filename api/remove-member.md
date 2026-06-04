@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.1.0
+version: 1.2.0
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Removes their entry from members-registry.json and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — agent-index does not touch Drive ACLs; Workspace IT handles identity offboarding.
 stateful: false
@@ -66,18 +66,35 @@ Confirm to the admin:
 
 > Removing `{display_name}` ({email}) from the member registry.
 >
-> Their `/members/{hash}/` directory will remain on the remote filesystem with its current ACLs. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org — that's what auto-revokes their Drive shares and triggers any ownership transfer.
+> Their private member space lives in THEIR own My Drive (`Agent-Index-Private`) — it is not org property, agent-index has no access to it, and this task will not (and cannot) touch it or any sharing grants they made on it. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org.
 >
 > Continue?
 
-### Step 2.5: Revoke the explicit member-directory grants (added in v1.1.0)
+### Step 2.4: Departure acknowledgment for owner-shared content (added in v1.2.0 — MANDATORY)
 
-Before removing the registry entry, revoke the two writer grants that `invite-member` explicitly granted at member creation. This is symmetric with `invite-member` (which creates exactly these two grants via the permission-helper). Closes bug `20260513-8d20ea22-3`.
+Before any removal, enumerate the discovery indexes (`/shared/strategies-index/`, and any future `/shared/{collection}-index/`) for pointers with `owner_hash == {member_hash}` and a live scope (not `revoked`). If any exist, present them and require explicit acknowledgment:
 
-**Bounded scope.** This step revokes ONLY the two specific grants this collection's `invite-member` task is known to have applied:
+> `{display_name}` owns {N} shared item(s) that live in their personal My Drive:
+> {for each: - "{title}" ({slug}) — scope: {readers/collaborators/org_read}}
+>
+> **These shares survive removal** — they are Drive permissions on content the member owns. Recipients keep access. What the org loses is governance: after removal, nobody in agent-index can revoke, extend, audit, or repair these grants.
+>
+> If the org wants custody of any of these, a **current recipient** can adopt it now: copy the contents into their own member space and re-share from there (no owner cooperation needed — readers can copy what they can read). Optionally, ask `{display_name}` to revoke their original shares after adoption.
+>
+> Acknowledge to proceed with removal (this annotates the pointers but changes no permissions).
 
-- `/members/{member_hash}/` — writer for the departing member
+On acknowledgment: **overwrite** each such pointer adding `"owner_departed": true` and `"departed_date": "{today}"` — scope UNCHANGED (access still works; the pointer must reflect "live but no longer governed by agent-index"). Never set `revoked` here, and never touch the member's My Drive.
+
+If no live pointers exist: skip silently.
+
+### Step 2.5: Revoke the explicit member-directory grants (added in v1.1.0; narrowed in v1.2.0)
+
+Before removing the registry entry, revoke the writer grant that `invite-member` explicitly granted at member creation. This is symmetric with `invite-member` 1.6.0 (which creates exactly this grant via the permission-helper). Closes bug `20260513-8d20ea22-3`.
+
+**Bounded scope.** This step revokes ONLY the specific grant this collection's `invite-member` task is known to have applied:
+
 - `/shared/members/artifacts/{member_hash}/` — writer for the departing member
+- *(legacy)* `/members/{member_hash}/` — writer for the departing member, **if** such a pre-3.9.0 Shared-Drive directory exists and carries the grant (members invited before the My Drive model)
 
 It does NOT walk the broader ACL graph looking for orphan grants on project resources, idea folders, shared artifacts, or anywhere else. Those remain Workspace IT's responsibility per Step 4's checklist; the broader cleanup is too expensive to do here and competes with Workspace's standard offboarding flow.
 

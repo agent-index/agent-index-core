@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.6.0
+version: 3.7.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -497,6 +497,17 @@ If any drift is detected, surface a prompt:
 On admin **confirmation:** apply the backfill values together with the per-operation updates from 6a/6b. The single write to `/org-config.json` is atomic. Re-running publish-updates after a successful backfill is a no-op (no drift detected; nothing to prompt about).
 
 On admin **decline:** skip the backfill but still apply the per-operation updates from 6a/6b for the current publish. The drift state persists; next publish-updates run will surface the same prompt.
+
+#### 6d. Member-folder handshake reconcile (added in core 3.9.0)
+
+Members create their private space in their own My Drive at bootstrap and cannot write the registry; their bootstrap records the folder ID in a handshake file instead. This step copies handshakes into the registry — it runs on EVERY publish-updates invocation, even when nothing else is being published:
+
+1. `aifs_list("/shared/members/artifacts/")` → for each member hash directory, check for `member-folder.json`. Read each one found.
+2. For each handshake whose `member_folder_id` differs from the corresponding `members-registry.json` entry (including entries where it is `null`): update the registry entry's `member_folder_id` (revision-aware write, same retry semantics as invite-member Step 8).
+3. Surface one line: "Reconciled {N} member folder ID(s) into the registry." (or nothing if N=0).
+4. Handshake with no matching registry entry (member removed but artifacts dir retained): skip, note in the summary.
+
+No admin prompt — the handshake is the member's authoritative self-report about a folder they own; the registry is a directory listing, not an approval.
 
 #### Write semantics
 

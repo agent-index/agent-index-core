@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.8.1
+version: 3.9.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -63,12 +63,22 @@ If no pending plan exists: proceed to Step 1.5.
 
 These checks run on EVERY `@ai:update` invocation — even when no entries are pending and even if the member's cursor is current. They are idempotent and exist because schema additions to member-local files otherwise never reach existing members (ensure-cached logic in org-setup/member-bootstrap only runs for new members).
 
-**Migration 1 — `member_folder_id` (introduced core 3.8.0):**
+**Migration 1 — `member_folder_id` re-cache (3.8.0, reworked 3.9.0):**
 
-1. Read local `members/{member_hash}/member-index.json`. If `member_folder_id` is present and non-empty: done, proceed.
-2. If missing: read `/members-registry.json` (remote) and look up the member's entry by `member_hash`.
-   - If the registry entry has `member_folder_id`: write it into local `member-index.json`. Surface one line: "✓ Cached your member folder ID (one-time migration)."
-   - If the registry entry lacks it too: do not guess. Surface once (not blocking): "Your org's registry doesn't record your member folder ID yet — your admin needs to run the member_folder_id backfill (core 3.8.0 CHANGELOG). Capabilities that share from your member space won't work until then." Proceed with the rest of the update normally.
+Precedence rule: **the member's own handshake file outranks the registry** — the handshake is written by the owner about a folder they own; the registry is an admin-side mirror that may lag until the next publish-updates reconcile (6d).
+
+1. Read local `members/{member_hash}/member-index.json`, the member's handshake file `/shared/members/artifacts/{member_hash}/member-folder.json` (if any), and the member's entry in `/members-registry.json`.
+2. **If a handshake exists:** its `member_folder_id` is authoritative. If local differs, write the handshake value into `member-index.json` ("✓ Refreshed your member folder ID."). Ignore the registry here — never overwrite local with a registry value that contradicts the handshake (the registry is stale until reconcile).
+3. **If no handshake exists** (pre-3.9.0 state): a registry value that differs from local may be cached locally as a stopgap, but Migration 2 below will run anyway (no handshake → ensure-my-drive-space) and supersede it in the same invocation.
+4. If all three lack it: proceed — Migration 2 handles creation.
+
+**Migration 2 — My Drive member space (introduced core 3.9.0):**
+
+If local `member-index.json` has no `member_folder_id`, OR the handshake file `/shared/members/artifacts/{member_hash}/member-folder.json` does not exist (pre-3.9.0 member whose space is still on the org Shared Drive):
+
+Run the **ensure-my-drive-space subroutine** (canonical definition: `member-bootstrap.md` Step 5): create `Agent-Index-Private` in the member's own My Drive via `id:root/...`, stat for the resolved Drive ID, **migrate any content from the old Shared-Drive space** (per-file `aifs_copy`, read+write fallback; never delete the old space), write the handshake file, update local `member-index.json`. Surface: "✓ Your private member space is now in your own My Drive ({n} files migrated)."
+
+This is the migration path for existing members: the 3.9.0 update entry triggers every member's `@ai:update`, which runs this step — no admin action per member. The admin's next `@ai:publish-updates` reconciles handshakes into the registry. Idempotent; must not block the update on failure (surface and continue).
 
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 

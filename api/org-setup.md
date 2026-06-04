@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.4.0
+version: 3.5.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -60,7 +60,7 @@ When invoked, determine the context: first-time setup, ongoing management, or a 
 
 In all cases: read `member-index.json` (local) and the installed collections catalog (remote) before responding. The catalog is assembled per § "Reading the Collections Catalog" below — iterate `org-config.installed_collections[]` and read each `/{collection}/collection.json` by known path. Never `aifs_list("/")` (it requires Drive membership non-admin members don't have).
 
-**Ensure `member_folder_id` is cached** (added in core 3.8.0): if `member-index.json` lacks a `member_folder_id` field, read the member's own entry from `/members-registry.json` (a known-path read that works for non-members), copy its `member_folder_id`, and write it into `member-index.json`. This is the Drive ID of the member's private remote space; all member-remote-space operations address it as `id:{member_folder_id}/...` (standards.md § "Addressing: paths vs. ID anchors"). If the registry entry has no `member_folder_id` (member invited before core 3.8.0), surface once: "Your private remote folder isn't registered for ID-anchored access yet — ask your admin to run the member-folder-id backfill (re-run `@ai:invite-member` reconcile for {email})." Continue with setup (local-only operations are unaffected); collections that need the member's remote space will be blocked until the backfill runs.
+**Ensure the member's private remote space** (reworked in core 3.9.0): if `member-index.json` lacks a `member_folder_id`, or the handshake file `/shared/members/artifacts/{member_hash}/member-folder.json` does not exist (pre-3.9.0 member whose space is still on the Shared Drive), run the **ensure-my-drive-space subroutine** defined in `member-bootstrap.md` Step 5: create `Agent-Index-Private` in the member's own My Drive (`id:root/...`), stat for the resolved ID, migrate any pre-3.9.0 Shared-Drive content, write the handshake file, and set `member_folder_id` in `member-index.json`. The space is member-owned (Drive owner role) — this is what makes owner-applied sharing grants possible (Shared-Drive folders can only be shared by drive Managers). The registry is updated admin-side by the publish-updates reconcile from the handshake file; no admin action is needed for the member to proceed.
 
 Never install, modify, or remove anything without the member's explicit confirmation of the specific action. For batch operations (like first-time onboarding where many things are installed), present the full proposed install list and get one confirmation for the batch before proceeding.
 

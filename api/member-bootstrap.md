@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.1.0
+version: 3.2.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -190,14 +190,26 @@ Create the local directory structure:
 
 If any of these directories already exist: skip creation, do not overwrite.
 
-**Fetch the member's `member_folder_id`** (added in core 3.8.0): read `/members-registry.json` via `aifs_read` (a known-path read that works for non-members), find this member's entry by `member_hash`, and take its `member_folder_id` — the Drive ID of the member's private remote space, recorded by `invite-member` at provisioning. Include it in `member-index.json` below. All member-remote-space operations address that space as `id:{member_folder_id}/...` (standards.md § "Addressing: paths vs. ID anchors") — non-admin members cannot resolve `/members/{hash}/` by path. If the registry entry has no `member_folder_id` (invited before core 3.8.0): proceed without it, and surface once that the admin needs to run the member-folder-id backfill before collections that use the member's remote space will work.
+**Ensure the member's private remote space — "ensure-my-drive-space" subroutine** (reworked in core 3.9.0; this is the canonical definition, referenced by org-setup and apply-updates):
+
+The member's private remote space is a folder named `Agent-Index-Private` **in the member's own My Drive** — created with the member's own credentials, owned by the member. It is NOT on the org Shared Drive (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see standards.md § "Addressing").
+
+1. `aifs_exists("id:root/Agent-Index-Private")`. If missing, create it:
+   `aifs_write("id:root/Agent-Index-Private/.keep", "Agent-index private member space — created {date}")`.
+2. `aifs_stat("id:root/Agent-Index-Private")` → record the **resolved** Drive ID as `new_id`. Never record the `root` alias anywhere — registry, handshake, member-index, and pointers must always carry real Drive IDs.
+3. **One-time content migration:** if the local `member-index.json` already has a `member_folder_id` that differs from `new_id` AND `aifs_exists("id:{old_id}")` (a pre-3.9.0 Shared-Drive member space): recursively `aifs_list` the old space and copy every file to the same relative path under `id:{new_id}/`. **For each destination directory, materialize it first** (`aifs_write` of an empty `.keep`) — `aifs_copy` does NOT auto-create destination parents (verified live 2026-06-04; cross-drive copy itself works). Then `aifs_copy` per file (`source`/`destination` args); if a copy fails, fall back to `aifs_read` + `aifs_write` for that file. Never delete the old space (the admin archives it manually later). If there is no old space or no prior id, skip silently.
+4. Write the handshake file so the admin-side reconcile can update the registry (members cannot write `/members-registry.json` fields reliably under least-privilege):
+   `aifs_write("/shared/members/artifacts/{member_hash}/member-folder.json", {"member_hash": "{member_hash}", "member_folder_id": "{new_id}", "previous_folder_id": "{old_id or null}", "recorded": "{ISO 8601}"})`
+5. Set `member_folder_id: "{new_id}"` in the local `member-index.json` (created below, or updated in place if it exists).
+
+The subroutine is idempotent: re-runs find the folder existing, stat the same id, and harmlessly overwrite the handshake. All member-remote-space operations address the space as `id:{member_folder_id}/...` (standards.md § "Addressing: paths vs. ID anchors").
 
 Create the local `member-index.json`:
 
 ```json
 {
   "member_hash": "{member_hash}",
-  "member_folder_id": "{from the member's members-registry.json entry; omit if not yet recorded}",
+  "member_folder_id": "{new_id from the ensure-my-drive-space subroutine above}",
   "agent_index_version": "2.0.0",
   "last_updated": "{today YYYY-MM-DD}",
   "installed": {

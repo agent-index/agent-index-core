@@ -6,6 +6,61 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.9.0] — 2026-06-04 — member spaces move to members' own My Drive (owner-sovereign sharing)
+
+### Why
+
+Finding **F12** (test-plan §3, live): Google Drive permits folder-sharing on a Shared Drive only to
+drive Managers — per-folder grants never confer it, and per-folder `organizer` cannot be granted. So
+non-admin owners could never apply the grants the owned-content model requires. The fix: the
+member's private space becomes a folder the member literally **owns** — `Agent-Index-Private` in
+their own My Drive — where owners have full sharing power. Adapter 2.5.0 ID anchors and
+helper-go 0.4.0 bare-ID specs already work on My Drive unchanged (verified live before this release).
+
+### Changed
+
+- **`member-bootstrap` 3.1.0 → 3.2.0** — Step 5 defines the canonical **ensure-my-drive-space**
+  subroutine: create `Agent-Index-Private` at `id:root`, stat for the **resolved** ID (never record
+  the `root` alias), migrate pre-3.9.0 Shared-Drive content (per-file `aifs_copy`, read+write
+  fallback; old space never deleted — admin archives manually), write the handshake file
+  `/shared/members/artifacts/{hash}/member-folder.json`, cache in `member-index.json`. Idempotent.
+- **`org-setup` 3.4.0 → 3.5.0** — member-flow ensure-cached block replaced with the subroutine.
+- **`apply-updates` 3.8.1 → 3.9.0** — Step 1.5 Migration 1 now re-caches when the registry value
+  *differs* (not only when missing); **Migration 2** runs ensure-my-drive-space for any member
+  without a handshake — this is the automatic migration path for existing members (the 3.9.0 update
+  entry triggers it on everyone's next `@ai:update`).
+- **`invite-member` 1.5.0 → 1.6.0** — no longer creates `/members/{hash}/`; Category A narrowed to
+  the artifacts-dir grant; registry entry records `member_folder_id: null` (filled by reconcile
+  after the member's first bootstrap).
+- **`publish-updates` 3.6.0 → 3.7.0** — new Step **6d** member-folder handshake reconcile: copies
+  handshake IDs into `members-registry.json` on every run (members cannot write the registry).
+- **`remove-member` 1.1.0 → 1.2.0** — new Step **2.4** mandatory departure acknowledgment for
+  owner-shared content: shares on the member's My Drive **survive removal** (recipients keep
+  access; the org loses governance, not access); pointers are annotated `owner_departed: true`
+  (scope unchanged); adoption path surfaced (any current recipient copies + re-shares from their
+  own space). Step 2.5 narrowed: artifacts-dir grant (+ legacy `/members/{hash}/` if present). The
+  task never reads, writes, or re-permissions a member's My Drive — it cannot.
+- **`standards.md`** — Addressing § rewritten for the My Drive member space, custody/cooperation
+  note, soft-delete nuance (members CAN delete in their own space; pointers always overwrite).
+
+### Also in this release (retro-documentation)
+
+- **permission-helper-go 0.4.0** (source in `lib/permission-helper-go/`, released 2026-06-04 on the
+  binaries repo; directory pin 0.4.0): accepts bare `id:{folderId}` spec resources
+  (validate.go + drive.go short-circuit — closes bug `20260604-8d20ea22-164642-e046` / F8) and
+  surfaces fatal pre-apply errors in a browser page when launched without a console (F8 secondary).
+
+### Migration notes (admins)
+
+1. Publish 3.9.0; every member's next `@ai:update` creates their My Drive space and migrates their
+   old content automatically (Migration 2). 2. Run `@ai:publish-updates` again afterwards — Step 6d
+   reconciles handshakes into the registry. 3. Archive/delete the legacy `/members/` directories at
+   your discretion once members have migrated (verify via the handshake files). 4. Known open issue
+   F11 (binary auto-install path failure on one install) is unrelated but un-diagnosed — see the
+   owned-content findings file.
+
+---
+
 ## [3.8.1] — 2026-06-04 — member-state self-heal in apply-updates
 
 ### Added

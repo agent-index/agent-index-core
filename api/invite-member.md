@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.5.0
+version: 1.6.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -86,39 +86,31 @@ import { createHash } from 'node:crypto';
 const member_hash = createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 16);
 ```
 
-Confirm the hash to the admin: "I'll create `/members/{hash}/` for `{email}`. Continue?"
+Confirm the hash to the admin: "I'll provision org access for `{email}` (hash `{hash}`). Continue?"
 
 ### Step 4: Re-invite detection
 
-Check whether `/members/{hash}/` already exists on the remote:
+Check whether the email was previously a member: look for a `members-registry.json` entry with this `member_hash`, and check `aifs_exists("/shared/members/artifacts/{hash}/")`.
 
-```
-aifs_exists("/members/{hash}/")
-```
+If previously a member:
 
-If it does:
-
-> This email was previously a member. The directory `/members/{hash}/` already exists with the prior member's content (any captures, ideas, or artifacts they kept).
+> This email was previously a member. Their shared-artifacts directory (`/shared/members/artifacts/{hash}/`) still exists, and their private member space (if any) is in their own My Drive — outside org control, untouched by removal or re-invite.
 >
-> Reuse the existing directory and re-add this email as a member, or stop and let me know how to handle it differently?
+> Re-add this email as a member (reusing the artifacts directory), or stop and let me know how to handle it differently?
 
-If the admin says reuse: proceed to Step 5, but note the directory already exists (skip creation, only update ACLs and registry).
+If the admin says reuse: proceed to Step 5 (skip creation where things exist, refresh ACLs and registry).
 
 If the admin says stop: surface "Stopped. Let me know how you'd like to proceed and we can retry." and exit cleanly.
 
-### Step 5: Create or refresh the member's directories (structural only)
+### Step 5: Create or refresh the member's shared-artifacts directory (structural only)
 
-This step creates the folders if they don't exist. It performs **no permission writes** — those go through the helper in Step 6.
+This step creates the folder if it doesn't exist. It performs **no permission writes** — those go through the helper in Step 6.
 
-For each of the two target paths — `/members/{hash}/` and `/shared/members/artifacts/{hash}/`:
+- Check `aifs_exists("/shared/members/artifacts/{hash}/")`.
+- If it does not exist: materialize it via `aifs_write("/shared/members/artifacts/{hash}/.placeholder", "")`.
+- If it already exists (re-invite case): leave it untouched.
 
-- Check `aifs_exists("/members/{hash}/")` (and the same for the artifacts path).
-- If it does not exist: materialize it via `aifs_write("/members/{hash}/.placeholder", "")` (writing a placeholder is the simplest way to materialize a folder; alternatively use a single create-folder call if the adapter exposes one — Drive's API folds folder creation into the parent-creation chain on write).
-- If it already exists (re-invite case): leave the directory untouched. The previous member's content remains in place per the access-control project's re-invite decision.
-
-**Capture the member folder's Drive ID** (added with adapter 2.5.0 / core 3.8.0): after `/members/{hash}/` exists, call `aifs_stat("/members/{hash}/")` and record the returned `id` field as `member_folder_id`. This is written into the member's registry entry in Step 8 and is what lets the member address their own private space via the `id:{member_folder_id}/...` anchor (non-admin members cannot resolve `/members/{hash}/` by path — see standards.md § "Addressing: paths vs. ID anchors"). If `aifs_stat` doesn't return an `id` (pre-2.5.0 adapter), surface a blocker: the adapter must be upgraded before inviting.
-
-Track which paths were freshly created vs. already existing. Used in Step 6 narration.
+**The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private` in the member's **own My Drive**, created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
 
 ### Step 6: Apply ACLs via permission-change-helper
 
@@ -126,7 +118,7 @@ The access grants are batched into a single helper invocation. The admin reviews
 
 **Two share-set categories** (extended in core 3.7.4 to close bug `20260522-8d20ea22` properly):
 
-**Category A — Member-directory writer grants (existing through 1.2.0):** the new member + admin both need writer on the new member's private directory and shared-artifact directory.
+**Category A — Member-directory writer grants (narrowed in 1.6.0):** the new member + admin both need writer on the member's shared-artifact directory (`/shared/members/artifacts/{hash}/`) only. The private member space is in the member's own My Drive (member-owned; the org holds no grant on it and needs none).
 
 **Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-Drive-member access to org folders only works through DIRECT shares, not group-mediated inheritance. The Google Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even when the user has full read rights on the contents. Direct shares are required for `aifs_list` to surface entries to non-admin members. Verified empirically with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG for the empirical-test details. This share set is what bug `20260522-8d20ea22` was missing in its original 3.7.4 attempt.
 
@@ -145,7 +137,6 @@ The Category B set covers every top-level path a non-admin member needs to walk:
 1. Read pre-state for ALL target paths (Category A + B) to capture current ACLs (used as the `before` field for diff visualization, and to filter shares that would be no-ops):
 
    ```
-   members_pre   = aifs_get_permissions("/members/{hash}/")
    artifacts_pre = aifs_get_permissions("/shared/members/artifacts/{hash}/")
    shared_pre    = aifs_get_permissions("/shared/")
    # Root-level org-readable files (added in 1.4.0):
@@ -160,7 +151,7 @@ The Category B set covers every top-level path a non-admin member needs to walk:
 
 2. Build the operations list:
 
-   **Category A (4 entries cross-product):** `{/members/{hash}/, /shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`.
+   **Category A (2 entries, narrowed in 1.6.0):** `{/shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`.
 
    **Category B (4 + N entries):** for each path in `{/shared/, /CLAUDE.md, /org-config.json, /members-registry.json} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_email, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
 
@@ -316,11 +307,11 @@ Parse, append the new member entry:
   "email": "{email}",
   "org_role": "{default-role-from-org-config-or-prompt}",
   "joined_date": "{today YYYY-MM-DD}",
-  "member_folder_id": "{the Drive id captured in Step 5 via aifs_stat}"
+  "member_folder_id": null
 }
 ```
 
-`member_folder_id` is the authoritative record of the member's private-space Drive ID (standards.md § "Addressing"). The member's own install reads it from this registry entry at setup (a known-path read that works for non-members) and caches it in `member-index.json`.
+`member_folder_id` is `null` at invite time (changed in 1.6.0): the member's private space is created in their own My Drive during their first bootstrap, which writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconcile copies the ID into this registry entry. The registry remains the authoritative org-side record once reconciled (standards.md § "Addressing").
 
 Write back with the captured revision:
 
@@ -359,9 +350,9 @@ Use the existing email-send capability (or surface the draft for the admin to se
 Surface to the admin:
 
 > Done. `{display_name}` ({email}) is now a member.
-> - Member dir: `/members/{hash}/` (admin + member writer)
 > - Artifacts dir: `/shared/members/artifacts/{hash}/` (admin + member writer)
-> - Registry: appended at revision {new_revision}
+> - Private space: created in THEIR My Drive at first bootstrap (`Agent-Index-Private`); registry gets the folder ID via your next `@ai:publish-updates` reconcile
+> - Registry: appended at revision {new_revision} (member_folder_id pending bootstrap)
 > - Welcome email: {sent | drafted | skipped}
 >
 > The shares were applied via the permission-change-helper; you can review the plan that was applied at `outputs/permission-plan-{timestamp}.json` if you want a record of exactly what was approved.
@@ -377,13 +368,13 @@ Append an activity event to a local audit hint file (no remote audit log — tha
 - This task is admin-only. The pre-flight check rejects non-admins early.
 - All ACL changes execute under the calling admin's OAuth identity. The new member's identity is never assumed.
 - Permission writes go through the `permission-change-helper` skill, never directly. The helper renders a review page, the admin clicks Accept, and the apply-script applies the changes with the admin's existing credentials. This task is upstream of the privileged action; the admin's deliberate click is what executes it.
-- Re-invite handling reuses the existing `/members/{hash}/` directory by default. The admin can choose to halt instead, but **never** overwrite, archive, or wipe without explicit confirmation.
+- Re-invite handling reuses the existing `/shared/members/artifacts/{hash}/` directory by default. The returning member's private My Drive space is theirs — re-running bootstrap finds or recreates it; the org never touches it. The admin can choose to halt instead, but **never** overwrite, archive, or wipe without explicit confirmation.
 - Group membership is verified through admin attestation, not API query. agent-index has no Workspace admin credentials.
 
 ### Constraints
 
 - Never invite an admin to add themselves as a member of their own org. The pre-flight check rejects the case where `email` matches an existing entry in `org-config.json admins[].email` (admin is implicitly already a member).
-- Never write to `/members/{hash}/` outside of this task and `member-bootstrap`.
+- Never create `/members/{hash}/` on the Shared Drive (retired in 3.9.0 — legacy directories are archived by the admin after members migrate). Never read, write, or attempt permission changes on a member's My Drive space — the org has no access, by design.
 - **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` directly from this task.** All permission writes go through the `permission-change-helper` skill. This is enforced by `agent-index-core/standards.md` § "Permission-Modifying Operations." Direct calls would be both an authoring error (caught by future preflight) and a runtime failure (the agent's safety boundary refuses them).
 - Never write to `members-registry.json` until the helper has confirmed the share batch applied successfully (or the admin has explicitly accepted a partial-state outcome). The registry-after-shares ordering protects against the partial state where a registry entry exists but the new member can't actually access anything.
 
