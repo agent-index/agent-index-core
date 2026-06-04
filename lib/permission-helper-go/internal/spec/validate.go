@@ -8,6 +8,15 @@ import (
 
 var emailRegex = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
+// idAnchorRegex matches ID-anchor resources of the form "id:{driveFolderId}"
+// (optional trailing slash). Added in v0.4.0 for the owned-content sharing
+// model: member-space folders are not path-addressable (non-admins cannot
+// enumerate /members/), so specs reference the granted folder's Drive ID
+// directly — captured by the calling task via aifs_stat (adapter 2.5.0+).
+// Deliberately strict: exact ID only, no relative path suffix; callers must
+// pass the ID of the precise folder being granted.
+var idAnchorRegex = regexp.MustCompile(`^id:[A-Za-z0-9_-]+/?$`)
+
 // Result is the outcome of validation.
 type Result struct {
 	OK     bool
@@ -88,8 +97,8 @@ func validateOp(op Op, i int) []string {
 		errs = append(errs, fmt.Sprintf("%s.op must be one of: share, unshare, transfer_ownership (got: %q)", prefix, op.Op))
 	}
 
-	if !strings.HasPrefix(op.Resource, "/") {
-		errs = append(errs, fmt.Sprintf("%s.resource must be a string starting with %q (got: %q)", prefix, "/", op.Resource))
+	if !strings.HasPrefix(op.Resource, "/") && !idAnchorRegex.MatchString(op.Resource) {
+		errs = append(errs, fmt.Sprintf("%s.resource must be a path starting with %q or an ID anchor of the form \"id:{folderId}\" (got: %q)", prefix, "/", op.Resource))
 	}
 
 	if !emailRegex.MatchString(op.Recipient) {

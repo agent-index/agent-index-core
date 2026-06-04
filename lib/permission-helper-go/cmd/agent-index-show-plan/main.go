@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -210,16 +211,46 @@ func usage() {
 	diag("  agent-index-show-plan --version")
 }
 
+// showErrorPage (v0.4.0): surface fatal pre-apply errors in the browser.
+// When launched via the agent-index:// URL handler there is no console — a
+// validation failure used to flash a window and vanish (bug
+// 20260604-8d20ea22-164642-e046, secondary symptom). Best-effort only: if the
+// page can't be written or opened we silently fall back to the outcome file +
+// stderr, which remain the canonical record.
+func showErrorPage(title string, details []string) {
+	var b strings.Builder
+	b.WriteString(`<!doctype html><meta charset="utf-8"><title>agent-index — error</title>`)
+	b.WriteString(`<body style="font-family:system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px">`)
+	b.WriteString(`<h2 style="color:#b00020">agent-index permission helper — error</h2>`)
+	b.WriteString("<p><strong>" + html.EscapeString(title) + "</strong></p><ul>")
+	for _, d := range details {
+		b.WriteString("<li><code>" + html.EscapeString(d) + "</code></li>")
+	}
+	b.WriteString(`</ul><p>No permission changes were applied. Close this tab and paste the error above into your agent session to continue.</p></body>`)
+	f, err := os.CreateTemp("", "agent-index-error-*.html")
+	if err != nil {
+		return
+	}
+	if _, werr := f.WriteString(b.String()); werr != nil {
+		f.Close()
+		return
+	}
+	f.Close()
+	_ = browser.Open("file:///" + filepath.ToSlash(f.Name()))
+}
+
 func runFromURL(rawURL string) {
 	workspace, err := workspaceRoot()
 	if err != nil {
 		diag("could not determine workspace root: %v", err)
+		showErrorPage("Could not determine workspace root", []string{err.Error()})
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: err.Error()})
 		os.Exit(listener.ExitValidationError)
 	}
 	parsed, err := urlhandler.Parse(rawURL, workspace)
 	if err != nil {
 		diag("invalid URL: %v", err)
+		showErrorPage("Invalid agent-index:// URL", []string{err.Error()})
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: err.Error()})
 		os.Exit(listener.ExitValidationError)
 	}
@@ -233,12 +264,18 @@ func runFromSpec(specPath string, cli, stub bool) {
 	bytes, err := os.ReadFile(specPath)
 	if err != nil {
 		diag("could not read spec at %s: %v", specPath, err)
+		if !cli {
+			showErrorPage("Could not read the permission spec", []string{specPath, err.Error()})
+		}
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: err.Error()})
 		os.Exit(listener.ExitValidationError)
 	}
 	var s spec.Spec
 	if err := json.Unmarshal(bytes, &s); err != nil {
 		diag("could not parse spec: %v", err)
+		if !cli {
+			showErrorPage("Could not parse the permission spec", []string{specPath, err.Error()})
+		}
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: err.Error()})
 		os.Exit(listener.ExitValidationError)
 	}
@@ -248,6 +285,9 @@ func runFromSpec(specPath string, cli, stub bool) {
 		for _, e := range v.Errors {
 			diag("  - %s", e)
 		}
+		if !cli {
+			showErrorPage("Spec validation failed", v.Errors)
+		}
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: strings.Join(v.Errors, "; ")})
 		os.Exit(listener.ExitValidationError)
 	}
@@ -255,6 +295,9 @@ func runFromSpec(specPath string, cli, stub bool) {
 	drv, err := buildDriver(stub)
 	if err != nil {
 		diag("could not construct Drive driver: %v", err)
+		if !cli {
+			showErrorPage("Could not construct the Drive driver", []string{err.Error()})
+		}
 		emitFinal(listener.StatusReport{Outcome: "validation_error", ErrorDetail: err.Error()})
 		os.Exit(listener.ExitValidationError)
 	}

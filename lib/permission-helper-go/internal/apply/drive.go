@@ -248,6 +248,14 @@ func (d *DriveDriver) findPermissionID(fileID, subject string) (string, error) {
 // Drive file ID. Hits the cache first; on miss, walks from the parent
 // down via Files.List.
 func (d *DriveDriver) resolvePath(p string) (string, error) {
+	// v0.4.0: ID-anchor resources ("id:{folderId}") carry the Drive file ID
+	// directly — no path walk. Member-space folders are not path-addressable
+	// (the walk below cannot enumerate /members/ as a non-admin), which is
+	// exactly why the owned-content model passes IDs. Validation has already
+	// restricted the form to an exact ID with no relative suffix.
+	if strings.HasPrefix(p, "id:") {
+		return strings.TrimSuffix(strings.TrimPrefix(p, "id:"), "/"), nil
+	}
 	clean := normalizePath(p)
 	d.cacheMu.RLock()
 	if id, ok := d.cache[clean]; ok {
