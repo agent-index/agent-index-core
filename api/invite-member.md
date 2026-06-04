@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.4.0
+version: 1.5.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -115,6 +115,8 @@ For each of the two target paths — `/members/{hash}/` and `/shared/members/art
 - Check `aifs_exists("/members/{hash}/")` (and the same for the artifacts path).
 - If it does not exist: materialize it via `aifs_write("/members/{hash}/.placeholder", "")` (writing a placeholder is the simplest way to materialize a folder; alternatively use a single create-folder call if the adapter exposes one — Drive's API folds folder creation into the parent-creation chain on write).
 - If it already exists (re-invite case): leave the directory untouched. The previous member's content remains in place per the access-control project's re-invite decision.
+
+**Capture the member folder's Drive ID** (added with adapter 2.5.0 / core 3.8.0): after `/members/{hash}/` exists, call `aifs_stat("/members/{hash}/")` and record the returned `id` field as `member_folder_id`. This is written into the member's registry entry in Step 8 and is what lets the member address their own private space via the `id:{member_folder_id}/...` anchor (non-admin members cannot resolve `/members/{hash}/` by path — see standards.md § "Addressing: paths vs. ID anchors"). If `aifs_stat` doesn't return an `id` (pre-2.5.0 adapter), surface a blocker: the adapter must be upgraded before inviting.
 
 Track which paths were freshly created vs. already existing. Used in Step 6 narration.
 
@@ -313,9 +315,12 @@ Parse, append the new member entry:
   "display_name": "{display_name}",
   "email": "{email}",
   "org_role": "{default-role-from-org-config-or-prompt}",
-  "joined_date": "{today YYYY-MM-DD}"
+  "joined_date": "{today YYYY-MM-DD}",
+  "member_folder_id": "{the Drive id captured in Step 5 via aifs_stat}"
 }
 ```
+
+`member_folder_id` is the authoritative record of the member's private-space Drive ID (standards.md § "Addressing"). The member's own install reads it from this registry entry at setup (a known-path read that works for non-members) and caches it in `member-index.json`.
 
 Write back with the captured revision:
 

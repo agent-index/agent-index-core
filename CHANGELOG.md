@@ -6,6 +6,23 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.8.0] — 2026-06-03 — ID-anchored addressing & member-folder identity
+
+### Added
+
+- **`standards.md` § "Addressing: paths vs. ID anchors (owned content)"** — the normative model for the owned-content/sharing design: absolute paths for enumerable locations (`/shared`), `id:{folderId}/...` anchors for granted-but-non-enumerable locations (a member's own `/members/{hash}/` space; items shared with them); the `member_folder_id` registry field; the per-item pointer-index convention (`/shared/{collection}-index/{owner_hash}-{slug}.json` with `folder_id` for recipients to anchor on); and the **soft-delete convention** (members are Shared-Drive Contributors and cannot trash — "delete" = mark archived, "unshare" = revoke grant + overwrite pointer to `scope: revoked`). Companion to gdrive adapter 2.5.0 (anchor resolution + `aifs_stat` returning `id`), validated live as a non-admin on 2026-06-03.
+- **`invite-member` 1.4.0 → 1.5.0** — Step 5 captures the new member folder's Drive `id` via `aifs_stat` (adapter 2.5.0+) and Step 8 records it as `member_folder_id` in the member's `members-registry.json` entry. This is what lets the member address their private space via `id:{member_folder_id}/...` (non-admins cannot resolve `/members/{hash}/` by path — bug `20260522-8d20ea22`).
+- **`org-setup` 3.3.1 → 3.4.0** — ensures `member_folder_id` is cached into `member-index.json` (reading the member's own registry entry by known path); surfaces the backfill ask for pre-3.8.0 members. Also corrects the stale Invocation prose that still described catalog assembly via `aifs_list("/")` (the procedure itself was fixed in 3.7.4; the prose now matches).
+- **`member-bootstrap` 3.0.1 → 3.1.0** — first-run workspace creation fetches `member_folder_id` from the registry and includes it in the new `member-index.json`.
+
+### Notes
+
+- `collection.json` 3.7.7 → 3.8.0. Changed-capability manifests bump with their capabilities; remaining manifests' `collection_version` reconciles via apply-updates manifest-sync.
+- **Backfill:** members invited before 3.8.0 have no `member_folder_id` in the registry. Admin backfill: for each member, `aifs_stat("/members/{hash}/")` → write `member_folder_id` into their registry entry (revision-aware). Until then, collections that use the member's remote space are blocked for that member (clear message surfaced at setup).
+- Ships with gdrive adapter **2.5.0** (id-anchored resolution + `stat.id`) — the anchor gate was validated live as testproduction (non-admin) before this release: anchor write/list/read/stat all green; old-path write correctly still fails; no `/shared` regression.
+
+---
+
 ## [3.7.8] — 2026-06-02 — cache-bust directory fetches
 
 ### Fixed

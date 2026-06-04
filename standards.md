@@ -166,6 +166,23 @@ Under the least-privilege access model (adapter contract v2.0+, core 3.1.0+), a 
 
 ---
 
+## Addressing: paths vs. ID anchors (owned content)
+
+The adapter (gdrive ≥ 2.5.0) supports two addressing modes:
+
+- **Absolute paths** (`/shared/...`, `/{collection}/...`) — for locations the caller can enumerate from the root. Members can enumerate `/shared` and collection trees via their direct `/shared` grant; admins can enumerate everything.
+- **ID anchors** — `id:{folderId}/relative/path` — for locations the caller is **granted on but cannot reach by walking from the root** (their own member space; items shared with them). Resolution starts at `{folderId}` and walks **downward only**. This is required because non-admin members are not Shared-Drive members and cannot enumerate containers like `/members/` (bug `20260522-8d20ea22`).
+
+**Conventions:**
+
+1. **Member space.** A member's private remote space is `/members/{hash}/`, addressed by the member as `id:{member_folder_id}/...`. The authoritative `member_folder_id` is recorded in the member's `members-registry.json` entry by `invite-member` at folder-creation time (via `aifs_stat`'s `id` field, adapter 2.5.0+). Installs cache it in `member-index.json`; if absent locally, re-read it from the registry (a known-path read that works for non-members).
+2. **Owned, selectively-shared content** lives in the owner's member space (`id:{owner_member_folder_id}/{collection}/{slug}/`), **never** under `/shared`. Sharing is additive grants on the item folder via `permission-change-helper`: *share with X* = X `reader`; *collaborator X* = X `writer`; *share with org* = `{all_members_group}` `reader`.
+3. **Pointer index (discovery).** Each shared item gets one pointer file in the collection's open-shared index folder: `/shared/{collection}-index/{owner_hash}-{slug}.json` with fields `type`, `owner`, `owner_hash`, `slug`, `folder_id` (the item's Drive ID — recipients open it via `id:{folder_id}/...`), `scope`, and (per-collection privacy choice) `title` / `collaborators`. The index folder is an open-shared area (`all@` writer, declared in the collection's `collaborative-acls.json`). One file per item — no shared mutable index, no write contention.
+4. **Soft-delete (no trashing by members).** Non-admin members are Contributors on the Shared Drive and **cannot trash/delete** remote files. Collections must never require a member to delete: "delete" = overwrite metadata to mark archived; "unshare" = revoke the grant (helper `unshare`) + **overwrite** the pointer file with `scope: "revoked"`. Overwrites are writer-permitted; deletions are admin-only.
+5. **Rule of thumb:** *paths for what you can enumerate; ID anchors for what you're granted.* Never resolve a member-space path by name; always anchor on a known folder ID.
+
+---
+
 ## Versioning Requirements
 
 - All collections must use semantic versioning: `MAJOR.MINOR.PATCH`

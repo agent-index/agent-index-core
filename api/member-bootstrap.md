@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.0.1
+version: 3.1.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -190,11 +190,14 @@ Create the local directory structure:
 
 If any of these directories already exist: skip creation, do not overwrite.
 
+**Fetch the member's `member_folder_id`** (added in core 3.8.0): read `/members-registry.json` via `aifs_read` (a known-path read that works for non-members), find this member's entry by `member_hash`, and take its `member_folder_id` — the Drive ID of the member's private remote space, recorded by `invite-member` at provisioning. Include it in `member-index.json` below. All member-remote-space operations address that space as `id:{member_folder_id}/...` (standards.md § "Addressing: paths vs. ID anchors") — non-admin members cannot resolve `/members/{hash}/` by path. If the registry entry has no `member_folder_id` (invited before core 3.8.0): proceed without it, and surface once that the admin needs to run the member-folder-id backfill before collections that use the member's remote space will work.
+
 Create the local `member-index.json`:
 
 ```json
 {
   "member_hash": "{member_hash}",
+  "member_folder_id": "{from the member's members-registry.json entry; omit if not yet recorded}",
   "agent_index_version": "2.0.0",
   "last_updated": "{today YYYY-MM-DD}",
   "installed": {
