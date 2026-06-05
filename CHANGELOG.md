@@ -6,6 +6,23 @@ Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
 
 ---
 
+## [3.9.1] — 2026-06-05 — raw-URL normalization (fetch-cache fix, part 2)
+
+### Fixed
+
+- **`agent-index.template.json`** — all five raw.githubusercontent URL fields now use the `/main/`
+  short-form instead of `/refs/heads/main/`. The fetch layer strips query params on the
+  `refs/heads` form and serves long-stale cached bytes — observed live: a weeks-old
+  marketplace-directory (1.5.3) and pre-0.4.x binary checksums served DESPITE the 2.9.0/3.7.8
+  cache-busters, which silently breaks `pin-binary-version` validation and Step 1.6 binary sha
+  verification. Finding **F7**, bug `20260604-8d20ea22-144009-20c2`. The cache-buster remains as
+  belt-and-braces on the working path.
+- **`apply-updates` 3.9.0 → 3.9.1 — Step 1.5 Migration 3:** one-time idempotent rewrite of the five
+  known `*_url` fields in each member's local `agent-index.json` (`/refs/heads/main/` → `/main/`),
+  healing every existing install on its next `@ai:update`. Non-raw URLs untouched.
+
+---
+
 ## [3.9.0] — 2026-06-04 — member spaces move to members' own My Drive (owner-sovereign sharing)
 
 ### Why
@@ -40,6 +57,13 @@ helper-go 0.4.0 bare-ID specs already work on My Drive unchanged (verified live 
   (scope unchanged); adoption path surfaced (any current recipient copies + re-shares from their
   own space). Step 2.5 narrowed: artifacts-dir grant (+ legacy `/members/{hash}/` if present). The
   task never reads, writes, or re-permissions a member's My Drive — it cannot.
+- **`apply-updates` — Step 1.6 Binary Pin Sync (standing)** — closes finding **F11**: binary sync
+  lived only in Phase 1 (infra batches), but `pin-binary-version` writes no update entry, so members
+  on collection-only batches never converged to a new pin (verified live: a member stayed on 0.3.0
+  after the org pinned 0.4.0). Step 1.6 runs on every `@ai:update`, self-contained: fetches the
+  infrastructure directory from `agent-index.json`'s URL (cache-busted, `/main/` short-form per
+  finding F7) instead of the "cached during this run" file that doesn't exist in non-infra batches.
+  Phase 1 step 7 now delegates to it.
 - **`standards.md`** — Addressing § rewritten for the My Drive member space, custody/cooperation
   note, soft-delete nuance (members CAN delete in their own space; pointers always overwrite).
 

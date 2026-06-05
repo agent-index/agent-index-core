@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.9.0
+version: 3.9.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -80,7 +80,29 @@ Run the **ensure-my-drive-space subroutine** (canonical definition: `member-boot
 
 This is the migration path for existing members: the 3.9.0 update entry triggers every member's `@ai:update`, which runs this step — no admin action per member. The admin's next `@ai:publish-updates` reconciles handshakes into the registry. Idempotent; must not block the update on failure (surface and continue).
 
+**Migration 3 — raw-URL normalization (introduced core 3.9.1, closes finding F7 / bug `20260604-8d20ea22-144009-20c2`):**
+
+The fetch layer strips query params on `refs/heads/main` raw.githubusercontent URLs and serves long-stale cached bytes (observed: a weeks-old directory served despite the cache-buster — which silently breaks pin validation and binary sha verification). The `/main/` short-form is cache-correct.
+
+1. Read local `agent-index.json`. For each of the known URL fields (`marketplace_directory_url`, `filesystem_adapter_directory_url`, `infrastructure_directory_url`, `core_version_url`, `marketplace_version_url`), if the value contains `raw.githubusercontent.com` AND `/refs/heads/main/`, rewrite that segment to `/main/`.
+2. If any field changed: write `agent-index.json` back and surface one line: "✓ Normalized {n} directory URL(s) (one-time migration)." Otherwise silent.
+3. Never touch non-raw URLs (`*_repo_url`, `log_collector_url`, zip URLs in directories).
+
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
+
+---
+
+### Step 1.6: Binary Pin Sync (standing — runs on EVERY invocation)
+
+Moved out of Phase 1 in 3.9.0 (closes finding F11): binary pins are changed by `@ai:pin-binary-version`, which writes **no update entry** — so a sync that only runs inside Phase 1 (infra batches) never fires for pin-only changes, and members never converge. Verified live: a collection-update-only batch skipped Phase 1 entirely and left a member on a binary below the org pin.
+
+This step is **self-contained** — it does not depend on any cache produced by other steps:
+
+1. Fetch `infrastructure-directory.json` from the URL in `agent-index.json` → `infrastructure_directory_url` (NOT a local file or remote-filesystem path; apply the cache-buster, and prefer the `/main/` short-form URL — `refs/heads/main` raw URLs strip query params, finding F7).
+2. Read `org-config.json` → `binaries{}` (remote). For each binary pinned there, run the reconcile flow defined in Phase 1 step 7 (version_file comparison, platform lookup, sha256-verified download with explicit user approval, post-install command).
+3. If local matches the pin: silent (or one summary line). If no binaries are pinned: silent.
+
+Phase 1 step 7 remains in place for infra batches but is now just an invocation of this standing step (do not run it twice in one update).
 
 Proceed to Step 2.
 
@@ -233,9 +255,9 @@ If `core-update` is present:
    - Surface a one-line confirmation: "Removed orphaned mcp-servers/permission-helper/ directory (pre-3.7.4 Node helper; replaced by permission-helper-go binary)."
    - Idempotent: on a second `apply-updates` run after 3.7.4 has landed, the directory is already gone and the step is a no-op.
    - Failure handling: if the deletion fails (filesystem permissions, in-use file, etc.), surface a notice but do NOT block the rest of `apply-updates`. The orphaned directory is dead code; harmless if it persists.
-7. **Sync registered binary tools** (added in core 3.4.0): for each entry in `infrastructure-directory.json` → `binaries[]`, reconcile the locally-installed binary against the org's pinned version. This is the new download/install path for native tools (currently: `permission-helper-go`). The flow:
+7. **Sync registered binary tools** (added in core 3.4.0; standing since 3.9.0): this is the same logic as Step 1.6 — if Step 1.6 already ran this invocation (it always does), skip here. For each entry in `infrastructure-directory.json` → `binaries[]`, reconcile the locally-installed binary against the org's pinned version. This is the download/install path for native tools (currently: `permission-helper-go`). The flow:
 
-   1. Read `infrastructure-directory.json` from remote (cached during this run).
+   1. Fetch `infrastructure-directory.json` from the URL in `agent-index.json` → `infrastructure_directory_url` (cache-busted, `/main/` short-form — NOT a local cache; pre-3.9.0 this said "cached during this run", which doesn't exist in non-infra batches).
    2. Read `org-config.json` → `binaries{}` from remote. For each binary listed in the directory:
       - **If the binary is not declared in `org-config.binaries`:** skip it (the org has not opted in). Surface a one-line note: "Available but not pinned: `<name>` (admin can run `@ai:pin-binary-version <name>` to enable)."
       - **If declared:** continue.
