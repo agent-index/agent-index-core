@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -44,18 +45,51 @@ var Version = "0.1.0-spike" // set at build time via -ldflags
 // bug 20260527-8d20ea22-2).
 var currentSpecPath string
 
+// v0.4.1: the apply result is written to the outcome file the moment
+// apply.Apply returns — NOT at lifecycle terminal. Pre-0.4.1, the file was
+// written only when the listener reached a terminal state (page close /
+// timeout), which raced page-close detection: observed outcomes were
+// "terminated" overwriting a successful apply, or no file at all while the
+// tab stayed open (bug 20260605-62a14c43). Once the apply outcome is
+// written, later terminal reports must not downgrade it.
+var (
+	outcomeMu           sync.Mutex
+	applyOutcomeWritten bool
+)
+
 func diag(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "[helper] "+format+"\n", args...)
+}
+
+// writeApplyOutcome persists the authoritative apply result immediately.
+// Called from OnApply (interactive) and runCli as soon as apply.Apply
+// returns, before the page is told anything. Guarantees: by the time the
+// review page shows success, the outcome file already exists.
+func writeApplyOutcome(report listener.StatusReport) {
+	outcomeMu.Lock()
+	defer outcomeMu.Unlock()
+	if currentSpecPath == "" {
+		return
+	}
+	data, _ := json.Marshal(report)
+	if err := writeOutcomeFile(currentSpecPath, data); err != nil {
+		diag("warning: could not write outcome file at %s: %v", deriveOutcomePath(currentSpecPath), err)
+		return
+	}
+	applyOutcomeWritten = true
 }
 
 func emitFinal(report listener.StatusReport) {
 	data, _ := json.Marshal(report)
 	fmt.Fprintln(os.Stdout, string(data))
 
-	// v0.3.0: also write to outcome JSON file when we know the spec path.
-	// The agent (skill spec Step 6) reads this file to learn what happened.
-	// Best-effort: write failures are logged but don't override the stdout emit.
-	if currentSpecPath != "" {
+	// Also write to the outcome JSON file when we know the spec path —
+	// UNLESS the apply outcome was already written (v0.4.1): terminal
+	// states like "terminated"/"page_closed" describe the page lifecycle,
+	// not the apply result, and must not clobber it.
+	outcomeMu.Lock()
+	defer outcomeMu.Unlock()
+	if currentSpecPath != "" && !applyOutcomeWritten {
 		if err := writeOutcomeFile(currentSpecPath, data); err != nil {
 			diag("warning: could not write outcome file at %s: %v", deriveOutcomePath(currentSpecPath), err)
 		}
@@ -347,6 +381,7 @@ func runCli(s *spec.Spec, drv apply.Driver) {
 
 	emitter := stderrEmitter{}
 	report := apply.Apply(s, emitter, drv)
+	writeApplyOutcome(report) // v0.4.1: same immediate-persist as interactive
 	emitFinal(report)
 	if len(report.FailedOperations) == 0 {
 		os.Exit(listener.ExitApplied)
@@ -375,6 +410,9 @@ func runInteractive(s *spec.Spec, drv apply.Driver) {
 	srv.OnApply = func(submitted *spec.Spec) {
 		emitter := sseEmitter{srv: srv}
 		report := apply.Apply(submitted, emitter, drv)
+		// v0.4.1: persist the apply result NOW — before the page is told —
+		// so page-close races can neither clobber nor delay the outcome file.
+		writeApplyOutcome(report)
 		// Map the apply outcome to a lifecycle exit code.
 		var exitCode int
 		switch report.Outcome {
