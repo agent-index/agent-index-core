@@ -52,7 +52,7 @@ These are decisions the org admin makes once and members can't override. Use thi
 
 **Test:** If two members in the same org configured this differently, would things break or get confusing? If yes, it's org-mandated.
 
-**Examples:** `delivery_method` (email-triage), `shared_projects_path` (projects), `comms_platform` (projects)
+**Examples:** `delivery_method` (email-triage), `projects_default_visibility` (projects), `comms_platform` (projects)
 
 ### `role-suggested`
 
@@ -295,16 +295,16 @@ Unless a collection's data is inherently shared (like org config or cross-member
 
 ### The "bare Read" anti-pattern
 
-The most common mistake is writing `Read \`projects-manifest.json\`` without specifying the tool. This looks clear to a human reader, but agents interpret "Read" as "use whatever file tool is available" — which defaults to native local file tools. If the file lives on the remote filesystem, the agent reads locally, finds nothing, and tells the member they have no data.
+The most common mistake is writing `Read \`action-items.json\`` without specifying the tool. This looks clear to a human reader, but agents interpret "Read" as "use whatever file tool is available" — which defaults to native local file tools. If the file lives on the remote filesystem, the agent reads locally, finds nothing, and tells the member they have no data.
 
 **Bad:**
 ```markdown
-Read `projects-manifest.json` and find the matching project.
+Read `action-items.json` and find the matching item.
 ```
 
 **Good:**
 ```markdown
-Read `projects-manifest.json` via `aifs_read` and find the matching project.
+Read `action-items.json` via `aifs_read` and find the matching item.
 ```
 
 This applies to every read and write in a workflow — not just the first one. If Step 1 says `aifs_read` but Step 3 says "Read the project's `current-state.md`" without the tool qualifier, the agent may revert to local reads in Step 3. Be explicit every time.
@@ -321,14 +321,15 @@ Use native file tools (Read/Write).
 
 **Remote shared data** (org config, shared projects):
 ```markdown
-Read `project.md` from `{shared_projects_path}/{project_slug}/` using `aifs_read`.
+Read `project.md` from `/shared/projects/{project_slug}/` using `aifs_read`. (For member-owned content addressed by Drive ID, the same rule applies with `id:{folder_id}/...` paths.)
 ```
 
 **Mixed** (strategy collection — starts local, promoted to shared):
 ```markdown
-Tool selection: Operations on the member's private workspace (`members/{member_hash}/strategies/`)
-use native Read/Write tools. Operations on the shared strategies path (`{shared_strategies_path}`)
-use `aifs_*` tools.
+Tool selection: Operations on the member's private LOCAL workspace (`members/{member_hash}/strategies/`)
+use native Read/Write tools. Operations on remote content — the owner's member space
+(`id:{member_folder_id}/strategies/{slug}/`) and the pointer index (`/shared/strategies-index/`)
+— use `aifs_*` tools.
 ```
 
 The mixed pattern is the most complex and the most important to get right. State the tool selection rule once at the top of the workflow, then reference it in each step where it matters.
@@ -338,26 +339,27 @@ The mixed pattern is the most complex and the most important to get right. State
 
 ---
 
-## Designing for Native Permissions (v3.1.0+)
+## Designing for Native Permissions (v3.1.0+, reworked for the core 3.9 access model)
 
 Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder access control via the backend's native ACL system (Drive Permissions, OneDrive permissions, S3 IAM). Every member operates as themselves through their own OAuth credentials — agent-index never elevates privilege. This affects how you design collections that touch shared resources.
 
-### When to call `aifs_share`
+**Core 3.9 changed how grants happen.** Google Drive permits folder-sharing on a Shared Drive only to drive Managers (audit finding F12), so the original "task calls `aifs_share` on a `/shared` folder" pattern is impossible for ordinary members. The current model — proven across bug-reports, strategy, client-intelligence, and projects in the 2026-06 cross-collection audit — is documented normatively in `standards.md` (Collaborative Folder ACLs; member spaces; pointer index; soft-delete). Design your collection around one of three patterns:
 
-If your task creates a shared resource that has a member-level audience (e.g., a project folder, a bug report, an idea folder), the task must call `aifs_share` to grant the appropriate roles. The adapter's `aifs_share` operation maps to the backend's native sharing API; it executes as the calling member's identity, so they can only share what they themselves have authority to share.
+### Pick an access pattern first
 
-Pattern:
+- **Open-commons** — everyone reads and writes the same org-level data (reference: bug-reports). Declare a `collaborative-acls.json` at your collection root granting `all@` writer on each `/shared/{dir}/`; install/upgrade provisioning applies it (marketplace 2.9+). Because the backend ACL can't distinguish members, every write must carry **task-level attribution** (`author_hash`/`author_name` in the data or an activity log).
+- **Owned-content** — each item belongs to one member who controls access (reference: strategy). Content lives in the **owner's own My Drive** member space, addressed by `id:{member_folder_id}/...` anchors. Grants are applied **by the owner** via the permission-change-helper flow — never inline `aifs_share` in a task workflow, and never by an admin on the owner's behalf. Discovery happens through a pointer index folder under `/shared/` (one small JSON pointer per shared item; the index folder itself is open-commons via your `collaborative-acls.json`).
+- **Two-tier hybrid** — items are org-public or private, chosen at creation (references: projects, client-intelligence). Combine both mechanisms, prompt for visibility at creation, and place child artifacts inside the parent's tree so they **inherit access structurally** with no per-item ceremony.
 
-```markdown
-### Step N: Apply ACLs to the new project folder
+### Invariants that apply to every pattern
 
-1. `aifs_share("/shared/projects/{slug}/", "{owner_email}", "writer")`
-2. For each invited member: `aifs_share("/shared/projects/{slug}/", "{email}", "{role}")`
-3. After each share, poll `aifs_get_permissions("/shared/projects/{slug}/")` until the
-   subjects appear (Drive's permissions API is eventually consistent — up to ~5s).
-```
+- **Verified-outcome gate.** Any step that depends on a grant having been applied (writing a pointer, updating scope, confirming to the member) proceeds only after the helper outcome reads `"applied"` OR an independent `aifs_get_permissions` confirms it. Never assume a grant succeeded.
+- **Sharing vocabulary.** "Share with X" = X can read; "make X a collaborator" = X can read + write; "share with the org" = everybody can read. Use it consistently in member-facing language.
+- **Pointer conventions.** Pointers are overwrite-only (revoke = overwrite with `scope: "revoked"`, never delete); scope shapes are `"org_public"` | `{readers, collaborators}` | `"private"` | `"revoked"`; invisible-until-shared items have no pointer at all; departed owners are annotated `owner_departed`.
+- **Prefer `id:` anchors** wherever members can create same-named siblings — name-based resolution picks arbitrarily among duplicates (bug 20260606-62a14c43-230135-db13).
+- **`aifs_delete` is non-recursive** — hard-delete workflows delete contents first. On org-shared surfaces, prefer the soft-delete conventions in `standards.md` (members can't trash Shared-Drive files at all).
 
-Roles are the AIFS-level abstraction (`reader` / `commenter` / `writer`) and adapters map to native roles. Use `inherit: false` on the share when the resource should be visible *only* to the named subjects (not also to anyone with access to the parent folder) — used for path-B initial member dirs and Phase-5 scoped ideas.
+Roles remain the AIFS-level abstraction (`reader` / `commenter` / `writer`); adapters map them to native roles. `inherit: false` remains available for shares that must be visible only to named subjects.
 
 ### When to call `aifs_unshare`
 
@@ -378,14 +380,15 @@ Files that are written by multiple members concurrently (`activity-log.jsonl`, `
 
 If you don't pass `if_revision`, you get the legacy unconditional-write behavior — that's fine for files only one writer touches, but risky for shared logs.
 
-### Tasks that produce shared artifacts must set their initial ACL
+### Tasks that produce shared artifacts must have a deliberate ACL story
 
-Standards rule: if your task has `produces_shared_artifacts: true` AND it creates a new resource (vs. appending to an existing one), the task must include an ACL-setting step. Reasons:
+Standards rule: if your task has `produces_shared_artifacts: true` AND it creates a new resource (vs. appending to an existing one), the task must state how that resource gets its access — by one of:
 
-- The path-B target state (non-admin members aren't drive members) means a freshly-created folder is otherwise visible only to the creator. Without an explicit share, no other member — including the project's owner if they're someone else — can see it.
-- Future `validate-collection` checks will flag tasks producing shared artifacts that don't reference `aifs_share` in their workflow.
+- **Provisioned commons:** the resource lives under a directory covered by your `collaborative-acls.json` (applied at install). Nothing further to do at runtime; add attribution to the write.
+- **Structural inheritance:** the resource is created inside a parent whose access is already correct (e.g., an artifact inside a project's tree). Document the inheritance assumption explicitly in the workflow.
+- **Owner-applied grants:** the resource lives in the creating member's own space and is shared via the permission-change-helper flow with the verified-outcome gate, plus a pointer for discovery.
 
-The exception is resources whose ACL is fully covered by parent inheritance. If your task creates `/shared/projects/{slug}/ideas/{idea-slug}/` and the parent project folder already has the right shares, you may rely on inheritance — but document it clearly in the task workflow.
+What is NOT acceptable: a runtime `aifs_share` on a freshly created `/shared` folder — it will fail for non-Manager members (F12), and the developer collection's preflight Step 7.5 errors on shared write paths with no covering `collaborative-acls.json`.
 
 ### Keep `reads_from` and `writes_to` accurate
 
@@ -585,29 +588,29 @@ Then write the workflow step as a script invocation rather than inline reasoning
 
 **Example — before (inline):**
 ```markdown
-### Step 2: Load Project Manifest
+### Step 2: Resolve the Project Pointer
 
-Read `projects-manifest.json` via `aifs_read`. Parse the JSON. Find the entry
-matching the project slug. Extract the project title, status, owner, and
-created date. If no entry matches, inform the member.
+Read `/shared/projects-index/{owner_hash}-{slug}.json` via `aifs_read`. Parse the
+JSON. Extract the project name, status, scope, and location. If the pointer does
+not exist, inform the member.
 ```
 
 **Example — after (script call):**
 ```markdown
-### Step 2: Load Project Manifest
+### Step 2: Resolve the Project Pointer
 
-Run the project manifest loader:
+Run the pointer resolver:
 
 \`\`\`bash
-python {apps_path}/projects-load-manifest.py \
-    --manifest-path "{shared_projects_path}/projects-manifest.json" \
+python {apps_path}/projects-resolve-pointer.py \
+    --index-path "/shared/projects-index" \
     --project-slug "{project_slug}" \
     --format json
 \`\`\`
 
-Parse the JSON output. The `data` field contains the project metadata.
-If exit code is 1, the project was not found — inform the member and offer
-alternatives.
+Parse the JSON output. The `data` field contains the pointer metadata (name,
+status, scope, location). If exit code is 1, the project was not found — inform
+the member and offer alternatives.
 ```
 
 The second version costs ~50 tokens (the script invocation and output parsing) instead of ~400 (Claude reasoning through JSON parsing, field extraction, and error handling). Over hundreds of runs, this compounds.

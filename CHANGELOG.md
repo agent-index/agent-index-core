@@ -1,5 +1,13 @@
 # Agent-Index Core — Changelog
 
+## [3.9.2] — 2026-06-06 — docs only: collection-authoring-guide access-model currency
+
+### Changed
+
+- **"Designing for Native Permissions" rewritten for the core 3.9 access model.** The "When to call `aifs_share`" pattern (runtime member shares on `/shared` folders) is removed — it is impossible for non-Manager members on Shared Drives (audit finding F12). Replaced with the three proven patterns (open-commons / owned-content / two-tier hybrid) and the cross-pattern invariants (verified-outcome gate, sharing vocabulary, pointer conventions, `id:` anchors, non-recursive `aifs_delete`). "Tasks that produce shared artifacts" now requires a deliberate ACL story (provisioned commons / structural inheritance / owner-applied grants) instead of a runtime share step.
+- **Teaching examples modernized.** Retired constructs (`projects-manifest.json`, `{shared_projects_path}`, `{shared_strategies_path}`) replaced with current equivalents (pointer index, `/shared/projects/`, `id:`-anchored member spaces) in the provenance-tier examples, the bare-Read anti-pattern, the storage-access patterns, and the script-first example.
+- No behavioral, schema, or workflow changes. `standards.md` was already current (3.9.0) and is untouched.
+
 All notable changes will be documented here.
 
 Format: [MAJOR.MINOR.PATCH] — YYYY-MM-DD
