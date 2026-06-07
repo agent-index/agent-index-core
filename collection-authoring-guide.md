@@ -711,6 +711,8 @@ The remote filesystem is accessed through an on-demand executor (`aifs-exec.sh`)
 
 The capability provider model lets collections depend on abstract services rather than specific implementations. Before you decide whether your collection should provide or consume capabilities, read `capability-provider-spec.md` for the full specification. This section covers the practical design decisions.
 
+**Runtime status (core 3.10.0):** the runtime V1 is live — install-collection registers providers (admin-confirmed) into `org-config.json` `capability_providers`, upgrade-collection refreshes registrations, check-updates surveys provides/requires links, and consumers resolve via `templates/resolve-capability.md`. V1 supports the single-provider auto-bind path; multi-provider bindings are post-V1. The first shipped provider/consumer pair is brand-book → client-intelligence; use them as the worked reference: brand-book declares `provides[]` for capability type `brand-book` (four read ops), stores its org-wide config in the registry's `provider_config` so consumers never read another collection's setup responses, and client-intelligence declares `requires[]` with `required: false, fallback: skip_with_notice` plus a copyable `/internal/resolve-brand.md` resolution wrapper.
+
 ### When to consume a capability
 
 If your collection needs to send messages, store documents, look up employees, or interact with a platform that varies by org, declare a `requires` entry in `collection.json` rather than hardcoding the integration. The test: if you find yourself asking "which platform does this org use for X?" in your setup interview, you probably want a capability requirement instead.

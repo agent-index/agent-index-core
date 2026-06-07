@@ -1,0 +1,164 @@
+{
+  "capability": "brand-book",
+  "version": "1.0.0",
+  "description": "Org brand identity as a service: tokens, voice, display elements, artifact templates with counterparty slots, and named assets. All operations are reads; providers hold the org's single source of brand truth.",
+  "operations": [
+    {
+      "name": "get-brand-guidelines",
+      "description": "Return the brand guidelines relevant to a composition context. Consumers call this BEFORE composing an artifact.",
+      "required": true,
+      "parameters": {
+        "artifact_type": {
+          "type": "string | null",
+          "required": false,
+          "description": "Artifact type slug (e.g., 'status-report', 'proposal'). Null returns org-wide guidelines without artifact-type tone modifiers."
+        },
+        "format": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "markdown",
+            "docx",
+            "pptx",
+            "html",
+            "pdf"
+          ],
+          "description": "Output format the artifact will be produced in."
+        },
+        "sections": {
+          "type": "array",
+          "required": false,
+          "description": "Which guideline sections to return: any of 'voice', 'visual', 'structure'. Default: all."
+        }
+      },
+      "returns": {
+        "guidelines": {
+          "type": "object",
+          "description": "Structured guidelines: tokens (palette/typography/spacing for the format), voice (org voice + applicable tone modifiers), structure (artifact-type structural rules when artifact_type given)."
+        },
+        "brand_usage": {
+          "type": "string",
+          "description": "'required' or 'optional' \u2014 the org-wide enforcement switch from provider config."
+        },
+        "brand_book_version": {
+          "type": "string",
+          "description": "Provider collection version, for artifact provenance stamps."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description, or null."
+        }
+      }
+    },
+    {
+      "name": "get-element",
+      "description": "Return one display element's semantic definition and its rendering for a format.",
+      "required": true,
+      "parameters": {
+        "element_name": {
+          "type": "string",
+          "required": true,
+          "description": "Element slug (e.g., 'table', 'cover-page', or a custom element)."
+        },
+        "format": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "markdown",
+            "docx",
+            "pptx",
+            "html",
+            "pdf"
+          ],
+          "description": "Output format."
+        }
+      },
+      "returns": {
+        "found": {
+          "type": "boolean",
+          "description": "Whether the element is defined in the published brand book."
+        },
+        "element": {
+          "type": "object | null",
+          "description": "Semantic definition + the requested format rendering. Null if not found."
+        },
+        "rendering_missing": {
+          "type": "boolean",
+          "description": "True when the element exists but has no rendering for this format \u2014 consumer falls back to its native default."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description, or null."
+        }
+      }
+    },
+    {
+      "name": "get-template",
+      "description": "Return a named artifact template: composition (sections, element placements) and declared slots.",
+      "required": false,
+      "parameters": {
+        "template_name": {
+          "type": "string",
+          "required": true,
+          "description": "Template slug (e.g., 'status-report', 'proposal')."
+        },
+        "format": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "markdown",
+            "docx",
+            "pptx",
+            "html",
+            "pdf"
+          ],
+          "description": "Output format."
+        }
+      },
+      "returns": {
+        "found": {
+          "type": "boolean",
+          "description": "Whether the template is defined."
+        },
+        "template": {
+          "type": "object | null",
+          "description": "Sections, element placements, formatting rules for the format."
+        },
+        "slots": {
+          "type": "array",
+          "description": "Declared placeholder slots: {name, kind: 'image'|'text', placement, sizing, clear_space, required}. Slot VALUES are always supplied by the consumer at compose time."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description, or null."
+        }
+      }
+    },
+    {
+      "name": "get-asset",
+      "description": "Return a named brand asset (logo, icon, pattern) by its registered name \u2014 never by path.",
+      "required": false,
+      "parameters": {
+        "asset_name": {
+          "type": "string",
+          "required": true,
+          "description": "Registered asset slug (e.g., 'primary-logo')."
+        }
+      },
+      "returns": {
+        "found": {
+          "type": "boolean",
+          "description": "Whether the asset is registered."
+        },
+        "asset": {
+          "type": "object | null",
+          "description": "Asset metadata: {name, kind, format, remote_path or id anchor, dimensions, usage_rules}."
+        },
+        "error": {
+          "type": "string | null",
+          "description": "Error description, or null."
+        }
+      }
+    }
+  ]
+}

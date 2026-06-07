@@ -1,5 +1,19 @@
 # Agent-Index Core — Changelog
 
+## [3.10.0] — 2026-06-07 — capability-provider runtime V1 + brand-book capability type
+
+### Added
+
+- **`capability-types/brand-book.json`** — new well-known capability type v1.0.0: `get-brand-guidelines` (required), `get-element` (required), `get-template`, `get-asset`. All read-only. First consumer-facing type whose runtime will actually be exercised (brand-book → client-intelligence program).
+- **`org-config-schema.json` `capability_providers`** — the provider registry per capability-provider-spec.md. Written only by install/upgrade registration and edit-org; consumers read it per `templates/resolve-capability.md`. V1 binding model: exactly-one-provider auto-bind; multi-provider binding interviews deferred.
+- **`edit-org` Step 5.8** — view/deregister/re-order capability providers; deregistration logs `provider-deregister` and names affected consumers.
+- **Authoring guide** — "Designing for Capability Providers" gains the runtime-status paragraph and the brand-book/client-intelligence worked reference.
+
+### Notes
+
+- Registration mechanics live marketplace-side (install-collection Step 5.7, upgrade-collection Step 6.7, check-updates Capabilities section) — companion release agent-index-marketplace 2.10.0.
+- No migrations; `capability_providers` is created on first registration.
+
 ## [3.9.2] — 2026-06-06 — docs only: collection-authoring-guide access-model currency
 
 ### Changed

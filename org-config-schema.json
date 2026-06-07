@@ -63,5 +63,27 @@
       "pinned_by": "a7f3b2c1d4e5f698",
       "pinned_date": "2026-05-05"
     }
-  }
+  },
+  "capability_providers": {
+    "brand-book": {
+      "providers": [
+        {
+          "provider_collection": "brand-book",
+          "capability_version": "1.0.0",
+          "registered_date": "2026-06-07",
+          "registered_by": "a7f3b2c1d4e5f698",
+          "operations_available": [
+            "get-brand-guidelines",
+            "get-element",
+            "get-template",
+            "get-asset"
+          ],
+          "provider_config": {
+            "brand_usage": "optional"
+          }
+        }
+      ]
+    }
+  },
+  "_capability_providers_note": "Added in core 3.10.0. Map of capability-type -> {providers: [...]}. Written ONLY by install-collection Step 5.7 / upgrade-collection Step 6.7 (registration, admin-confirmed, if_revision) and edit-org (manual management incl. deregistration). Consumers read it at runtime per agent-index-core/templates/resolve-capability.md: exactly one provider => auto-bind; zero => fallback behavior from the consumer's requires[] declaration; multiple => V1 surfaces a setup notice (binding interviews are post-V1). provider_config schema is provider-defined (brand-book stores its org-wide brand_usage switch here so consumers never read another collection's setup responses). See capability-provider-spec.md."
 }

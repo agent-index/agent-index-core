@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.0.2
+version: 3.1.0
 collection: agent-index-core
 description: Edit org configuration — update the admin list or launch the marketplace to install or manage collections.
 stateful: false
@@ -189,6 +189,16 @@ After the subroutine completes, surface the member distribution instructions:
 > **For new members:** The bootstrap zip at the download location is already updated — no action needed.
 
 ---
+
+### Step 5.8: Capability Provider Management (added in 3.10.0)
+
+If the admin asks to view, deregister, or re-order capability providers:
+
+1. Read `org-config.json` via `aifs_read` → `capability_providers`. Present each capability type with its registered providers (collection, version, operations, registered date/by).
+2. **Deregister:** on explicit request, confirm: "Deregistering `{collection}` as a `{capability}` provider means consumer collections that resolve this capability will fall back to their declared fallback behavior on their next run. Proceed?" On yes: remove the provider entry (revision-aware write, `if_revision`), append a `provider-deregister` op to the update log (`reason: "manual"`), and surface which installed collections declare `requires[]` for this capability so the admin knows what degrades.
+3. **Re-registration** happens through `@ai:install-collection` (reconfigure) or `@ai:upgrade-collection` — do not hand-edit registry entries here beyond removal and ordering.
+
+If the member asks about registering a provider, direct them to `@ai:install-collection {collection}` — registration is install/upgrade-time, admin-confirmed.
 
 ### Step 6: Marketplace Launch
 
