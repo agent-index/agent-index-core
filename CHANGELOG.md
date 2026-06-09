@@ -1,5 +1,20 @@
 # Agent-Index Core — Changelog
 
+## [3.10.1] — 2026-06-08 — collection access by stored folder_id (Option B) + admin-gated backfill
+
+### Fixed / Changed
+
+- **cr01/cr02 — members can now read & install newly-installed collections.** `org-config-schema` gains `installed_collections[].folder_id` (the collection code dir's Drive ID). The manifest-sync subroutine and the rewritten apply-updates **Phase 6** (new-collection install) resolve a read base: `id:{folder_id}` when present, else the legacy `/{collection}` path. Phase 6 now installs capabilities by reading the collection from the **org remote** into the member's LOCAL workspace — never a GitHub re-download, never a member write to the org remote; if the collection is unreadable it surfaces "ask your admin" and skips. (bugs 20260608-…-cr01, -cr02)
+- **Migration 4 (apply-updates Step 1.5) — admin-gated collection-access backfill.** On an admin's `@ai:update`, captures any missing `folder_id` (via `aifs_stat`) and provisions any missing `all@` reader grant on `/{collection}/` (batched into one permission-change-helper Accept, verified-outcome gated). Non-admins skip silently. Brings existing orgs to the id-anchored model without re-installing collections. Idempotent.
+- **manifest-sync subroutine revision 3 → 4** — the id-anchored read-base step forces a one-time per-collection re-sync so reads migrate to `id:{folder_id}` wherever present.
+- **edit-org.md truncation healed.** The Constraints section had been committed truncated mid-sentence ("Only org admins may execute changes. The ad") in origin/main for some time; reconstructed the final constraint (admin-identity verification in Step 1). Also corrects the remote copy on next publish.
+- **doc3 — `CLAUDE.md.template` available-tools list now includes `aifs_get_permissions`** (directly callable; the verified-gate's independent-verification step), with a note that share/unshare/transfer go through `permission-change-helper`. (bug 20260608-…-doc3)
+
+### Requires Admin Attention
+
+- After upgrading, run `@ai:update` **as an admin once** so Migration 4 backfills `folder_id` + read grants for all existing collections (one batched Accept). Until then, members fall back to path-based reads (unchanged behavior) for collections that already had legacy read grants.
+- Companion release: agent-index-marketplace 2.10.1 (captures folder_id + grants the reader at install) and gdrive adapter 2.5.1 (binary upload + duplicate-name resolution).
+
 ## [3.10.0] — 2026-06-07 — capability-provider runtime V1 + brand-book capability type
 
 ### Added

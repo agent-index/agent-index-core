@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.9.1
+version: 3.9.2
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -87,6 +87,18 @@ The fetch layer strips query params on `refs/heads/main` raw.githubusercontent U
 1. Read local `agent-index.json`. For each of the known URL fields (`marketplace_directory_url`, `filesystem_adapter_directory_url`, `infrastructure_directory_url`, `core_version_url`, `marketplace_version_url`), if the value contains `raw.githubusercontent.com` AND `/refs/heads/main/`, rewrite that segment to `/main/`.
 2. If any field changed: write `agent-index.json` back and surface one line: "✓ Normalized {n} directory URL(s) (one-time migration)." Otherwise silent.
 3. Never touch non-raw URLs (`*_repo_url`, `log_collector_url`, zip URLs in directories).
+
+**Migration 4 — collection-access backfill (introduced core 3.10.1; ADMIN-GATED self-heal; closes bugs cr01 `20260608-8d20ea22-160001-cr01` and the discovery half of cr02 `20260608-8d20ea22-160002-cr02`):**
+
+Post-3.9.0, non-admin members are not Drive members and reach a collection's code dir only if it is (a) directly shared with them (all@ reader) and (b) addressable by a stored `folder_id`. Collections installed before 3.10.1 have neither captured. This migration backfills both. It requires Manager/owner rights, so it runs **only when the member applying updates is an org admin** (check `org-config.json` `admins[]` for the local `member_hash`); non-admins skip it silently (they benefit once an admin has run it).
+
+1. If the local member is NOT in `org-config.json` `admins[]`: skip Migration 4 entirely (silent).
+2. Read `org-config.json` → `installed_collections[]` (status `installed`). For each collection `C`:
+   - **folder_id capture:** if `C.folder_id` is absent/empty, `aifs_stat("/{C.name}")` to resolve its Drive ID. If resolved, stage `C.folder_id = <id>` for a single revision-aware `org-config.json` write at the end. If `/{C.name}` can't be stat'd (not yet on remote / ambiguous), note and skip that collection's capture.
+   - **reader-grant check:** `aifs_get_permissions("/{C.name}")`. If `all@{domain}` lacks `reader` (and isn't already covered by a broader grant), add a `share` op (recipient `all@{members_group}`, role `reader`, resource `id:{C.folder_id}` if captured this run, else `/{C.name}`) to a single batched permission-change-helper spec.
+3. **Apply:** if any folder_id was staged, write `org-config.json` once (revision-aware, `if_revision`). If any reader grants are needed, invoke `permission-change-helper` ONCE with the batched spec — the admin reviews and Accepts all missing grants in one page (verified-outcome HARD GATE; idempotent — skip if the grant already exists). Do not write a pointer/scope; these are infrastructure grants.
+4. Surface a one-line summary: "✓ Backfilled collection access: {n} folder_id(s) captured, {m} read grant(s) provisioned." Idempotent: on a fully-backfilled org this migration is a no-op (every collection has folder_id and the grant).
+5. Never block the update on a backfill failure — surface what couldn't be done and continue; the next admin update retries.
 
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 
@@ -338,7 +350,7 @@ If a capability's upgrade requires member input (reset parameters or new require
 
 This phase runs **unconditionally** on every `apply-updates` invocation that reaches Phase 4 (i.e. any run with at least one operation in the merged plan, regardless of operation type — `core-update`, `marketplace-update`, `collection-update`, `adapter-bundle-update`, or `binary-update`). It detects drift between the member's locally-synced capability files and the org's currently-installed collection versions, and re-runs the manifest-sync subroutine for any collection that's out of sync. This is the structural fix for the 3.6.0 spec bug where step 3.5's drift-detection prose described a one-time backfill that was never reachable because it lived inside Phase 4's per-collection-update loop.
 
-**Subroutine revision constant.** The manifest-sync subroutine (defined below) has a `CURRENT_SUBROUTINE_REVISION` constant that bumps whenever a step is added or its data-shape semantics change. As of core 3.7.6 this constant is **`3`** (revision 1 was the 3.6.1 release with steps 1–6 and step 8; revision 2 added step 7 in 3.7.0, which reconciles `member-index.installed[].version` with the `.md` frontmatter version; revision 3 added step 9 in 3.7.6, which reconciles setup-responses org-mandated values against `collection-setup-responses.md` at the corrected path — closes the data half of bug `20260527-8d20ea22-4`). Phase 4.5 uses this constant alongside `manifest_sync[C]` to decide when to re-run the subroutine — this protects against the structural bug `20260512-8d20ea22` where a 3.7.0 install with already-populated `manifest_sync` (from a 3.6.1+ backfill) had the new step 7 silently skipped.
+**Subroutine revision constant.** The manifest-sync subroutine (defined below) has a `CURRENT_SUBROUTINE_REVISION` constant that bumps whenever a step is added or its data-shape semantics change. As of core 3.10.1 this constant is **`4`** (revision 4 added step 1.5 — id-anchored read base via the collection's stored `folder_id`, falling back to the legacy `/{collection}` path; this forces a one-time re-sync per collection so reads migrate to id-anchored addressing wherever a `folder_id` is present). Prior: as of core 3.7.6 this constant was **`3`** (revision 1 was the 3.6.1 release with steps 1–6 and step 8; revision 2 added step 7 in 3.7.0, which reconciles `member-index.installed[].version` with the `.md` frontmatter version; revision 3 added step 9 in 3.7.6, which reconciles setup-responses org-mandated values against `collection-setup-responses.md` at the corrected path — closes the data half of bug `20260527-8d20ea22-4`). Phase 4.5 uses this constant alongside `manifest_sync[C]` to decide when to re-run the subroutine — this protects against the structural bug `20260512-8d20ea22` where a 3.7.0 install with already-populated `manifest_sync` (from a 3.6.1+ backfill) had the new step 7 silently skipped.
 
 1. Read `member-index.json`'s `manifest_sync` object (default to `{}` if the field is absent — pre-3.6.1 installs won't have it). Also read `manifest_sync_subroutine_revision` (default to `{}` if absent — pre-3.7.1 installs won't have it; effectively all entries default to revision 0).
 2. Build the org's collection-version map: read `aifs_read("/org-config.json")` and extract `installed_collections[]`. For each entry `{ name, version, status }` with `status: "installed"`, record `orgCollectionVersions[name] = version`. (Skip entries that are removed/deprecated.)
@@ -388,12 +400,14 @@ Given `(collection, targetVersion)`:
 
 1. **Identify the capabilities to sync.** Read `member-index.json`'s `installed.skills[]` and `installed.tasks[]`, filter to entries with `collection === <collection>`. Each entry has `name` and (implicit by which array) `type`.
 
-2. **Read the three canonical files from remote** for each capability (these can be issued in parallel per capability):
-   - `def_md = aifs_read("/{collection}/api/{name}.md")`
-   - `setup_md = aifs_read("/{collection}/api/{name}-setup.md")` — if the file exists; some capabilities have no setup template, in which case `setup_md` is null.
-   - `manifest_json = aifs_read("/{collection}/api/{name}-manifest.json")`
+1.5. **Resolve the read base (added in core 3.10.1 — Option B id-anchored addressing).** Read `org-config.json` → `installed_collections[]`, find the entry for `<collection>`. If it has a non-empty `folder_id`, set `base = "id:{folder_id}"`. Otherwise set `base = "/{collection}"` (legacy path read — kept for backward compatibility with installs the admin hasn't backfilled yet; behaves exactly as pre-3.10.1). All reads in steps 2–3 use `{base}/...`. **Rationale:** non-admin members are not Drive members and cannot reliably resolve a root-relative collection path (`aifs_list("/")` is unavailable to them; same-named folders are ambiguous — bug 20260606-62a14c43-230135-db13). Addressing by the collection's stored Drive ID makes the read deterministic and immune to name collisions. The `folder_id` is captured admin-side at install (marketplace download/install-collection) and backfilled by Step 1.5 Migration 4.
 
-3. **Read the collection.json once** for this collection: `coll = aifs_read("/{collection}/collection.json")`. Use `coll.version` as the authoritative collection version for the manifest field sync below. (This is the value the org has on remote, which equals `targetVersion` in steady state.)
+2. **Read the three canonical files from remote** for each capability (these can be issued in parallel per capability):
+   - `def_md = aifs_read("{base}/api/{name}.md")`
+   - `setup_md = aifs_read("{base}/api/{name}-setup.md")` — if the file exists; some capabilities have no setup template, in which case `setup_md` is null.
+   - `manifest_json = aifs_read("{base}/api/{name}-manifest.json")`
+
+3. **Read the collection.json once** for this collection: `coll = aifs_read("{base}/collection.json")`. Use `coll.version` as the authoritative collection version for the manifest field sync below. (This is the value the org has on remote, which equals `targetVersion` in steady state.)
 
 4. **LF-normalize text content** (added in core 3.6.1; mechanic inlined here in core 3.7.4 — previously cross-referenced Phase 1 step 6's Node-helper-install normalization, which was removed in 3.7.4 when the Node helper was removed). Read the remote file's bytes; replace any `\r\n` sequence with `\n`; replace any standalone `\r` with `\n`; then write. Apply to all `.md` and `.json` content. When the install runs on a Windows host the file-write APIs default to applying CRLF; this normalization step makes the writes deterministic regardless of host OS (closes the data-shape side of bug `20260504-8d20ea22-7` for this code path).
 
@@ -409,7 +423,7 @@ Given `(collection, targetVersion)`:
 
 7. **Synchronize `member-index.json` `installed[].version` for this capability** (added in core 3.7.0). Locate the member-index entry for `{type: <type>, name: <name>}` and set its `version` field to the value of `version` in the `.md` frontmatter (the same value just written to `manifest.json` in step 6). This is the data-repair counterpart to the spec clarification in `org-setup` Phase 4 step 11 and Upgrading flow step 9 (also added in 3.7.0): both flows record the `.md` frontmatter version, not the collection version. Pre-3.7.0 installs frequently recorded the collection version here, producing spurious "local ahead of remote" rows in `check-updates`. The Phase 4.5 first-run sweep on a 3.6.x install will reconcile every capability's recorded version with its frontmatter. Idempotent: write only if different from the current value. If the member-index entry is missing (the capability was uninstalled out-of-band): skip the write and surface a notice that the local install directory exists for a capability not in member-index.
 
-8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` AND `manifest_sync_subroutine_revision[<collection>] = CURRENT_SUBROUTINE_REVISION` (currently 3) in `member-index.json` and write the file. Both fields advance together; if any capability failed in steps 2–7 or step 9, do NOT advance either field; the failure leaves them at their prior values, and the next apply-updates run retries.
+8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` AND `manifest_sync_subroutine_revision[<collection>] = CURRENT_SUBROUTINE_REVISION` (currently 4) in `member-index.json` and write the file. Both fields advance together; if any capability failed in steps 2–7 or step 9, do NOT advance either field; the failure leaves them at their prior values, and the next apply-updates run retries.
 
 9. **Reconcile setup-responses org-mandated values** (added in core 3.7.6 to close the data half of bug `20260527-8d20ea22-4`). For each capability that was just resynced in steps 2–7, check whether its local `setup-responses.md` org-mandated values match the org's authoritative `collection-setup-responses.md` (read via `aifs_read("/{collection}/setup/collection-setup-responses.md")` — note the corrected path; the pre-3.7.6 `org-setup` spec had this wrong, which is why this reconciliation is needed on every existing install). If drifted: re-inject the org-mandated values into the local setup-responses, preserving member-defined and role-suggested values.
 
@@ -478,11 +492,12 @@ For each `collection-install` (unless `--skip-optional`):
 
 1. Present the collection to the member: "{display_name} ({category}) is newly available in your org. {description}. Would you like to install capabilities from it?"
 2. If the member declines: skip. Record the decision — the member won't be asked again for this specific collection-install entry (tracked by noting the entry ID in the cursor advancement).
-3. If the member accepts: delegate to the org-setup skill's install flow:
-   - Present available capabilities from the collection
-   - Let the member select which to install
-   - Run the setup interview for each selected capability
-   - Write to `member-index.json`
+3. If the member accepts: install capabilities by reading definitions from the **org remote copy** (the admin already placed the collection there via install-collection) — NEVER by re-downloading from GitHub/marketplace, and NEVER by writing collection files to the org remote. Specifically:
+   - **Resolve the read base (core 3.10.1, Option B).** Read `org-config.json` → `installed_collections[]` for this collection. If it has a `folder_id`, `base = "id:{folder_id}"`; else `base = "/{collection}"` (legacy fallback). Read `coll = aifs_read("{base}/collection.json")`.
+   - **If `{base}` is unreadable** (e.g. `folder_id` absent AND the path won't resolve because the member lacks the all@ reader grant — bug cr01): surface "‘{display_name}’ isn't readable on the org remote yet — ask your admin to (re-)publish it or grant access (`@ai:publish-updates` / re-run `@ai:install-collection {collection}`)." Then SKIP this collection. Do **not** download-and-install, do **not** write any collection files to the org remote. (This is the cr02 safeguard: a non-admin member never performs an org-level collection install.)
+   - Present available capabilities from `coll.api[]`; let the member select which to install.
+   - For each selected capability, read its definition from `{base}/api/{name}.md` (+ `-setup.md`, `-manifest.json`), run the setup interview, and write the capability into the member's LOCAL workspace (same read+LF-normalize+local-write mechanics as the manifest-sync subroutine; reuse it). Local writes only.
+   - Write to `member-index.json`; set `manifest_sync[<collection>]` and `manifest_sync_subroutine_revision[<collection>]` so the new install is recorded as synced. Merge the collection's triggers into `routing.json`.
 4. After installation (or skip): surface result and continue.
 
 **Phase 7 — Collection removals (informational)**
@@ -559,28 +574,4 @@ Never modify any file on the remote filesystem. This task reads from remote — 
 
 Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
 
-Never advance the cursor without completing or explicitly declining all operations in the plan. If the task is interrupted (adapter restart, session end), write the pending plan file with the remaining operations — the cursor stays at its pre-update value until everything is processed.
-
-Never force-install a new collection. Collection installs from `collection-install` operations are always optional. The member chooses whether to install capabilities from newly available collections.
-
-Never modify `org-config.json`, `members-registry.json`, or any remote file. The only remote reads are the update log and collection definitions. **Exception:** Phase 1 step 5 strips the deprecated `mcp_server` and `exec` blocks from `org-config.json` if present (the documented org-level write, gated on those blocks existing).
-
-This task is the sole authority for advancing `member-index.json`'s `last_applied_update` field. No other task should touch that field. Tasks that change individual capabilities (org-setup install/upgrade/remove) update the per-capability `installed[]` entries; only this task advances the cursor.
-
-This task must be re-runnable. Every write is either idempotent (re-running the same operation produces the same state) or guarded by cursor advancement (re-running with a fresh cursor skips already-applied operations). A crash, a network error, or an abort-on-prompt at any point should leave the install in a state that the next `@ai:update` invocation can resume cleanly.
-
-### Edge Cases
-
-If the update log exists but is empty (no entries): surface "No update instructions have been published yet." Halt.
-
-**Cursor points to a missing log entry.** If the member's `last_applied_update` points to an entry ID that doesn't exist in the log (log was truncated or rebuilt by an admin, or the cursor is otherwise out of sync), do not silently halt and do not silently advance. Surface: "Your local cursor points at update #{cursor}, but that entry is no longer in the org's update log. The log's earliest entry is #{first_id}. Either (a) reset your cursor to before #{first_id} to re-process all available updates, or (b) advance your cursor to #{latest_id} to accept the current state without reprocessing. Which would you like?" On (a): set `last_applied_update` to `null` and re-enter the task from Step 2 (all pending entries become applicable). On (b): set `last_applied_update` to the latest entry ID and exit cleanly. Do not pick a default; the choice is destructive in different ways and the member needs to make it consciously.
-
-**Authentication failure mid-Phase-1.** If any `aifs_*` call inside Phase 1 returns `NOT_AUTHENTICATED`, the auto-re-auth flow from session-start will be invoked. If auto-re-auth succeeds, retry the failing call and continue. If auto-re-auth fails: halt Phase 1 at the failed call (do not advance the cursor, do not partially-write `member-index.json`), surface "Authentication to the remote filesystem failed during Phase 1. Your local install is partially updated; the cursor has NOT advanced so the next `@ai:update` run will resume from where this one stopped. To restore the connection, say `@ai:member-bootstrap`."
-
-**Partial Phase 4 failure.** If one collection's upgrade succeeds and a subsequent collection's upgrade fails (the org-setup delegate throws, a single `aifs_read` fails, etc.), record which collections succeeded in a scratch field on `pending-update-plan.json` (collection-level granularity is fine — half-completed collections roll back to their pre-upgrade state via the `manifest_sync` no-advancement rule). Do **not** advance the cursor. Surface: "{N of M} collection upgrades applied. {failed_collection} did not upgrade: {error}. Your cursor remains at #{prior_cursor} so the next `@ai:update` run will retry. The {N} collections that did upgrade are recorded; we won't re-do them on retry."
-
-**Network errors during Step 0 (pending-plan read) or Step 5 (capability sync).** Treat as fail-safe: do not write `member-index.json`, do not advance the cursor. Surface the underlying error and the suggestion: "Network error reading {path}. Your install is unchanged. Re-run `@ai:update` when the connection is restored."
-
-**Phase 2 (CLAUDE.md) succeeds, Phase 3 (adapter bundle) fails.** The two phases write different artifacts and are independently recoverable. Phase 2's write of the new CLAUDE.md is durable as-is (the member is not in a broken state by virtue of a newer CLAUDE.md). Phase 3's adapter-bundle install failing leaves the existing local bundle in place — also a safe state. Continue with later phases (Phase 4 collection upgrades, etc.) and at the end surface: "Phase 3 (adapter bundle update from {from_v} → {to_v}) did not complete: {error_summary}. The previously-installed bundle remains active and functional. Re-run `@ai:update` once the underlying issue is resolved — the cursor has advanced past the other operations in this batch, so the next run will only retry the adapter-bundle-update."
-
-(Pre-existing truncated sentence completed in core 3.7.4 — found via preflight Check 6 mid-word truncation heuristic during release-bundle pass.)
+Never advance the cursor without completing or explicitly declining all operations in the

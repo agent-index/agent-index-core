@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.5.0
+version: 3.5.1
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -75,7 +75,7 @@ To build the catalog (revised in core 3.7.4 to close bug `20260522-8d20ea22` —
 1. Read `aifs_read("/org-config.json")` and parse `installed_collections[]`.
 2. For each entry where `status: "installed"`:
    - Skip `agent-index-core` and `agent-index-marketplace` — these are infrastructure, not user-installable capabilities.
-   - Read the collection's manifest directly via `aifs_read("/{name}/collection.json")` to get `display_name`, `category`, `description`, `version`, and the `api[]` list.
+   - Read the collection's manifest directly. **Resolve the read base (core 3.10.1):** if the `installed_collections[]` entry has a `folder_id`, read `aifs_read("id:{folder_id}/collection.json")`; otherwise fall back to `aifs_read("/{name}/collection.json")` (pre-3.10.1 installs not yet backfilled). Addressing by stored Drive ID makes the read deterministic for non-Drive-member members and immune to same-named-folder ambiguity (bug 20260606-…-db13). Extract `display_name`, `category`, `description`, `version`, and the `api[]` list.
    - The `api[]` entries name each public capability; no separate `aifs_list("/{name}/api/")` is needed (the catalog is fully described by `collection.json` itself).
 
 **Defensive read semantics** (added in 3.7.4): if any individual `aifs_read("/{name}/collection.json")` fails (NOT_FOUND, permission denied, or returns invalid JSON), do NOT halt the bootstrap. Skip that collection with a one-line notice: *"Skipped collection `{name}`: collection.json not readable ({error reason}). The collection's capabilities will not be available in this session; ask your admin to verify the install."* Continue to the next entry. This handles transitional cases where `org-config.installed_collections[]` is stale relative to the remote filesystem (e.g., between a 3.7.4 ship and the admin running publish-updates' new writeback for the first time — see bug `20260522-8d20ea22-4`'s fix in this same release), as well as any genuine drift where a collection was hand-removed from remote without updating `org-config`.
@@ -357,4 +357,4 @@ If a collection's API directory is empty (a collection is installed but has no s
 
 If the member's role has `recommended_tasks` that depend on skills not in `recommended_skills`: add the missing skills to the recommended set automatically and explain why: "I've also added {skill} because {task} requires it."
 
-If an upgrade script references a version boundary that does not exist in the remote collection's `/upgrade/` directory (checked via `aifs_exists("/{collection}/upgrade/{old-version}-to-{new-version}.md")`): treat the upgrade as a MINOR upgrade — carry all responses forward unchanged, apply the new definition, update the version. Surface a notice that the expected upgrade script was not found so the member can report it to the collection maintainer.
+If an upgrade script references a version boundary that does not exist in the remote co
