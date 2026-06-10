@@ -137,11 +137,46 @@ Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setu
 
 ---
 
-## Cache-busting directory/version fetches
+## Distribution fetch protocol (SHA-pinned)
 
-Any task that fetches a directory or version file from `raw.githubusercontent.com` (`infrastructure_directory_url`, `marketplace_directory_url`, `filesystem_adapter_directory_url`, fallback `*_version_url`, or a `zip_url`) **must append a unique cache-buster query param** — e.g. `?t={current unix epoch seconds}` (`&t=…` if the URL already has a query string).
+Any task that fetches a directory, version, or archive file from GitHub (`infrastructure_directory_url`, `marketplace_directory_url`, `filesystem_adapter_directory_url`, fallback `*_version_url`, or a `zip_url`) **must use the SHA-pinned fetch protocol** below. Bare `/main/` (branch-form) raw URLs are cache-unsafe: the fetch layer caches them by exact URL and serves stale bytes long after a push, and query-param cache-busters (`?t=…`) are **stripped on the raw redirect**, so they do not defeat the cache (bug `20260601-8d20ea22-2`, three confirmed recurrences). A stale fetch *succeeds*, so the task reports "✓ up to date" against pre-release data with no error — the most dangerous failure mode. A commit-SHA-pinned path is immutable; the cache cannot serve it stale.
 
-The fetch layer caches these responses keyed on the exact URL and serves stale bytes for a long time. Without a buster, a fetch shortly after a release silently returns pre-release content: the fetch *succeeds*, so the task reports "✓ up to date" against stale data with no error — the most dangerous failure mode, because nothing signals that an update was missed. This was bug `20260601-8d20ea22-2`; `check-updates`, `refresh-marketplace-cache`, and `publish-updates --check-upstream` were fixed in marketplace 2.9.0 / core 3.7.8. New tasks that read these URLs must follow the same rule.
+**Protocol** (replaces the cache-buster rule, marketplace 2.11.0 / core 3.11.0):
+
+1. Derive `{owner}/{repo}/{branch}/{path}` from the configured URL.
+2. Resolve the branch head SHA: `GET https://api.github.com/repos/{owner}/{repo}/commits/{branch}` → `.sha`. Cache the SHA per repo for the session (a full check-updates run needs ≤4 resolutions).
+3. Fetch `https://raw.githubusercontent.com/{owner}/{repo}/{SHA}/{path}` (for archives: `https://codeload.github.com/{owner}/{repo}/zip/{SHA}`). This result is **authoritative**.
+4. **Fallback A** — SHA resolution failed (rate limit, network): fetch `https://cdn.jsdelivr.net/gh/{owner}/{repo}@{branch}/{path}`. Different origin (defeats the local fetch-layer cache) but has its own CDN cache: label the result `source: jsdelivr-fallback` and treat it as advisory.
+5. **Fallback B** — both failed: fetch the bare raw URL, label `source: unpinned`. An unpinned result is **never sufficient** to conclude "up to date"; classify the failure (allowlist-blocked vs network) per the standard failure-shape rules and surface the degraded confidence.
+6. **Staleness comparison** (directory files): the fetched copy is newer iff `directory_version` increased, **or** `directory_version` is equal and `last_updated` is newer and the content actually differs (hash). Never key on `directory_version` alone (bug `20260607-8d20ea22-131906-d1rv`). The no-downgrade guard is unchanged and still applies to every path.
+7. Record provenance (`source`, resolved SHA) wherever fetch metadata is persisted (e.g., `cache-metadata.json`).
+
+Hosts `api.github.com` and `cdn.jsdelivr.net` are part of the canonical network allowlist for any environment running these tasks.
+
+---
+
+## File-integrity sentinel (`AIFS:FILE-END`)
+
+Tail truncation — files cut mid-content by capped or interrupted writes — has corrupted both local and remote copies (bug `20260608-8d20ea22-003039-trunc`). The sentinel standard makes completeness a property of the file itself: a stamped file that does not end with its sentinel **is truncated**, deterministically, with no heuristics.
+
+**Marker:** the logical marker is `AIFS:FILE-END`. The **last non-whitespace content** of a stamped file must be its per-format encoding:
+
+| Format | Encoding (final line / final key) |
+|---|---|
+| Markdown, plain text | `<!-- AIFS:FILE-END -->` on its own line |
+| JSON | top-level key `"_file_end": "AIFS:FILE-END"`, serialized last |
+| Shell, Python | `# AIFS:FILE-END` |
+| JavaScript | `// AIFS:FILE-END` |
+
+Trailing whitespace/newlines after the marker are permitted. JSON consumers must tolerate (ignore) the `_file_end` key; schemas that enumerate keys must allow it.
+
+**Stamped classes (v1):** collection source files (`collection.json`, `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `api/*`, `setup/*`, `internal/*`, `apps/*` scripts); core/marketplace/developer infrastructure equivalents; task-written JSON state files (`org-config.json`, `member-index.json`, manifests, `published-state.json`, `latest.json`) — stamped opportunistically whenever a task rewrites them.
+
+**Excluded:** JSONL/append-mode files (per-line parse validity is their integrity check), binary files, third-party files, member free-form content.
+
+**Adoption:** a collection opts in by declaring `"file_integrity": "sentinel-v1"` in `collection.json`. Preflight then treats a missing sentinel on a stampable file as an ERROR (WARNING for non-declaring collections). New collections scaffolded by `develop` declare it from birth. Writers re-stamp on every rewrite; the adapter's write path (gdrive ≥ 2.6.0) verifies post-write that a sentinel present in written content survived, and fails loudly if it did not.
+
+**Detection contract:** missing sentinel on a stamped file ⇒ tail truncation — re-fetch before any heal decision, and never overwrite a complete copy with a truncated one. Sentinel presence does NOT prove semantic correctness; it proves the tail arrived. Size (`aifs_stat`) checks remain appropriate for non-tail anomalies.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.7.0
+version: 3.8.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -48,7 +48,7 @@ If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` fl
 
 When `--check-upstream` is present, fetch the latest infrastructure source from GitHub before scanning local. This closes the manual `git pull` step from the admin's mental model — they say one verb and the task pulls upstream + syncs to remote + publishes.
 
-1. Read `agent-index.json` → `infrastructure_directory_url`. HTTPS GET the JSON (30s timeout), **appending a cache-buster query param** — e.g. `{infrastructure_directory_url}?t={current unix epoch seconds}` (`&t=…` if it already has a query string). **Required:** the fetch layer caches `raw.githubusercontent.com` by exact URL and serves stale bytes long after a push, so without the buster this step reads pre-release versions, concludes "all infrastructure already at upstream," and silently fails to pull a release you just made (bug `20260601-8d20ea22-2`). Also append the same buster to each entry's `zip_url` GET in step 4 so the archive pull isn't served stale. Parse.
+1. Read `agent-index.json` → `infrastructure_directory_url`. Fetch the JSON (30s timeout) **using the Distribution fetch protocol (SHA-pinned) — standards.md § "Distribution fetch protocol"**: resolve the repo's branch head SHA via `api.github.com/repos/{owner}/{repo}/commits/{branch}`, then GET `raw.githubusercontent.com/{owner}/{repo}/{SHA}/{path}`. **Required:** bare branch-form raw URLs are served from a stale fetch-layer cache and `?t=` cache-busters are **stripped on the raw redirect** (bug `20260601-8d20ea22-2`) — an unpinned fetch here reads pre-release versions, concludes "all infrastructure already at upstream," and silently fails to pull a release you just made. If SHA resolution fails, follow the protocol's fallback ladder (jsdelivr → bare URL); a fallback-sourced result is advisory and is **never sufficient** to conclude "already at upstream." Parse.
 2. For each entry in `infrastructure[]` (currently: `agent-index-core`, `agent-index-marketplace`):
    - Read the local `<project_dir>/<entry-name>/collection.json` → `version` field. If the directory or file is missing locally, treat the local version as "absent."
    - Compare against the directory's `current_version`.
@@ -66,7 +66,7 @@ When `--check-upstream` is present, fetch the latest infrastructure source from 
    ```
 
 4. **Response handling:**
-   - `[a]ll` (or `--all` flag passed at invocation, which auto-answers `a`): pull every candidate without further prompts. Per-entry: HTTPS GET the `zip_url`, save to `<project_dir>/.agent-index/staging/upstream-fetch-<timestamp>/`, extract, then **overwrite the local `<project_dir>/<entry-name>/` directory contents** with the extracted files. Preserve any `.git/` directory present locally. Apply LF normalization to all text-shaped files (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`) before writing — same logic as Step 0 (closes bug `20260504-8d20ea22-7` in this code path too).
+   - `[a]ll` (or `--all` flag passed at invocation, which auto-answers `a`): pull every candidate without further prompts. Per-entry: GET the archive **at the SHA resolved in step 1** — rewrite the `zip_url` to its SHA-pinned form, `https://codeload.github.com/{owner}/{repo}/zip/{SHA}`, so the archive pull cannot be served stale (Distribution fetch protocol, standards.md) — save to `<project_dir>/.agent-index/staging/upstream-fetch-<timestamp>/`, extract, then **overwrite the local `<project_dir>/<entry-name>/` directory contents** with the extracted files. Preserve any `.git/` directory present locally. Apply LF normalization to all text-shaped files (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`) before writing — same logic as Step 0 (closes bug `20260504-8d20ea22-7` in this code path too).
    - `[s]elect`: for each candidate, ask `Pull <name> <local_version> → <directory_version>? [Y/N]`. Y → pull as above. N → skip this entry.
    - `[n]one`: skip all upstream pulls. Halt with "No fetch performed. Re-run without --check-upstream to publish whatever is currently local, or run with --check-upstream again when ready to fetch upstream." (Don't proceed to Step 0 — admin clearly didn't want any of this.)
 
@@ -515,9 +515,17 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 ---
 
-### Step 7: Confirm to Admin
+### Step 7: Verify Propagation, Then Confirm to Admin
 
-After both Step 5 and Step 6 succeed, surface confirmation:
+**Propagation check (added in core 3.11.0 — closes the "pushed ≠ visible" class structurally).** If this publish involved any upstream listing change (directory files in `agent-index-resource-listings`: infrastructure, marketplace, adapter, or binary directories — whether pushed in this session or assumed pushed beforehand), verify the org-visible state BEFORE reporting success:
+
+1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — standards.md.
+2. Confirm the fetched copy advertises the versions just published (and that `directory_version` itself was bumped — a listing content change under an unchanged `directory_version` is invisible to consumers; see bug `20260607-8d20ea22-131906-d1rv`).
+3. If the fetched copy does NOT reflect the publish: **the publish report must say so as a failure**, naming the stale or unbumped file. Do not report overall success. Typical causes: the listing push was missed, or `directory_version` wasn't bumped. Direct the admin to push/bump and re-run the check.
+
+If no listing was touched, skip the propagation check.
+
+After Step 5, Step 6, and the propagation check succeed, surface confirmation:
 
 > "Update instructions published (entry #{id}). Members will see these on their next session start and can apply them with '@ai:update'."
 >
@@ -559,16 +567,4 @@ Never modify collection directories or any file outside the documented write sur
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
 
-Never auto-publish. The admin must confirm every publish action. The `--dry-run` flag exists for admins who want to preview before committing.
-
-### Edge Cases
-
-If `published-state.json` exists but is malformed: surface the issue. Offer to rebuild from current state (treating everything as new), or halt for manual inspection. Do not silently overwrite a corrupted file without the admin's decision.
-
-If the update log has entries but `published-state.json` is missing (file was deleted but log remains): the log is still valid. Reconstruct the baseline from the last log entry's operations (best-effort) or treat everything as new. Surface this to the admin.
-
-If the admin runs `publish-updates` twice in rapid succession without making any org changes between runs: Step 3 produces no operations. Surface "Nothing has changed since the last publish" and halt. Do not create empty log entries.
-
-If a collection on the remote filesystem has a `collection.json` that cannot be parsed: skip that collection in the diff, surface a notice to the admin, and continue with the remaining collections. Do not block the entire publish on one unreadable collection.
-
-If the admin has made changes to the local project directory but hasn't pushed them to the remote filesystem (e.g., updated CLAUDE.md locally but not uploaded it): the diff will detect the CLAUDE.md hash change based on the local file. This is correct — the admin is responsible for ensuring the remote state is current before publishing. Surface a reminder: "The update instructions reflect your local state. Make sure all changes have been pushed to the remote filesystem before members apply updates."
+Never auto-publish. The admin must confirm every publish action. The `--dry-run` f

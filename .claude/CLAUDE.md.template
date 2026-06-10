@@ -162,7 +162,7 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'
 ```
 
-**Available tools:** `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_stat`, `aifs_delete`, `aifs_copy`, `aifs_get_permissions`, `aifs_auth_status`, `aifs_authenticate`
+**Available tools:** `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_stat`, `aifs_delete`, `aifs_copy`, `aifs_get_permissions`, `aifs_search`, `aifs_auth_status`, `aifs_authenticate`
 
 `aifs_get_permissions` (read-only) is directly callable by any task — use it to inspect ACLs and as the independent-verification step of the verified-outcome gate. The permission-MODIFYING ops (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are NOT called directly; they are applied through the `permission-change-helper` skill (owner-reviewed, applied under the user's own credentials).
 

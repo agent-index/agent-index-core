@@ -27,13 +27,19 @@
     },
     {
       "host": "api.github.com",
-      "purpose": "Collection directory lookup via GitHub API",
+      "purpose": "Collection directory lookup via GitHub API; branch-head SHA resolution for the Distribution fetch protocol (SHA-pinned fetches, core 3.11.0 — standards.md)",
       "required": true,
       "tested_by": "setup-time-reachability-check"
     },
     {
       "host": "codeload.github.com",
-      "purpose": "Collection zip archive downloads (github.com redirects archive URLs here). Added in core 3.7.3 to close bug 20260515-8d20ea22.",
+      "purpose": "Collection zip archive downloads (github.com redirects archive URLs here; SHA-pinned archive pulls fetch codeload.../zip/{SHA} directly). Added in core 3.7.3 to close bug 20260515-8d20ea22.",
+      "required": true,
+      "tested_by": "setup-time-reachability-check"
+    },
+    {
+      "host": "cdn.jsdelivr.net",
+      "purpose": "Fallback origin for directory fetches when GitHub API SHA resolution is unavailable (Distribution fetch protocol Fallback A, core 3.11.0). Advisory-quality results; see standards.md.",
       "required": true,
       "tested_by": "setup-time-reachability-check"
     }

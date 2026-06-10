@@ -1,5 +1,20 @@
 # Agent-Index Core — Changelog
 
+## [3.11.0] — 2026-06-09 — Platform Reliability: SHA-pinned distribution fetches + file-integrity sentinel standard
+
+Release record: core-improvements `releases/platform-reliability/`. Closes the core half of bug `20260601-8d20ea22-2` (4th recurrence); partially addresses `20260608-8d20ea22-003039-trunc` (prevention/detection); completes doc3 (`20260608-8d20ea22-184519-doc3`).
+
+### Added
+- **standards.md § "Distribution fetch protocol (SHA-pinned)"** — replaces the cache-buster rule. All directory/version/archive fetches resolve the branch head SHA via `api.github.com`, then fetch the immutable SHA-pinned raw/codeload path. Fallback ladder: jsdelivr (advisory) → bare URL (never sufficient for "up to date"). Content-signal staleness comparison (never `directory_version` alone). Rationale: `?t=` busters are stripped on the raw redirect; three confirmed recurrences.
+- **standards.md § "File-integrity sentinel (`AIFS:FILE-END`)"** — stamped files carry a per-format end marker (MD comment / reserved `_file_end` JSON key / script comment; JSONL excluded); missing sentinel on a stamped file = tail truncation, deterministically. Collections opt in via `"file_integrity": "sentinel-v1"` in collection.json. Adapter gdrive ≥ 2.6.0 verifies sentinel survival post-write.
+- `templates/network-allowlist.template.json`: `cdn.jsdelivr.net` added (Fallback A origin); `api.github.com` purpose updated for SHA resolution.
+- `org-config-schema.json`: reserved `_file_end` key documented and allowed.
+
+### Changed
+- **publish-updates 3.8.0**: Step 0a items 1 and 4 use the SHA-pinned protocol (directory fetch + archive pull at the resolved SHA). New Step 7 propagation check: after a listing-touching publish, re-fetch SHA-pinned and confirm the org-visible directory advertises the published versions and that `directory_version` was bumped — report failure otherwise ("pushed ≠ visible" closed structurally).
+- **apply-updates 3.10.0**: Step 1.6 binary pin sync fetches the infrastructure directory via the SHA-pinned protocol (replaces cache-buster + `/main/` short-form guidance); fallback-sourced results cannot conclude a pinned binary is current.
+- `.claude/CLAUDE.md.template`: available-tools list now includes `aifs_search` (completes the doc3 fix; `aifs_get_permissions` + helper-mediated ops note shipped in 3.10.1). Triggers bootstrap regeneration on publish.
+
 ## [3.10.1] — 2026-06-08 — collection access by stored folder_id (Option B) + admin-gated backfill
 
 ### Fixed / Changed

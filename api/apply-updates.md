@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.9.2
+version: 3.10.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -110,7 +110,7 @@ Moved out of Phase 1 in 3.9.0 (closes finding F11): binary pins are changed by `
 
 This step is **self-contained** — it does not depend on any cache produced by other steps:
 
-1. Fetch `infrastructure-directory.json` from the URL in `agent-index.json` → `infrastructure_directory_url` (NOT a local file or remote-filesystem path; apply the cache-buster, and prefer the `/main/` short-form URL — `refs/heads/main` raw URLs strip query params, finding F7).
+1. Fetch `infrastructure-directory.json` from the URL in `agent-index.json` → `infrastructure_directory_url` (NOT a local file or remote-filesystem path). Use the **Distribution fetch protocol (SHA-pinned)** — standards.md § "Distribution fetch protocol" (core 3.11.0; replaces the cache-buster + `/main/` short-form guidance, which the redirect cache defeats — bug `20260601-8d20ea22-2`). A fallback-sourced (non-pinned) result must not be used to conclude a pinned binary is current.
 2. Read `org-config.json` → `binaries{}` (remote). For each binary pinned there, run the reconcile flow defined in Phase 1 step 7 (version_file comparison, platform lookup, sha256-verified download with explicit user approval, post-install command).
 3. If local matches the pin: silent (or one summary line). If no binaries are pinned: silent.
 
@@ -572,6 +572,4 @@ The merge algorithm in Step 3 must produce a correct net plan regardless of how 
 
 Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
 
-Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
-
-Never advance the cursor without completing or explicitly declining all operations in the
+Never skip the plan presentati
