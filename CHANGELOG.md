@@ -1,5 +1,9 @@
 # Agent-Index Core — Changelog
 
+## [3.11.1] — 2026-06-10 — repair: tail truncations introduced in 3.11.0
+
+The 3.11.0 release commits contained tail-truncated capability specs — a mount-mediated read-modify-write during version restamping wrote stale truncated views back to disk (FCI-1 class; see bug 20260608-8d20ea22-003039-trunc and release record platform-reliability/build-record.md). 3.11.1 splices the complete pre-release tails back under the 3.11.0 content edits, verified byte-exact against the pre-release endings, and stamps the repaired files with AIFS:FILE-END sentinels. No behavioral changes beyond 3.11.0.
+
 ## [3.11.0] — 2026-06-09 — Platform Reliability: SHA-pinned distribution fetches + file-integrity sentinel standard
 
 Release record: core-improvements `releases/platform-reliability/`. Closes the core half of bug `20260601-8d20ea22-2` (4th recurrence); partially addresses `20260608-8d20ea22-003039-trunc` (prevention/detection); completes doc3 (`20260608-8d20ea22-184519-doc3`).

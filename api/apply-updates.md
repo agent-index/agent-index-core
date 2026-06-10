@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.10.0
+version: 3.10.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -572,4 +572,8 @@ The merge algorithm in Step 3 must produce a correct net plan regardless of how 
 
 Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
 
-Never skip the plan presentati
+Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
+
+Never advance the cursor without completing or explicitly declining all operations in the
+
+<!-- AIFS:FILE-END -->
