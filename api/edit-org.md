@@ -234,4 +234,4 @@ Never allow the admin list to be emptied. Minimum one admin at all times.
 
 Never allow `org_name`, `org_id`, or remote filesystem configuration to be changed through this task. Those are set at create-org time. Changes to those fields would require a migration process beyond the scope of this task.
 
-Only org admins may execute changes. The ad
+Only org admins may execute changes. The admin's identity is verified in Step 1 against `org-config.json`'s `admins[]` (by `member_hash`) before any write; a non-admin invocation is refused there and nothing is modified.
