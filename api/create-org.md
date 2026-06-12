@@ -192,7 +192,7 @@ Before proceeding, verify that ALL domains needed for setup are reachable from t
 
 6. **If `blocked_required` is non-empty:** Proceed to the allowlisting flow below. Surface each blocked host along with its `purpose` annotation from the canonical file so the admin understands what each host is for.
 
-For documentation purposes, the canonical file currently enumerates the following infrastructure hosts: `raw.githubusercontent.com`, `github.com`, `api.github.com`, `codeload.github.com` (the last added in core 3.7.3 to close bug `20260515-8d20ea22`). Telemetry: derived dynamically from `log_collector_url`. Backend (gdrive): `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`. Other backends (OneDrive, S3) are not enumerated in the canonical file; their hosts come from each adapter's `adapter.json`. Reading directly from the canonical file is the source of truth; this paragraph is a snapshot at the time of authoring.
+For documentation purposes, the canonical file currently enumerates the following infrastructure hosts: `raw.githubusercontent.com`, `github.com`, `api.github.com`, `codeload.github.com` (added in core 3.7.3 to close bug `20260515-8d20ea22`), `cdn.jsdelivr.net` (added in core 3.11.0 as the Distribution fetch protocol's fallback origin). Telemetry: derived dynamically from `log_collector_url`. Backend (gdrive): `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`. Other backends (OneDrive, S3) are not enumerated in the canonical file; their hosts come from each adapter's `adapter.json`. **Reading directly from the canonical file is the source of truth — never act on this snapshot paragraph; it exists only so a human reader knows roughly what to expect** (kept current by preflight reviews, not guaranteed).
 
 **If all domains are reachable:** Proceed to Step 3c.
 
@@ -218,7 +218,7 @@ For documentation purposes, the canonical file currently enumerates the followin
     }
   },
   "required_domains": {
-    "infrastructure": ["raw.githubusercontent.com"],
+    "infrastructure": ["{ALL infrastructure[] hosts from agent-index-core/templates/network-allowlist.template.json — the canonical list; NEVER hardcode a subset here (bug 20260515-8d20ea22)}"],
     "backend": ["{domain1}", "{domain2}", "..."],
     "telemetry": ["{log_collector_hostname, if configured}"]
   },
@@ -328,7 +328,7 @@ Place the files at their final locations:
     }
   },
   "required_domains": {
-    "infrastructure": ["raw.githubusercontent.com"],
+    "infrastructure": ["{ALL infrastructure[] hosts from agent-index-core/templates/network-allowlist.template.json — the canonical list; NEVER hardcode a subset here (bug 20260515-8d20ea22)}"],
     "backend": ["{domain1}", "{domain2}", "..."],
     "telemetry": ["{log_collector_hostname, if configured}"]
   },
@@ -837,6 +837,13 @@ If the admin accepts: invoke the `upload-install-log` task. It handles reading t
 If the admin declines: accept gracefully. "No problem. The log is saved locally at `.agent-index/logs/{log_filename}` if you want to review or upload it later with '@ai:upload-install-log'."
 
 If `log_collector_url` or `log_collector_api_key` is not configured in `agent-index.json`: skip this step silently. The upload infrastructure is not yet set up.
+
+**Telemetry key choice (added core 3.11.2 — distribution decision D3, deploy-readiness release record).** Before the first upload offer of a new org install, surface the telemetry identity explicitly rather than silently inheriting the template value:
+
+> "Diagnostics uploads are configured with the **community key** (the default shipped with agent-index). If your organization was issued its own key, I can set it now; you can also disable telemetry entirely."
+> Options: keep community key / enter org key (writes `log_collector_api_key` in `agent-index.json`) / disable (clears `log_collector_url`; upload steps then skip silently).
+
+Paying customer orgs receive their own key from Agent Index Inc; the community key remains the default for free installs. The override is plain per-install config — no code path differs by key.
 
 ---
 

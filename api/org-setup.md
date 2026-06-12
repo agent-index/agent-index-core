@@ -176,7 +176,34 @@ For each skill and task in the determined installation order:
    - Pre-fill `[role-suggested]` parameters with role defaults — present to member for confirmation
    - Present `[member-overridable]` parameters with their defaults — invite changes
    - Ask for `[member-defined]` required parameters — these must be provided before completing setup
-8. Write `setup-responses.md` with all collected values
+8. Write `setup-responses.md` with all collected values, in the **canonical setup-responses format** (normative as of core 3.11.2 — closes bug `20260530-8d20ea22`; `apply-updates` Phase 4.5 step 9 machine-parses exactly this shape):
+
+   ```markdown
+   ---
+   capability: {name}
+   collection: {collection}
+   capability_version: {version from the .md frontmatter}
+   completed: {YYYY-MM-DD, or "partial"}
+   ---
+
+   ## Org-Mandated Parameters (from collection setup)
+
+   ### {param_name}
+   - **Value:** {value}
+
+   ## Role-Suggested Parameters
+
+   ### {param_name}
+   - **Value:** {value as confirmed or changed by the member}
+
+   ## Member Parameters
+
+   ### {param_name}
+   - **Value:** {value}
+   - **Provenance:** member-overridable | member-defined
+   ```
+
+   **Format rules (normative):** one `###` block per parameter; the `- **Value:**` line is REQUIRED and machine-parsed — keep the value on that single line (JSON-encode multi-line or structured values). All three `##` section headings MUST be present even when a section has no parameters — an absent `## Org-Mandated Parameters` section is treated as total drift by apply-updates Phase 4.5 step 9 and triggers re-injection. The heading may carry trailing parenthetical text; parsers match on the `## Org-Mandated Parameters` prefix. The org-level `collection-setup-responses.md` (written in Phase 2, stored at `/{collection}/setup/collection-setup-responses.md`) uses the same `### {param_name}` + `- **Value:**` shape under a single `## Org-Mandated Parameters` heading. A partial interview (member exits mid-setup) writes the same format with `completed: partial` — see Edge Cases.
 9. Write the personalized installed instance to the member workspace
 10. Write `manifest.json` with version, provenance, parameter provenance map, and dependency status
 11. Write the entry to `member-index.json`:
@@ -357,4 +384,8 @@ If a collection's API directory is empty (a collection is installed but has no s
 
 If the member's role has `recommended_tasks` that depend on skills not in `recommended_skills`: add the missing skills to the recommended set automatically and explain why: "I've also added {skill} because {task} requires it."
 
-If an upgrade script references a version boundary that does not exist in the remote co
+If an upgrade script references a version boundary that does not exist in the remote collection's `/upgrade/` directory (e.g., a chain step like `2-to-3.md` is implied by the version jump but the file is absent): do not guess and do not run a partial chain. Surface the inconsistency, install the capability at its current published version without running the broken upgrade chain, and direct the member to notify the org admin — the collection's upgrade chain is out of sync with its published versions and needs an author-side fix.
+
+<!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
+
+<!-- AIFS:FILE-END -->

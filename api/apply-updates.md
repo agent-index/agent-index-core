@@ -574,6 +574,8 @@ Never modify any file on the remote filesystem. This task reads from remote — 
 
 Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
 
-Never advance the cursor without completing or explicitly declining all operations in the
+Never advance the cursor without completing or explicitly declining all operations in the merged plan. If the session must end mid-plan (adapter restart, interruption), write `pending-update-plan.json` with the remaining operations (Step 1's resume path) and leave the cursor unmoved — the cursor advances only when the plan is fully resolved.
+
+<!-- RECONSTRUCTED 2026-06-10: final-sentence completion of a tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); reviewed and approved by Bill. -->
 
 <!-- AIFS:FILE-END -->

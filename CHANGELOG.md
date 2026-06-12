@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.11.2] — 2026-06-12 — Deploy Readiness: truncation reconstructions + onboarding hardening + SHA-resolution amendment
+
+Release record: core-improvements releases/deploy-readiness/. Closes bugs 20260530-8d20ea22 (setup-responses format now normative), 20260527-8d20ea22-4 (path fix verified shipped 3.7.6 — closed with evidence), 20260515-8d20ea22 (allowlist single-sourced; create-org examples defer to the canonical template), 20260522-8d20ea22 (closed by live non-member probe; residual filed as 20260612-rootsilent); amends 20260610-8d20ea22-sharesolve (protocol step 2 resolution hardening).
+
+### Fixed
+- org-setup, remove-member, verify-workspace-policy: tail truncations RECONSTRUCTED (reviewed; inline provenance notes), sentinel-stamped. apply-updates: final Constraints sentence completed (3.10.x patch).
+- org-setup step 8: canonical setup-responses.md format specified normatively (frontmatter + three required section headings + machine-parsed Value lines) — apply-updates Phase 4.5 step 9 and org-setup now share one written contract.
+- create-org: install-state examples no longer hardcode host subsets (defer to network-allowlist.template.json); doc snapshot updated + marked non-actionable; NEW telemetry key choice at setup (community key / org-issued key / disable) per distribution decision D3.
+
+### Changed
+- standards.md § Distribution fetch protocol step 2: SHA resolution via commits-LIST endpoint + nonce (single-commit + buster form forbidden — redirect-stripped in proxied envs, bug 20260610-sharesolve); new step 2a jsdelivr freshness cross-check.
+
 ## [3.11.1] — 2026-06-10 — repair: tail truncations introduced in 3.11.0
 
 The 3.11.0 release commits contained tail-truncated capability specs — a mount-mediated read-modify-write during version restamping wrote stale truncated views back to disk (FCI-1 class; see bug 20260608-8d20ea22-003039-trunc and release record platform-reliability/build-record.md). 3.11.1 splices the complete pre-release tails back under the 3.11.0 content edits, verified byte-exact against the pre-release endings, and stamps the repaired files with AIFS:FILE-END sentinels. No behavioral changes beyond 3.11.0.

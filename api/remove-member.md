@@ -168,4 +168,8 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 
 - **Email is not in the registry.** Surface clearly and stop. Don't attempt fuzzy matching — the admin should re-check the email.
 - **Member is mid-task.** Removal does not interrupt any task the departing member is currently running in their own session. Their next session-start will fail at the registry-membership check and surface the standard "You're not registered with this org" path. (This is correct behavior — they've been removed.)
-- **Two admins removing the same member concurrently.** Revision-aware wri
+- **Two admins removing the same member concurrently.** Revision-aware writes protect the registry: the second admin's `aifs_write` carries `if_revision` and fails with `REVISION_CONFLICT`. On conflict, re-read the registry, observe the member is already removed, and report "already removed by another admin" — do NOT retry the removal and do NOT re-run the Step 2.5 unshare ops (the first admin's flow owns them; the helper ops are idempotent but a second Accept would be redundant ceremony).
+
+<!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
+
+<!-- AIFS:FILE-END -->

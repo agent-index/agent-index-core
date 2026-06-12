@@ -148,4 +148,8 @@ If any direct check failed: surface specific remediation steps for each.
 ### Edge Cases
 
 - **Brand-new install, /CLAUDE.md not yet published.** Step 4 falls back to `/org-config.json` (always present) instead.
-- **Admin runs this from an account that's not
+- **Admin runs this from an account that's not a Google Workspace admin** (an org-config admin without Workspace Admin Console rights): the automated probes still run — they need only agent-index-level read access — but the manual-check checklist items that require the Admin Console must be delegated to Workspace IT; mark those items "needs delegation" in the report rather than failed.
+
+<!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
+
+<!-- AIFS:FILE-END -->
