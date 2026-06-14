@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.1.1
+version: 3.2.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -150,10 +150,14 @@ Based on the selection, collect backend-specific connection config:
 - Ask for the OAuth client secret (`client_secret`) — required for the OAuth flow. Provide guidance: "Copy the client secret from the same OAuth credentials page in Google Cloud Console."
 
 **Microsoft OneDrive/SharePoint:**
-- Ask for the Azure AD tenant ID — the admin's Microsoft 365 organization ID. Provide guidance: "You can find this in the Azure Portal under Azure Active Directory → Overview → Tenant ID. If your org uses Microsoft 365, your IT admin can provide it. Use 'common' for multi-tenant apps."
-- Ask for the Azure AD client ID — the admin must register an app in Azure Portal. Provide guidance: "Register an app in Azure Portal → App registrations → New registration. Set redirect URI to 'http://localhost:3939/callback' (type: Web). Under API permissions, add Microsoft Graph → Files.ReadWrite.All and User.Read (delegated). Copy the Application (client) ID."
-- Optionally ask for the drive ID — if using a specific OneDrive or SharePoint document library. Leave blank to use the authenticated user's default OneDrive.
-- Optionally ask for the site ID — if targeting a SharePoint site. Provide guidance: "For SharePoint, you can find the site ID via the Graph API or SharePoint admin center."
+
+Topology note to set expectations: a SharePoint document library is the org's shared root (everyone reads/writes the org tree there); each member's personal OneDrive becomes their private space automatically at their own bootstrap. A personal OneDrive cannot serve as the shared org root, so any multi-member org should use a SharePoint site.
+
+- Ask for the Azure AD (Entra) tenant ID — the admin's Microsoft 365 organization ID. Provide guidance: "Entra admin center → Overview → Tenant ID. Your IT admin can provide it."
+- Ask for the Azure AD application (client) ID — the admin registers a **public client** app. Provide guidance: "Entra → App registrations → New registration. Under Redirect URI, choose platform **Mobile and desktop applications** and enter **`http://localhost:3939/`**. Then go to Authentication → Advanced settings and set **'Allow public client flows' → Yes** (this is off by default and sign-in fails without it). Under API permissions add Microsoft Graph **delegated** permissions: `User.Read`, `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `offline_access`, then Grant admin consent. Copy the Application (client) ID. **Do NOT create a client secret** — this adapter is a public client (PKCE)."
+- Ask for the SharePoint site URL (recommended for any multi-member org) — Provide guidance: "Paste the document-library site URL, e.g. `https://contoso.sharepoint.com/sites/YourSite`. The site_id and drive_id are resolved automatically after you sign in (Step 4) — you don't need to find those GUIDs by hand. Leave blank only for a single-user / personal-OneDrive setup."
+
+Note: OneDrive collects `tenant_id`, `client_id`, and (optional) `site_url` — **no client secret**. `site_id`/`drive_id` are not entered by hand; they are derived from `site_url` after authentication (Step 4). If `site_url` is blank, the member's default OneDrive is the root.
 
 **Amazon S3:**
 - Ask for the S3 bucket name. Provide guidance: "Enter the name of the S3 bucket that will store your org's agent-index files. The bucket must already exist and the admin must have read/write access."
@@ -389,6 +393,8 @@ This step runs in the new session (Phase 3). The `agent-index.json` and `.claude
 - For other errors: surface the error message and offer to retry.
 
 Do not proceed without successful authentication — every subsequent step depends on remote access.
+
+**OneDrive/SharePoint — resolve the site after authentication:** if the backend is `onedrive` and a `site_url` was collected in Step 3, now resolve it to the connection IDs (this needs the token, which is why it happens here rather than in Step 3). Call `aifs_resolve_site` with `{"site_url": "<the collected URL>"}`. On success it returns `site_id`, `drive_id`, `site_web_url`, and `drive_name`: set `connection.site_id` and `connection.drive_id` to the returned values and confirm to the admin: "Resolved SharePoint library '{drive_name}' at {site_web_url}." On failure (`INVALID_ARGS` for a malformed URL, or a Graph error), surface it and offer the manual fallback: ask the admin to paste `site_id` and `drive_id` directly. If no `site_url` was provided (single-user/personal-OneDrive), leave both blank — the member's default OneDrive is the root. (This sub-step is a no-op for gdrive and S3.)
 
 **On success:** Proceed to Step 5.
 

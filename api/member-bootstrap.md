@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.2.0
+version: 3.3.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -192,7 +192,9 @@ If any of these directories already exist: skip creation, do not overwrite.
 
 **Ensure the member's private remote space — "ensure-my-drive-space" subroutine** (reworked in core 3.9.0; this is the canonical definition, referenced by org-setup and apply-updates):
 
-The member's private remote space is a folder named `Agent-Index-Private` **in the member's own My Drive** — created with the member's own credentials, owned by the member. It is NOT on the org Shared Drive (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see standards.md § "Addressing").
+The member's private remote space is a folder named `Agent-Index-Private` **in the member's own personal space** — their My Drive on Google Drive, or their OneDrive on Microsoft 365 — created with the member's own credentials, owned by the member. It is NOT on the org's shared root (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see standards.md § "Addressing"). On all backends the space is addressed by the backend-neutral `id:root/...` anchor, which resolves to the member's own personal drive.
+
+**Not-provisioned handling (OneDrive):** a member's OneDrive does not exist until they have signed in to office.com at least once. If any step below returns `NOT_PROVISIONED` (top-level `needs_provision: true`), stop and tell the member: *"Your OneDrive isn't set up yet — sign in once at office.com, open OneDrive, then re-run setup."* Do not retry automatically. (Google Drive and S3 never emit this; the branch is inert for them.)
 
 1. `aifs_exists("id:root/Agent-Index-Private")`. If missing, create it:
    `aifs_write("id:root/Agent-Index-Private/.keep", "Agent-index private member space — created {date}")`.

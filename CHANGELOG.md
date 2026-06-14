@@ -1,5 +1,16 @@
 # Agent-Index Core — Changelog
 
+## [3.12.0] — 2026-06-13 — M365 install wiring (create-org + member-bootstrap)
+
+Release record: core-improvements releases/ms365-adapter/ (06 solution design, 07 tech design). Ships org-setup/member-bootstrap support for the Microsoft OneDrive/SharePoint backend so an M365 org installs by interview, not hand-edited config. Pairs with onedrive adapter 2.0.1 + filesystem framework 2.1.0.
+
+### Changed
+- create-org 3.1.1 → 3.2.0: OneDrive app-registration guidance corrected to the public-client reality the adapter implements — register as **Mobile and desktop applications**, redirect `http://localhost:3939/`, **"Allow public client flows" → Yes** (required, non-default), delegated Graph `User.Read`/`Files.ReadWrite.All`/`Sites.ReadWrite.All`/`offline_access`, **no client secret**. Admin now provides a SharePoint **site URL** instead of opaque GUIDs; `site_id`/`drive_id` are resolved automatically after authentication (Step 4) via the onedrive adapter's `aifs_resolve_site` helper. Topology note added (SharePoint library = shared root; member OneDrive = private space).
+- member-bootstrap 3.2.0 → 3.3.0: the ensure-space subroutine surfaces the framework `NOT_PROVISIONED` error with a "sign in to office.com once" message for a member whose OneDrive isn't provisioned yet; member-facing language generalized from "My Drive" to "your personal space / OneDrive". The `id:root/Agent-Index-Private` mechanic is unchanged and backend-neutral.
+
+### Notes
+- No change to existing Google Drive or S3 orgs — all edits are additive within the OneDrive branch / inert error handling.
+
 ## [3.11.2] — 2026-06-12 — Deploy Readiness: truncation reconstructions + onboarding hardening + SHA-resolution amendment
 
 Release record: core-improvements releases/deploy-readiness/. Closes bugs 20260530-8d20ea22 (setup-responses format now normative), 20260527-8d20ea22-4 (path fix verified shipped 3.7.6 — closed with evidence), 20260515-8d20ea22 (allowlist single-sourced; create-org examples defer to the canonical template), 20260522-8d20ea22 (closed by live non-member probe; residual filed as 20260612-rootsilent); amends 20260610-8d20ea22-sharesolve (protocol step 2 resolution hardening).
