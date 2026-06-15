@@ -1,5 +1,19 @@
 # Agent-Index Core — Changelog
 
+## [3.12.1] — 2026-06-14 — M365 install reliability (post-first-install fixes)
+
+Release record: core-improvements releases/ms365-adapter/ (09 retro, 10 next-build proposal). Build A reliability patch from the first real-world M365 install. Pairs with filesystem framework 2.2.0 + onedrive adapter 2.0.2.
+
+### Fixed (create-org 3.2.0 → 3.2.1)
+- **Post-auth content-host reachability gate (Step 4):** after site resolution, derive and reachability-test the tenant content hosts (`{tenant}.sharepoint.com`, `{tenant}-my.sharepoint.com`) — content reads and >4MB uploads redirect there, and Step 3b can't test them pre-auth. Halts with allowlist guidance instead of letting Step 5's read be the discovery (bug 20260614-8d20ea22-sphost).
+- **Backends without share ops no longer silently no-op (Step 4.5):** on OneDrive (share pending), create-org now explicitly instructs the admin to grant access via SharePoint site membership and records the gap, rather than skipping the all-members grant silently (bug 20260614-8d20ea22-spacl, interim; full provisioning is the ACL fast-follow).
+- **Large/binary uploads documented as default (Step 9, 12):** use `content_file` + `encoding:base64` (upload session for >4MB) — not the inline `content` arg, which hits the shell arg-size cliff on big files.
+- **Continuous install logging:** logging is now explicitly resume-aware and gap-free through completion; `completed_steps` is append-only/contiguous (bug 20260614-8d20ea22-loggap).
+- **Bootstrap zip built off-mount (Step 12):** build in a `mktemp` scratch dir (the mounted folder forbids zip's rename/unlink) and upload via `content_file`.
+
+### Notes
+- No change to existing Google Drive or S3 orgs — all edits are within OneDrive branches or backend-agnostic hardening.
+
 ## [3.12.0] — 2026-06-13 — M365 install wiring (create-org + member-bootstrap)
 
 Release record: core-improvements releases/ms365-adapter/ (06 solution design, 07 tech design). Ships org-setup/member-bootstrap support for the Microsoft OneDrive/SharePoint backend so an M365 org installs by interview, not hand-edited config. Pairs with onedrive adapter 2.0.1 + filesystem framework 2.1.0.

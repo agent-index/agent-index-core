@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.2.0
+version: 3.2.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -396,6 +396,8 @@ Do not proceed without successful authentication — every subsequent step depen
 
 **OneDrive/SharePoint — resolve the site after authentication:** if the backend is `onedrive` and a `site_url` was collected in Step 3, now resolve it to the connection IDs (this needs the token, which is why it happens here rather than in Step 3). Call `aifs_resolve_site` with `{"site_url": "<the collected URL>"}`. On success it returns `site_id`, `drive_id`, `site_web_url`, and `drive_name`: set `connection.site_id` and `connection.drive_id` to the returned values and confirm to the admin: "Resolved SharePoint library '{drive_name}' at {site_web_url}." On failure (`INVALID_ARGS` for a malformed URL, or a Graph error), surface it and offer the manual fallback: ask the admin to paste `site_id` and `drive_id` directly. If no `site_url` was provided (single-user/personal-OneDrive), leave both blank — the member's default OneDrive is the root. (This sub-step is a no-op for gdrive and S3.)
 
+**OneDrive/SharePoint — post-auth content-host reachability gate:** the Step 3b reachability check could only test `graph.microsoft.com` and `login.microsoftonline.com`, but file content reads and >4MB uploads 302-redirect to the **tenant content host**, which isn't knowable until the site is resolved (just above). Derive it now from the resolved `site_web_url` / tenant: `{tenant}.sharepoint.com` and `{tenant}-my.sharepoint.com` (e.g. `contoso.sharepoint.com`, `contoso-my.sharepoint.com`). Test each through the proxy CONNECT tunnel (same method as Step 3b). If either is `blocked-by-allowlist`, **halt** with: "Add these to your Cowork network allowlist, then start a new session and resume: `{tenant}.sharepoint.com`, `{tenant}-my.sharepoint.com` (or `*.sharepoint.com`). These carry file content reads and large uploads — Step 5 will fail without them." Do not proceed to Step 5 until both resolve. (No-op for gdrive/S3.) This closes the gap where a blocked content host was discovered only by Step 5's read failing (bug `20260614-8d20ea22-sphost`).
+
 **On success:** Proceed to Step 5.
 
 ---
@@ -586,6 +588,12 @@ If the template file is missing for any reason, fall back to generating the file
 
 4.5. **Grant `all@{org_domain}` reader access on the three root-level org-readable files** (added in core 3.7.6 to close the spec half of bug `20260527-8d20ea22-3` — every non-admin member needs read access to these files; pre-3.7.6 the grants had to be applied manually).
 
+**Backend without share ops (e.g. OneDrive/SharePoint today — do NOT silently skip):** first check the adapter's `supported_operations`. If `share` is NOT supported (onedrive 2.0.x lists it in `supported_operations_pending`), the per-file grants below cannot run. **Do not quietly no-op** — on SharePoint, read access is governed by **site membership**, and nothing in setup provisions that yet (the ACL fast-follow will). Surface this explicitly to the admin and record it in the install log, then continue:
+
+> "This backend doesn't support per-file sharing yet, so I can't grant all-members read access on the org files automatically. On SharePoint, members get access by being **members of the site** (`{site_web_url}`). Add your members to that site (SharePoint admin center → the site → Members), and they'll be able to read the org config and collections. Automated all-members provisioning will land with the adapter's ACL update. You, as the site owner, are unaffected."
+
+Record `all_members_access: "manual-site-membership"` (or similar) in the install state so it's auditable, and proceed. (Tracked: bug `20260614-8d20ea22-spacl`.) For backends that DO support `share` (gdrive), continue with the per-file grants below.
+
 After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members Google Group reader access on each. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and other tasks.
 
 **Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and do NOT go through the `permission-change-helper` skill. The admin running `create-org` is the org-creator with organizer authority on the new Shared Drive; the operations are deterministic and a one-time setup. Helper-mediated review would add friction without adding safety in this context.
@@ -633,6 +641,8 @@ Confirm: "Your org '{org_name}' is configured. Org config and directory structur
 Upload `agent-index-core/` to the remote filesystem so that members can read collection definitions via MCP during their setup.
 
 Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. Skip `node_modules/`, `.git/`, and other non-essential directories. **Upload files sequentially** — one `aifs_write` at a time, waiting for each to complete before the next. See the sequential write note in Step 8.
+
+**Large / binary files (default, not an escape hatch):** a file passed as the inline `content` string is capped by the shell argument length (~128KB) and binaries break as a CLI arg. For any file larger than ~100KB or any binary (e.g. the permission-helper `.exe`), use the `content_file` form: `aifs_write` with `{"path": "...", "content_file": "<local path>", "encoding": "base64"}`. The adapter reads the bytes from disk and, for OneDrive, uses an upload session automatically for >4MB. Prefer `content_file` for *every* file in a bulk upload — it avoids the arg-size cliff entirely and `aifs_write`'s size-verification confirms each file landed intact.
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 
@@ -724,13 +734,17 @@ The `CLAUDE.md` is the local copy written in Step 8.
 
 **Create the zip:**
 
+`zip` needs to rename/unlink as it works, which the mounted workspace folder does not permit — building in place fails. Use a non-mount scratch dir for both the staging tree and the output, then read the result back:
+
 ```bash
-cd {temp_directory} && zip -r member-bootstrap.zip agent-index/
+WORK="$(mktemp -d)"            # NOT under the mounted project folder
+# assemble agent-index/ under $WORK, then:
+cd "$WORK" && zip -r "$WORK/member-bootstrap.zip" agent-index/
 ```
 
 **Upload to remote:**
 
-Read the zip file as binary content and upload via `aifs_write("/shared/bootstrap/member-bootstrap.zip", "base64:{content}")`.
+Upload via the `content_file` form (binary): `aifs_write` with `{"path": "/shared/bootstrap/member-bootstrap.zip", "content_file": "<$WORK/member-bootstrap.zip>", "encoding": "base64"}` — the adapter's size-verification confirms the upload landed intact. (Avoid leaving temp read-back files in the mounted folder; write scratch to `mktemp` dirs.)
 
 **Generate download instructions:**
 
@@ -910,7 +924,7 @@ This task must maintain a structured install log throughout its execution. The l
 
 **What NOT to log:** File contents (especially anything containing credentials, OAuth client secrets, or tokens). Log the path and size, not the content.
 
-**Session continuity:** When resuming from a previous session, read the existing log file and append to it. Increment the session number. The first entry should be `session_resume` with the install state context.
+**Session continuity (MUST hold — no gaps):** When resuming, read the `run_id` from the install state and **re-open the existing `.jsonl` and append to it** — never start a fresh log or stop logging mid-run. Every session that does work, including the final session that performs the remote writes and reaches completion, must append entries through the last step; a log that stops at an earlier session's halt is a defect (bug `20260614-8d20ea22-loggap`). The first entry on resume is `session_resume` with the install-state context. Treat `completed_steps` as **append-only and contiguous** — append each step as it finishes (do not skip entries, e.g. 10→12); it is an audit record, not a checkpoint shorthand. As a finalization check before the completion summary, confirm the log's last entry corresponds to the final step reached this session.
 
 ### Behavior
 
