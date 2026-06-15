@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.12.2] — 2026-06-15 — M365 install reliability 2 (post-second-install fixes)
+
+Release record: core-improvements releases/ms365-adapter/ (12 retro, 13 release roadmap). Build A.1 from the second install + live collection shakedown. Pairs with filesystem framework 2.2.1 (proxy diagnostics → stderr) + onedrive adapter 2.0.3.
+
+### Fixed (create-org 3.2.1 → 3.2.2)
+- **Admin member space provisioned (Step 13):** create-org now runs the ensure-member-space subroutine for the admin (creates `Agent-Index-Private`, records `member_folder_id` + registry handshake) — the admin runs create-org, not member-bootstrap, so previously had no remote member space and owned-content collections had no anchor (bug 20260615-8d20ea22-adminspace).
+- **Safe org-config rewrite rule:** every `org-config.json` read-modify-write must use a unique temp path (never a fixed `/tmp/oc.json`) and verify `org_id`/connection identity before the authoritative write — a stale temp from another org's install corrupted the canonical config in two installs (bug 20260615-8d20ea22-ocstale).
+
+### Notes
+- Framework 2.2.1 (bundled into the adapter) moves proxy diagnostics off stdout so byte-exact `aifs_read` is correct in proxied sessions (bug 20260615-8d20ea22-stdoutlog).
+- No change to existing Google Drive / S3 orgs.
+
 ## [3.12.1] — 2026-06-14 — M365 install reliability (post-first-install fixes)
 
 Release record: core-improvements releases/ms365-adapter/ (09 retro, 10 next-build proposal). Build A reliability patch from the first real-world M365 install. Pairs with filesystem framework 2.2.0 + onedrive adapter 2.0.2.

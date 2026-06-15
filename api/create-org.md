@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.2.1
+version: 3.2.2
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -666,9 +666,11 @@ If the admin says yes:
 4. Download `agent-index-marketplace` locally from the `marketplace_repo_url` in `agent-index.json`.
 5. Verify the download by confirming `collection.json` is readable.
 6. Upload the entire marketplace collection to the remote filesystem via MCP (same process as Step 9).
-7. Update `org-config.json` on remote via `aifs_read` then `aifs_write`:
+7. Update `org-config.json` on remote via `aifs_read` then `aifs_write` (follow the **safe org-config rewrite rule** below):
    - Add entry to `installed_collections`
    - Update `last_updated`
+
+> **Safe org-config rewrite rule (MUST follow for every `org-config.json` read-modify-write — bug `20260615-8d20ea22-ocstale`):** Never stage the rewritten config at a fixed, shared scratch path like `/tmp/oc.json` — a leftover file from another org's install can be picked up and uploaded, corrupting the canonical config (observed in two installs). (a) Build the new content **in memory** or in a **unique** path (`mktemp`), never a fixed name; (b) **before** the authoritative `aifs_write`, parse the bytes you are about to upload and **assert `org_id` matches this org and `remote_filesystem.connection.site_id`/`drive_id` match the in-session values** — abort if they don't; (c) only then write. This is the source-identity complement to `aifs_write`'s size-verify: confirm you're uploading the *right* config, not just that it landed intact.
 
 Proceed to Step 11.
 
@@ -791,8 +793,9 @@ The admin's member workspace is set up locally, following the same flow that mem
 
 1. Create the local member workspace directory structure: `{project_dir}/members/{admin_hash}/` with subdirectories: `skills/`, `tasks/`, `profile/`
 2. Create `member-index.json` for the admin (locally)
-3. Run the preferences-management initial interview
-4. If collections were installed via marketplace in Step 11, proceed to capability selection and installation for the admin
+3. **Provision the admin's remote member space** — run the canonical **ensure-member-space subroutine** (defined in `member-bootstrap.md`, "ensure-my-drive-space"), exactly as a member would. The admin runs `create-org`, not `member-bootstrap`, so without this the admin never gets a remote member space and owned-content collections they run (strategy, capture, etc.) have no `member_folder_id` to anchor on. The subroutine: create `Agent-Index-Private` in the admin's own drive via `id:root/...`, stat the **resolved** id, record `member_folder_id` in the admin's `member-index.json`, and write the registry handshake. It is idempotent and backend-agnostic (`id:root` resolves to the admin's My Drive on gdrive / OneDrive). On OneDrive, if it returns `NOT_PROVISIONED`, surface the "sign in to office.com once" message and retry after. (Closes bug `20260615-8d20ea22-adminspace`.)
+4. Run the preferences-management initial interview
+5. If collections were installed via marketplace in Step 11, proceed to capability selection and installation for the admin
 
 The transition should feel seamless — the admin does not need to separately invoke setup.
 
