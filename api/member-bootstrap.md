@@ -132,6 +132,10 @@ Surface: "To connect to your org's shared storage, you'll need to sign in with y
 
 Present the OAuth URL from the `aifs_authenticate` response. Follow the same paste-URL logic as Google Drive above, adjusted for Microsoft sign-in.
 
+> **Do not re-issue `start` once a sign-in is in progress (bug `20260615-8d20ea22-pkcerestart`).** After you have shown the member the auth URL, the next call must be `aifs_authenticate(action="complete", auth_code="{pasted value}")` — do **NOT** call `aifs_authenticate(action="start")` again. A second `start` used to regenerate the PKCE challenge and invalidate the code the member had already obtained, forcing a second sign-in. (The onedrive adapter 2.1.0+ now reuses a still-fresh verifier so an accidental restart is harmless, but the correct flow is still: start once, then complete.) If `complete` fails because the code expired (codes are valid ~10 min), only THEN issue a fresh `start`.
+
+> **OneDrive license/provisioning prerequisite (memberlicense).** A member's private OneDrive space (`Agent-Index-Private`) requires a OneDrive-inclusive M365 license — included by default in Business Standard/Premium and E3, so most members already have it. If `ensure-my-drive-space` later reports a license/provisioning problem, surface the message the adapter returns (it distinguishes "no OneDrive license — ask your admin" from "not signed in yet — sign in once at office.com"). A member without a OneDrive license can still use org **shared** collections via site membership; only owned-content (member-space) collections need the personal space.
+
 **Amazon S3:**
 Surface: "To connect to your org's shared storage on AWS, you'll need to set up your AWS credentials. Your org admin should have provided instructions for your org's AWS setup."
 
@@ -194,7 +198,7 @@ If any of these directories already exist: skip creation, do not overwrite.
 
 The member's private remote space is a folder named `Agent-Index-Private` **in the member's own personal space** — their My Drive on Google Drive, or their OneDrive on Microsoft 365 — created with the member's own credentials, owned by the member. It is NOT on the org's shared root (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see standards.md § "Addressing"). On all backends the space is addressed by the backend-neutral `id:root/...` anchor, which resolves to the member's own personal drive.
 
-**Not-provisioned handling (OneDrive):** a member's OneDrive does not exist until they have signed in to office.com at least once. If any step below returns `NOT_PROVISIONED` (top-level `needs_provision: true`), stop and tell the member: *"Your OneDrive isn't set up yet — sign in once at office.com, open OneDrive, then re-run setup."* Do not retry automatically. (Google Drive and S3 never emit this; the branch is inert for them.)
+**Not-provisioned handling (OneDrive):** a member's OneDrive does not exist until they have signed in to office.com at least once — OR the account may lack a OneDrive license entirely. If any step below returns `NOT_PROVISIONED` (top-level `needs_provision: true`), stop and relay **the adapter's own message** verbatim (2.1.0+ distinguishes the two causes — "no OneDrive license, ask your admin" vs "not signed in yet, sign in once at office.com"; bug `20260615-8d20ea22-memberlicense`). Do not retry automatically, and do not assume "sign in once" if the adapter indicates a licensing gap. The rest of bootstrap can still complete (local workspace + registry); owned-content collections that need the member space stay unavailable until the personal OneDrive exists, while shared/open collections work via site membership. (Google Drive and S3 never emit this; the branch is inert for them.)
 
 1. `aifs_exists("id:root/Agent-Index-Private")`. If missing, create it:
    `aifs_write("id:root/Agent-Index-Private/.keep", "Agent-index private member space — created {date}")`.

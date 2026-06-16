@@ -369,8 +369,10 @@ Never modify `agent-index.json` or any collection directory on the remote filesy
 
 Never write an alias to `member-index.json` that collides with an existing alias without explicit collision resolution. The collision resolution must be completed before the installation entry is written.
 
-If the collection's `collection-setup-responses.md` cannot be read from the remote filesystem via `aifs_read("/{collection}/setup/collection-setup-responses.md")` (the collection was installed but org-level setup was never completed by an admin), surface this as a blocker for any capability from that collection:
-> "The {collection display name} collection has not been configured by your org admin yet. Skills and tasks from this collection cannot be set up until an admin completes the collection setup. Contact your org admin to resolve this."
+If the collection's `collection-setup-responses.md` cannot be read from the remote filesystem via `aifs_read("/{collection}/setup/collection-setup-responses.md")` (the collection was installed but org-level setup was never completed by an admin), surface this as a blocker for any capability from that collection — and name the exact remedy so the member can relay it (bug `20260615-8d20ea22-setupresp`: members were blocked org-wide because a bulk/defaults install never wrote the responses file):
+> "The {collection display name} collection is installed but hasn't had its **org-level setup** completed, so its skills and tasks can't be configured yet. Ask your org admin to run `@ai:install-collection {collection}` (or the collection's setup) once — even accepting all defaults writes the required `collection-setup-responses.md`. After that, re-run setup and this collection's capabilities will be available."
+
+This is a per-collection org-admin action, not something the member can self-resolve. If MULTIPLE installed collections are missing their responses file, list them together so the admin can fix them in one pass.
 
 ### Edge Cases
 

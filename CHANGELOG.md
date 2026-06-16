@@ -1,5 +1,23 @@
 # Agent-Index Core — Changelog
 
+## [3.13.0] — 2026-06-16 — Release B: multi-member ACL / selective sharing (OneDrive)
+
+Release record: core-improvements releases/ms365-adapter/ (15 solution design, 17 tech design rev 2, 19 build handoff, 20 §3-C runbook). Pairs with onedrive adapter 2.1.0, marketplace 2.12.0, and the new permission-helper-go-onedrive 0.5.0 binary. The last release before customer B deploy.
+
+### Added / Changed (create-org, permission-change-helper, apply-updates)
+- **All-members + collaborator provisioning on both backends (closes bug 20260614-8d20ea22-spacl):** create-org Step 4.5 now applies real additive `aifs_share` grants using the backend's `all_members_group` — a Google Group on gdrive, a Microsoft 365 group on onedrive (now that onedrive 2.1.0 implements the ACL ops). The A.1 manual-site-membership interim is kept only as a fallback for pre-2.1.0 onedrive adapters. `all_members_group` is wired into the onedrive connection schema and captured during the M365 connection step.
+- **Per-adapter helper binary (apply-updates Phase 1 step 7):** binaries[] entries may declare a `backend`; apply-updates installs the build matching `remote_filesystem.backend` to the shared install path. The gdrive build (Drive) and the new onedrive build (Graph) share a Go core; downstream refs (permission-change-helper, invite-member, setup) are unchanged. Generic delegation isn't possible (the host-side binary has no Node), so each build embeds its backend's API.
+
+### Fixed (reliability bundle)
+- **localcfgtrunc:** create-org verifies local config writes (`agent-index.json`, member-index) by read-back + JSON.parse, rewriting via the shell on truncation — the local-side complement to the ocstale remote rule (bug 20260615-8d20ea22-localcfgtrunc).
+- **pkcerestart:** member-bootstrap must `complete` (not re-issue `start`) once a sign-in is in progress; onedrive 2.1.0 startAuth reuses a still-fresh PKCE verifier so an accidental restart can't invalidate an in-flight code (bug 20260615-8d20ea22-pkcerestart).
+- **setupresp:** org-setup surfaces an actionable per-collection remedy when a collection is installed but its `collection-setup-responses.md` is missing (paired with the marketplace 2.12.0 install guardrail) — closes the org-wide member-install block (bug 20260615-8d20ea22-setupresp).
+- **memberlicense:** onedrive distinguishes "no OneDrive license" from "not signed in yet"; member-bootstrap relays the adapter's message and documents the OneDrive-license prerequisite (bug 20260615-8d20ea22-memberlicense).
+- **trunc:** core/marketplace api doc-truncation audit closed — all named files healed, full sweep clean (bug 20260608-8d20ea22-003039-trunc).
+
+### Notes
+- No change to existing Google Drive / S3 orgs' behavior; the gdrive helper binary is untouched (still 0.4.1).
+
 ## [3.12.2] — 2026-06-15 — M365 install reliability 2 (post-second-install fixes)
 
 Release record: core-improvements releases/ms365-adapter/ (12 retro, 13 release roadmap). Build A.1 from the second install + live collection shakedown. Pairs with filesystem framework 2.2.1 (proxy diagnostics → stderr) + onedrive adapter 2.0.3.
