@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.6.0
+version: 1.7.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -16,8 +16,8 @@ external_dependencies:
     description: Reads use aifs_get_permissions and revision-aware aifs_write — both introduced in adapter contract v2.0. Permission writes (share, unshare, transfer_ownership) go through the permission-change-helper skill rather than being called directly from this task. Will fail clearly if the installed adapter declares contract_version < 2.0.0.
   - name: permission-change-helper Go binary
     description: The pre-built Go binary `agent-index-show-plan` at `mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`, installed by core 3.4.0+ via `apply-updates` Phase 1 step 7. The helper renders a review page for the admin and applies the ACLs after a member-confirmed Accept. If not present, the helper skill's setup check surfaces the install issue. (Pre-3.7.4 also shipped a Node fallback; removed in 3.7.4 — closes idea `remove-node-permission-helper-fallback`.)
-  - name: All-members Google Group
-    description: Workspace-maintained Google Group whose membership is the authoritative agent-index member roster. Address is read from org-config.json remote_filesystem.connection.all_members_group. New members must be added to this group at the Workspace level (out-of-band; agent-index does not have Workspace admin credentials).
+  - name: All-members group
+    description: The org's all-members group whose membership is the authoritative agent-index member roster — a Google Group on gdrive, a Microsoft 365 group on onedrive. Address is read from org-config.json remote_filesystem.connection.all_members_group. New members are added to this group at the identity-provider level (out-of-band; agent-index does not hold Workspace/Entra admin credentials): gdrive → Google Workspace Admin Console → Groups; onedrive → Microsoft 365 admin center → Teams & groups (for a group-connected SharePoint site, this group's membership IS the site membership).
 reads_from: "/members-registry.json"
 writes_to: "/members-registry.json,/members/,/shared/members/artifacts/"
 ---
@@ -26,11 +26,11 @@ writes_to: "/members-registry.json,/members/,/shared/members/artifacts/"
 
 `invite-member` is the admin-side onboarding flow for a new agent-index member. The admin runs this when they want to add someone to the org. The task is admin-only — non-admin members will be told to ask their admin.
 
-The flow is intentionally narrow: agent-index manages team membership; Workspace IT manages identity. This task does **not** create a Google account, add the new member to the Workspace, or grant Drive access at the workspace level. Those are out-of-scope. What it does:
+The flow is intentionally narrow: agent-index manages team membership; the org's identity provider (Google Workspace / Microsoft Entra) manages identity. This task does **not** create an account, add the new member to the Workspace/tenant, or grant storage access at the identity-provider level. Those are out-of-scope. **In particular it does not require the admin to pre-stage the member as a SharePoint site member** — member access is provisioned by the direct per-member shares in step 3 (applied via the permission-change-helper), so the realistic flow is "invite, the framework provisions access," not "remember to add them to the site first." What it does:
 
 1. Compute the deterministic `member_hash` from the new member's email.
 2. Create the member's private directory (`/members/{hash}/`) and shared-artifact directory (`/shared/members/artifacts/{hash}/`). Apply explicit ACLs (admin + new member as writers on both) by handing a batched permission-change spec to the `permission-change-helper` skill — the admin reviews and confirms all shares on a single page, then the helper's apply-script applies them with the admin's existing OAuth token.
-3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) with the new member. In v3.1.0+ orgs configured with an `all_members_group`, the member receives this access automatically by being added to the group; the task verifies group membership and prompts the admin to fix it if missing.
+3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) + collection roots with the new member, as **direct per-member shares** applied through the permission-change-helper. Direct shares (not group inheritance) are what make `aifs_list` enumeration work for a non-member — established empirically on gdrive (see Category B) and assumed to hold on OneDrive/SharePoint (the onedrive analog is confirmed by the 2-account M365 test). The `all_members_group` add is a parallel out-of-band roster step (verified by admin attestation), but the direct shares are what actually grant working access — so a member is functional even before group propagation, and no site pre-staging is needed.
 4. Append the member's entry to `members-registry.json` using a revision-aware write (so two admins inviting members concurrently don't overwrite each other).
 5. Email the new member their install instructions.
 
@@ -110,7 +110,7 @@ This step creates the folder if it doesn't exist. It performs **no permission wr
 - If it does not exist: materialize it via `aifs_write("/shared/members/artifacts/{hash}/.placeholder", "")`.
 - If it already exists (re-invite case): leave it untouched.
 
-**The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private` in the member's **own My Drive**, created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
+**The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private` in the member's **own personal space** — their My Drive on gdrive, their OneDrive on onedrive — created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not; on onedrive the member owns their OneDrive items outright). On onedrive this requires the member to have a OneDrive-inclusive license and to have signed into office.com once (see memberlicense; create-org now surfaces this prerequisite to the admin). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
 
 ### Step 6: Apply ACLs via permission-change-helper
 
@@ -120,7 +120,9 @@ The access grants are batched into a single helper invocation. The admin reviews
 
 **Category A — Member-directory writer grants (narrowed in 1.6.0):** the new member + admin both need writer on the member's shared-artifact directory (`/shared/members/artifacts/{hash}/`) only. The private member space is in the member's own My Drive (member-owned; the org holds no grant on it and needs none).
 
-**Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-Drive-member access to org folders only works through DIRECT shares, not group-mediated inheritance. The Google Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even when the user has full read rights on the contents. Direct shares are required for `aifs_list` to surface entries to non-admin members. Verified empirically with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG for the empirical-test details. This share set is what bug `20260522-8d20ea22` was missing in its original 3.7.4 attempt.
+**Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-member access to org folders works through DIRECT shares, not group-mediated inheritance. On **gdrive** this is established empirically: the Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even with full read rights on the contents — so direct shares are required for `aifs_list` to surface entries (verified with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG; this share set is what bug `20260522-8d20ea22` originally missed).
+
+**OneDrive/SharePoint (Release B):** the same direct-share approach is used — the new member gets direct reader shares on the org-readable roots + collection roots via `aifs_share` (onedrive 2.1.0) through the helper, rather than relying on SharePoint site membership being pre-staged. **Assumption (gdrive parity): a SharePoint/OneDrive non-site-member with a direct per-item share gets both read AND list on that item.** This is the one M365 behavior not yet empirically confirmed — the 2-account ms-install-4 invite test verifies it. If it turns out a non-site-member CANNOT enumerate via direct shares (i.e. SharePoint requires site membership for list, unlike the per-item direct-share model), the fallback is to make the `all_members_group` add (= site membership for a group-connected site) the required access step and prompt the admin for it before the member's first session — record the finding and switch the model. Until contradicted, direct shares are the mechanism on both backends.
 
 The Category B set covers every top-level path a non-admin member needs to walk:
 - `/shared/` — folder; enables listing all org-shared subtrees (projects, marketplace-cache, updates, bug-reports, members artifacts, installed-collection-specific subfolders)
@@ -274,16 +276,16 @@ The helper's verification step replaces the eventual-consistency polling loop th
 
 ### Step 7: Verify the all-members group includes the new member
 
-This is a soft check — agent-index doesn't have Workspace admin credentials to query group membership directly. Instead:
+This is a soft check — agent-index doesn't hold identity-provider admin credentials to query group membership directly. The direct per-member shares from Step 6 are what actually grant working access; the group is the roster (and, on a group-connected SharePoint site, the site-membership signal). Instead:
 
-1. Read `org-config.json remote_filesystem.connection.all_members_group` (e.g., `agent-index-all@brainly.com`).
-2. Surface to the admin:
-   > Has `{new_member_email}` been added to the Workspace group `{all_members_group}`?
+1. Read `org-config.json remote_filesystem.connection.all_members_group` and the org's `remote_filesystem.backend`.
+2. Surface to the admin (backend-aware wording):
+   > Has `{new_member_email}` been added to the all-members group `{all_members_group}`?
    >
-   > This is what makes the org-readable infrastructure files (CLAUDE.md, members-registry.json, bootstrap zip, etc.) visible to them. Without it, their first session will fail to read these.
+   > They already have working access via the direct shares I just applied — this group add is the roster step (and on OneDrive/SharePoint, group membership of a group-connected site is what keeps their access durable as the org evolves).
    >
    > **Yes, they're in the group** — continue.
-   > **No, not yet** — I'll continue, but the welcome email will tell them to wait two minutes for group propagation before their first session. If they have access issues, the admin needs to add them to `{all_members_group}` via Workspace Admin Console.
+   > **No, not yet** — I'll continue (their direct shares already work). To add them: **gdrive** → Google Workspace Admin Console → Groups; **onedrive** → Microsoft 365 admin center → Teams & groups → the site's group → Members. Allow a couple minutes for propagation.
    > **Add them later** — same as no.
 
 3. Record the admin's response in the activity (does not block).

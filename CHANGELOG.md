@@ -1,5 +1,14 @@
 # Agent-Index Core — Changelog
 
+## [3.14.0] — 2026-06-16 — OneDrive member onboarding + admin license prompt
+
+### Added (invite-member 1.6.0 → 1.7.0 — OneDrive member onboarding)
+- **Backend-aware member access provisioning:** invite-member now works on the onedrive backend. A new member's access is provisioned by **direct per-member shares** (org-readable roots + collection roots) applied through the permission-change-helper — onedrive 2.1.0 implements `share`, so this runs the same as gdrive. **No SharePoint site pre-staging required** — the realistic flow is "admin invites, framework provisions access," not "remember to add them to the site first." The `all_members_group` add becomes an out-of-band roster step (admin-attested; on a group-connected SharePoint site it also conveys durable site membership), but the direct shares are what grant working access.
+- **Documented assumption + fallback:** that a SharePoint/OneDrive non-site-member with a direct per-item share gets read AND list (gdrive parity) is the one M365 behavior confirmed by the 2-account ms-install-4 invite test; if SharePoint requires site membership for enumeration, the model switches to a required group/site-membership add (documented in invite-member Category B).
+
+### Added (create-org)
+- **Admin-facing member-license prompt (completes memberlicense, bug 20260615-8d20ea22-memberlicense):** during OneDrive/SharePoint setup, create-org now tells the admin that each member who'll use owned-content capabilities needs a OneDrive-inclusive M365 license (standard in Business Standard/Premium and E3), with the exact assign path (M365 admin center → Users → Licenses and apps), and offers to confirm members are licensed before inviting them. Build B put the license-vs-not-signed-in message on the member side; this puts the actionable prerequisite in front of the admin who actually controls licensing. Guidance, not a hard gate.
+
 ## [3.13.0] — 2026-06-16 — Release B: multi-member ACL / selective sharing (OneDrive)
 
 Release record: core-improvements releases/ms365-adapter/ (15 solution design, 17 tech design rev 2, 19 build handoff, 20 §3-C runbook). Pairs with onedrive adapter 2.1.0, marketplace 2.12.0, and the new permission-helper-go-onedrive 0.5.0 binary. The last release before customer B deploy.
