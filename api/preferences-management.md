@@ -1,7 +1,7 @@
 ---
 name: preferences-management
 type: skill
-version: 3.0.0
+version: 3.0.1
 collection: agent-index-core
 description: Enables members to configure, review, and update their agent-index session preferences and invocation aliases through natural language without editing configuration files directly.
 stateful: true
@@ -80,14 +80,9 @@ Map to: `deprecation_warning_threshold: {N}`
 Default: `60`
 Accepted values: any positive integer. If member says something like "as early as possible," use 90. If "last minute," use 14.
 
-**5. Filesystem sync staleness warning**
-Explain: "I can warn you if your org filesystem hasn't synced recently — which can happen if you're offline or the sync service is paused."
-Ask: "How long before I should warn you about a stale sync? 30 minutes is the default. You can also turn this off entirely."
-Map to: `filesystem_sync_staleness_warning: {N} | null`
-Default: `30`
-If member says "turn it off" or "don't warn me": record as `null`.
+<!-- Removed (core 3.x, bug 20260617-8d20ea22-deadsyncpref): the "Filesystem sync staleness warning" (`filesystem_sync_staleness_warning`) preference. It was never consumed by any task or hook — vestigial from the pre-remote-filesystem mounted-shared-drive model. The on-demand-executor model has no local mount to go stale (every aifs call hits remote fresh). Do not re-ask it. Existing preferences.md files may still carry the key; it is inert and can be left or pruned. -->
 
-At the end of the interview, present a plain-language summary of all five values and ask the member to confirm before writing. Write all values to `preferences.md` in a single operation.
+At the end of the interview, present a plain-language summary of all four values and ask the member to confirm before writing. Write all values to `preferences.md` in a single operation.
 
 ### Alias Management
 
@@ -129,7 +124,6 @@ Common natural language patterns and their mappings:
 | "Always load my {task} context" | `eager_loading_exceptions` | Add task to list |
 | "Stop auto-loading {task}" | `eager_loading_exceptions` | Remove task from list |
 | "Warn me earlier about expiring skills" | `deprecation_warning_threshold` | Increase value |
-| "Turn off sync warnings" | `filesystem_sync_staleness_warning` | Set to `null` |
 | "Show me my preferences" | — | Read and display all fields in plain language |
 | "Reset my preferences to defaults" | — | Full reset flow (see Constraints) |
 
@@ -140,7 +134,6 @@ When a member asks to see their preferences, present all fields in plain languag
 > **Session startup:** Brief summary
 > **Task state loading:** On demand (email-manager loads automatically)
 > **End-of-life warnings:** 60 days in advance
-> **Sync staleness warning:** After 30 minutes
 
 Include the alias registry as a separate block if the member asks for it, or as part of a full preferences review.
 

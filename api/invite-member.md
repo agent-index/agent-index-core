@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.7.0
+version: 1.8.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -30,7 +30,7 @@ The flow is intentionally narrow: agent-index manages team membership; the org's
 
 1. Compute the deterministic `member_hash` from the new member's email.
 2. Create the member's private directory (`/members/{hash}/`) and shared-artifact directory (`/shared/members/artifacts/{hash}/`). Apply explicit ACLs (admin + new member as writers on both) by handing a batched permission-change spec to the `permission-change-helper` skill — the admin reviews and confirms all shares on a single page, then the helper's apply-script applies them with the admin's existing OAuth token.
-3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) + collection roots with the new member, as **direct per-member shares** applied through the permission-change-helper. Direct shares (not group inheritance) are what make `aifs_list` enumeration work for a non-member — established empirically on gdrive (see Category B) and assumed to hold on OneDrive/SharePoint (the onedrive analog is confirmed by the 2-account M365 test). The `all_members_group` add is a parallel out-of-band roster step (verified by admin attestation), but the direct shares are what actually grant working access — so a member is functional even before group propagation, and no site pre-staging is needed.
+3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) + collection roots with the new member, as **direct per-member shares** applied through the permission-change-helper. Direct shares (not group inheritance) are what make `aifs_list` enumeration work for a non-member — established empirically on gdrive (see Category B) and ASSUMED (not yet confirmed) to hold on OneDrive/SharePoint. The ms-install-4 attempt to confirm it was **confounded** — the test member was also a SharePoint site member, so its `list` visibility couldn't be attributed to the direct shares. Until a direct-share-only / non-site-member test confirms it, treat the access model as open (see the access-model-confound finding). The `all_members_group` add is a parallel out-of-band roster step (verified by admin attestation), but the direct shares are what actually grant working access — so a member is functional even before group propagation, and no site pre-staging is needed.
 4. Append the member's entry to `members-registry.json` using a revision-aware write (so two admins inviting members concurrently don't overwrite each other).
 5. Email the new member their install instructions.
 
@@ -122,7 +122,13 @@ The access grants are batched into a single helper invocation. The admin reviews
 
 **Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-member access to org folders works through DIRECT shares, not group-mediated inheritance. On **gdrive** this is established empirically: the Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even with full read rights on the contents — so direct shares are required for `aifs_list` to surface entries (verified with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG; this share set is what bug `20260522-8d20ea22` originally missed).
 
-**OneDrive/SharePoint (Release B):** the same direct-share approach is used — the new member gets direct reader shares on the org-readable roots + collection roots via `aifs_share` (onedrive 2.1.0) through the helper, rather than relying on SharePoint site membership being pre-staged. **Assumption (gdrive parity): a SharePoint/OneDrive non-site-member with a direct per-item share gets both read AND list on that item.** This is the one M365 behavior not yet empirically confirmed — the 2-account ms-install-4 invite test verifies it. If it turns out a non-site-member CANNOT enumerate via direct shares (i.e. SharePoint requires site membership for list, unlike the per-item direct-share model), the fallback is to make the `all_members_group` add (= site membership for a group-connected site) the required access step and prompt the admin for it before the member's first session — record the finding and switch the model. Until contradicted, direct shares are the mechanism on both backends.
+**OneDrive/SharePoint (Release B / B.1):** two onedrive-specific requirements, then the same helper flow.
+
+1. **Resolve the grantable identity FIRST (identitymap — bug 20260617-8d20ea22-identitymap).** The roster email is often NOT the identity Graph can grant to, and the right address is per-user and unguessable (one member resolves by UPN, another by a vanity/proxy). So before composing the spec, call `aifs_resolve_identity` with the new member's email; it returns `{ id, upn, mail }`. Use the returned **`id` (objectId)** as the share recipient (most robust) and **persist it on the member's registry entry as `sharing_identity`** in Step 8, so every later share/unshare/remove-member uses the resolved identity, not the roster email. If resolution fails (no matching tenant user), halt with a clear message — do not attempt the share with the unresolvable address (that produces the misleading generic `sharingFailed`). On gdrive, `aifs_resolve_identity` is a passthrough (the email IS the grantable identity), so `sharing_identity == email` and this step is a no-op.
+
+2. **Robust access model — require the all-members group-add (access-model fork, bug 20260620-8d20ea22-accessmodel).** Whether a direct-share-only non-site-member gets `aifs_list` (not just read) on SharePoint is not yet confirmed (the ms-install-4 test was confounded by the member also being a site member; the gdrive precedent suggests SharePoint may require site/group membership for enumeration). Until a clean fresh-member test settles it, do BOTH: apply the direct reader shares below **and** require the admin to add the member to the all-members M365 group (= site membership for a group-connected site) — surface it as a **required** step (not optional), with the M365-admin-center path, before the member's first session. That guarantees working access whichever mechanism SharePoint honors. (When the clean test confirms direct shares alone enumerate, this can relax to belt-and-suspenders.)
+
+The direct reader shares on org-readable roots + collection roots are then applied via `aifs_share` (onedrive 2.1.0) through the helper, using the resolved `sharing_identity` as the recipient — the same link→Accept→read-outcome flow share-idea uses. **Never apply these directly with `aifs_share` from this task, even when the helper can't be driven from a sandbox** (helperbypass, bug 20260617-8d20ea22-helperbypass): the agent emits the `agent-index://apply?spec=…` link, the admin clicks+Accepts on their host, and this task reads the outcome — that flow works from Cowork. There is no direct-apply fallback.
 
 The Category B set covers every top-level path a non-admin member needs to walk:
 - `/shared/` — folder; enables listing all org-shared subtrees (projects, marketplace-cache, updates, bug-reports, members artifacts, installed-collection-specific subfolders)
@@ -151,11 +157,11 @@ The Category B set covers every top-level path a non-admin member needs to walk:
 
    Note: `aifs_get_permissions` is read-only and agent-callable directly — only *write* ops go through the helper.
 
-2. Build the operations list:
+2. Build the operations list. **The recipient is the resolved `sharing_identity`** (the `id`/UPN from `aifs_resolve_identity`) on onedrive, the member email on gdrive — NOT the raw roster email (identitymap). Likewise the admin's recipient is the admin's resolved identity.
 
-   **Category A (2 entries, narrowed in 1.6.0):** `{/shared/members/artifacts/{hash}/} × {admin_email, new_member_email} × {writer}`.
+   **Category A (2 entries, narrowed in 1.6.0):** `{/shared/members/artifacts/{hash}/} × {admin_identity, new_member_identity} × {writer}`.
 
-   **Category B (4 + N entries):** for each path in `{/shared/, /CLAUDE.md, /org-config.json, /members-registry.json} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_email, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
+   **Category B (4 + N entries):** for each path in `{/shared/, /CLAUDE.md, /org-config.json, /members-registry.json} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_identity, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
 
    For each tuple, look up the recipient in the corresponding pre-state. If the recipient already has the requested role on the path (via direct grant OR group inheritance through all@): **omit** this operation (no-op). Otherwise: include it.
 
@@ -307,11 +313,14 @@ Parse, append the new member entry:
   "member_hash": "{hash}",
   "display_name": "{display_name}",
   "email": "{email}",
+  "sharing_identity": "{resolved id/UPN from aifs_resolve_identity, or = email on gdrive}",
   "org_role": "{default-role-from-org-config-or-prompt}",
   "joined_date": "{today YYYY-MM-DD}",
   "member_folder_id": null
 }
 ```
+
+`sharing_identity` (new in 1.8.0 — identitymap) is the backend-grantable identity resolved in Step 6: the member's objectId/UPN on onedrive, the email on gdrive. It is the canonical recipient for every later share/unshare/remove-member targeting this member — tasks read it from the registry rather than re-resolving or using the roster `email` (which often isn't grantable on M365). `member_hash` stays the canonical agent-index identity for everything else (ownership, capabilities).
 
 `member_folder_id` is `null` at invite time (changed in 1.6.0): the member's private space is created in their own My Drive during their first bootstrap, which writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconcile copies the ID into this registry entry. The registry remains the authoritative org-side record once reconciled (standards.md § "Addressing").
 

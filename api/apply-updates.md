@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.10.1
+version: 3.10.2
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -289,6 +289,7 @@ If `core-update` is present:
       - **If Y:** download the file, compute its SHA256, compare against the directory's published SHA256. If mismatch, abort and surface "SHA256 mismatch — the published checksum is `<expected>` but downloaded file hashes to `<actual>`; this is a security failure, not retrying. Report to admin." Refuse to install the file.
       - On match: write atomically to the `install_destination` path (substituting `{ext}` to `.exe` on Windows, empty otherwise). On Unix, `chmod +x`. Write the version string to the `version_file` path.
       - **Run the `post_install_command`** (substituting `{binary}` with the install destination's full path). This is typically `--register` to wire up URL handlers / .desktop files / registry keys. The command's stdout/stderr is surfaced to the user. Non-zero exit code is logged but does not abort (the binary is installed; registration may need manual follow-up).
+      - **Cowork caveat (hostregister, bug `20260617-8d20ea22-hostregister`):** when running in a Cowork session the agent is in a Linux sandbox and the binary is host-native, so `post_install_command`/`--register` **cannot execute here**. Do NOT report it as auto-registered or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from an `agent-index://` link until it's registered). Surface the exact host command as a required one-time step instead: Windows PowerShell → `& "{install_path}" --register` (note the leading `&`); macOS/Linux host → `"{install_path}" --register`. The binary is installed; only the OS-level handler wiring is pending until the user runs it.
       - **If N:** skip, surface "skipped — re-run `@ai:apply-updates` anytime to install."
    7. After all binaries reconciled, surface a concise summary: "Binary tools: `<n>` updated, `<m>` skipped, `<k>` already current."
 

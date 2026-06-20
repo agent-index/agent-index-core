@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.2.2
+version: 3.3.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -811,7 +811,21 @@ On completion: "Your member workspace is ready. You can start using your install
 
 If the admin declines or wants to do this later: accept that, note they can say '@ai:setup' anytime.
 
-**On success:** Proceed to Step 14.
+**On success:** Proceed to Step 13b.
+
+---
+
+### Step 13b: Provision the Permission-Helper Binary (closes bug 20260617-8d20ea22-nohelperpin)
+
+The permission-change-helper binary is **required** for member onboarding (`invite-member`'s per-member grants), member-driven selective sharing, and `remove-member` revocation — anything that goes through the interactive `permission-change-helper`. A fresh org has it **neither pinned nor installed** (the binary install path is `apply-updates` Phase 1 step 7, which only installs *pinned* binaries), so without this step the admin's first `invite-member` fails with `binary_not_found`. create-org's own bootstrap grants don't need it (they apply directly with admin creds), which is why the gap is otherwise invisible until the first invite.
+
+Do this now, before completion:
+
+1. **Pin the backend-matched helper** in `org-config.json` → `binaries{}` so it installs for the admin AND propagates to every member's `apply-updates`. The name matches the org's `remote_filesystem.backend`: `permission-helper-go` (gdrive) or `permission-helper-go-onedrive` (onedrive). Set `{ "policy": "min", "version": "<current_version from infrastructure-directory binaries[]>" }`. Use the **safe org-config rewrite rule** (unique temp + identity verify) for this write.
+2. **Install it for the admin now** via the `apply-updates` Phase 1 step 7 binary-reconcile (download → SHA-verify against the published checksum → install to `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`). This requires the normal binary-download **user approval prompt** (per the trust contract). On decline, note that `invite-member`/sharing won't work until `@ai:update` installs it, and continue.
+3. **Register the `agent-index://` handler — host-side, manual in Cowork (bug 20260617-8d20ea22-hostregister).** The `--register` post-install command CANNOT run from a Cowork session: the agent is in a Linux sandbox and the helper is a host-native binary. Do NOT claim it auto-registers or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from an `agent-index://` link until it's registered). Instead, surface the exact host command as a required one-time step: Windows → `mcp-servers\permission-helper-go\agent-index-show-plan.exe --register` (run in the workspace folder); macOS/Linux host → `./mcp-servers/permission-helper-go/agent-index-show-plan --register`. (If the agent is running natively on the host, it may run `--register` directly.) Re-surface until the helper setup check confirms the handler is registered.
+
+**On success (or deferral):** Proceed to Step 14.
 
 ---
 
@@ -838,6 +852,8 @@ If the admin says no: skip, remind them they can do this later via '@ai:edit-org
 
 ### Step 15: Completion Summary
 
+**First, make the admin's own workspace usable (closes bug 20260617-8d20ea22-admincaps).** Installing collections org-wide does NOT add their capabilities to the installing admin's personal `member-index.json`. Before presenting the summary, read `members/{admin_hash}/member-index.json`: if collections are installed org-wide but the admin's `skills`/`tasks` are empty (or missing collections), **offer to install them into the admin's workspace now** by running the `org-setup` first-time capability install for the admin: "Your org has {N} collections installed, but none are in your personal workspace yet — you can't run their capabilities until they are. Install them into your workspace now?" On yes, run org-setup's onboarding for the admin and confirm what got installed. Do NOT report the workspace as "ready" if it has no capabilities.
+
 Present the final summary:
 
 > **Org Setup Complete — {org_name}**
@@ -846,10 +862,12 @@ Present the final summary:
 > Admins: {admin display names}
 > Installed collections: {list}
 > Org roles: {list, or "none defined yet"}
-> Your member workspace: ready
+> Your member workspace: {capabilities installed: list, OR "set up, but no capabilities installed yet — run '@ai:setup' to install the ones you want to use"}
 > Bootstrap zip: uploaded to {remote location}
 >
-> **To onboard new members:** send them the instructions from Step 12. They download the bootstrap zip, unzip to `~/agent-index/`, open Cowork, and say "set up my agent-index member workspace."
+> **To onboard new members:** run '@ai:invite-member' for each person. It provisions their access (the per-member share grants), registers them, and gives you their personalized install instructions — don't just hand out the bootstrap zip, because that skips the access grants and they'll have no read access on their first session. (The zip lives at {remote location} for reference; invite-member is the path.)
+>
+> **To start using capabilities yourself:** if any aren't in your workspace yet, say '@ai:setup' to install them.
 >
 > **To edit org configuration:** say '@ai:edit-org' or 'edit org'
 > **To publish updates for members:** after making org changes, say '@ai:publish-updates' to generate update instructions that members can apply with '@ai:update'

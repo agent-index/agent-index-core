@@ -1,5 +1,23 @@
 # Agent-Index Core — Changelog
 
+## [3.15.0] — 2026-06-20 — Release B.1: ms-install-4 hardening (identity resolution, helper install, reliability)
+
+Release record: core-improvements releases/ms365-adapter/ (22 fix-batch proposal, 23 deploy-readiness register). The reliability/UX pass from the real ms-install-4 admin + member runs. Pairs with onedrive adapter 2.2.0. Architecture validated in ms-install-4; this hardens the paths it exercised.
+
+### Added / Changed
+- **identitymap (invite-member 3.x → 1.8.0, standards, adapter 2.2.0):** sharing recipients are now the resolved tenant identity, not the roster email. invite-member resolves once via the new `aifs_resolve_identity` (adapter Graph lookup; gdrive passthrough) and persists `sharing_identity` on the registry entry; all sharing tasks read it (a registry-field read — no per-collection lookup). standards.md documents the recipient rule. Closes the per-user-unguessable failure (testproduction needs UPN, Bill needs the vanity) that surfaced as a misleading `sharingFailed`.
+- **helperbypass (invite-member 1.8.0, standards):** removed the direct-apply fallback — invite-member uses the link→Accept→read-outcome helper flow even from a sandbox; standards.md states there is no sandbox fallback (create-org bootstrap is the only sanctioned direct `aifs_share`).
+- **nohelperpin (create-org 3.3.0 Step 13b, member-bootstrap 3.4.0 Step 7b):** create-org pins + installs the backend-matched helper at setup; member-bootstrap installs the pinned helper so a member's first share doesn't hit `binary_not_found`.
+- **admincaps + manualinvite (create-org 3.3.0 Step 15):** create-org installs/guides the admin's own capabilities and stops reporting "ready" when empty; completion points to `@ai:invite-member`, not manual zip distribution.
+- **hostregister (apply-updates 3.10.2, member-bootstrap 3.4.0, create-org 3.3.0):** the `--register` step is surfaced as a required host command (PowerShell `&` form) — never claimed as auto/first-use, since it can't run from the Cowork sandbox.
+- **pkcerestart (adapter 2.2.0):** verifier persisted to a sandbox-local path (the workspace-mount write was lost to a race) + reuse-on-restart; exec infers `complete` when an auth_code is present.
+- **memberlicense (create-org admin prompt, member-bootstrap):** admin-facing license prerequisite + clearer member messaging.
+- **deadsyncpref (preferences-management 3.0.1):** removed the never-consumed filesystem-sync-staleness preference.
+- **member-index verify-after-write (member-bootstrap 3.4.0):** localcfgtrunc guard extended to member-index writes (the mount truncated it in ms-install-4).
+
+### Open (tracked, tested by the B.1 fresh install)
+- `accessmodel` — whether a direct-share-only non-site-member gets `aifs_list`; invite-member 1.8.0 is built robust (also requires the group-add) pending the clean fresh-member test.
+
 ## [3.14.0] — 2026-06-16 — OneDrive member onboarding + admin license prompt
 
 ### Added (invite-member 1.6.0 → 1.7.0 — OneDrive member onboarding)

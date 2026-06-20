@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.3.0
+version: 3.4.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -227,6 +227,8 @@ Create the local `member-index.json`:
 
 If `member-index.json` already exists: do not overwrite. This is a safety check — if it exists, this might be a re-run of setup and we should not lose installed capability records.
 
+> **Verify-after-write (localcfgtrunc / member-index truncation, ms-install-4).** After writing `member-index.json` (here and any later update — e.g. when ensure-my-drive-space sets `member_folder_id`), read it back and `JSON.parse` it. The Cowork mount truncated member-index.json mid-write in ms-install-4 (caught only because the next read failed to parse). If it doesn't parse or is missing fields you just wrote, rewrite it via the shell (an executor-readable path) and re-verify before continuing. Never proceed past a member-index write you haven't read back and parsed.
+
 **Step 6 — Register member on remote**
 
 Read the current `members-registry.json` from the remote filesystem: `aifs_read("/members-registry.json")`.
@@ -276,6 +278,16 @@ auth_identity: {email or user identity from auth}
 org_name: {org_name}
 status: connected
 ```
+
+**Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
+
+If the org pins a permission-helper binary (`org-config.json` → `binaries{}` includes `permission-helper-go` / its backend variant), install it now via the `apply-updates` Phase 1 step 7 binary-reconcile (download → SHA-verify → install to `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`), with the standard binary-download **user-approval prompt**. Without this, the member's first sharing action (e.g. `share-idea` with a teammate) fails with `binary_not_found` until they manually `@ai:update` (the ms-install-4 member hit exactly this). On decline, note that sharing won't work until `@ai:update` installs it.
+
+**Register the `agent-index://` handler — manual host step in Cowork (hostregister).** The binary's `--register` post-install CANNOT run from a Cowork session (Linux sandbox; the binary is host-native). Do NOT claim it auto-registers or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from a link until registered). Surface the exact host command as a required one-time step:
+- Windows (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
+- macOS/Linux host: `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
+
+Re-surface until the helper setup check confirms the handler is registered. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
 
 **Step 8 — Confirm and hand off**
 
