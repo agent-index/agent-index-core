@@ -1,5 +1,19 @@
 # Agent-Index Core — Changelog
 
+## [3.16.0] — 2026-06-21 — Release B.2: ms-install-5 hardening (identity resolution permission, explicit mapping, reliability)
+
+Release record: core-improvements releases/ms365-adapter/ (deploy-readiness register). Surfaced by the real ms-install-5 clean-org install + invite. Pairs with onedrive adapter 2.2.1. The B.1 identity resolver was non-functional against a live tenant (a missing Graph permission that unit-test mocks hid); this makes it actually work, and closes the realistic unverified-roster-domain mapping case.
+
+### Added / Changed
+- **identityperm (create-org 3.4.0, adapter 2.2.1):** the Entra app now requires the delegated Microsoft Graph **`User.Read.All`** permission (+ admin consent). Plain `User.Read` only reads the signed-in user's own profile, so `aifs_resolve_identity`'s `GET /users/{other}` and `proxyAddresses` `$filter` returned 403 on every member lookup — the B.1 resolver could never see another user against a live tenant. create-org's app-registration guidance and the adapter's requested scope both add it. **Existing onedrive orgs must add `User.Read.All` to the app, grant admin consent, and re-authenticate.**
+- **errormask (adapter 2.2.1):** a 403/`Authorization_RequestDenied` from the resolver is now surfaced as a distinct `ACCESS_DENIED` ("add User.Read.All + admin consent + re-auth — the member likely exists") instead of being swallowed and reported as `INVALID_SUBJECT` "no matching user" (which sent ms-install-5 hunting for an account that demonstrably existed).
+- **explicit identity mapping (invite-member 1.9.0):** `member_hash` stays derived from the roster email (canonical, cross-backend-stable); the **grantable** `sharing_identity` is resolved separately and may be an admin-supplied tenant UPN/objectId — the normal path when the roster domain isn't a verified/aliased tenant domain (the common case, and the likely customer-B case). Resolution branches `ACCESS_DENIED` (consent gap) vs `INVALID_SUBJECT` (genuine no-match) rather than conflating them.
+- **accessmodel (invite-member 1.9.0):** documents the controlled direct-shares-only test path (withhold the group-add during the test to isolate whether direct shares alone enumerate).
+- **resolve arg aliases (adapter 2.2.1):** `aifs_resolve_identity` accepts `email`/`subject`/`identity`/`upn`/`user`/`member`/`recipient`, not just `ref` (cost a wasted round-trip in ms-install-5).
+- **Reliability:** localcfgtrunc — write local config shell-first (not just verify-after-write); resume/idempotency — Step 3c skip-guard when bundle+config already present and `next_step ≥ 4`; loggap — re-open the install log as the FIRST resume action, with run_id recovery from the newest log.
+- **adapterdirstale / sharesolve (create-org 3.4.0):** create-org fetches `filesystem-adapter-directory.json` via the SHA-pinned Distribution fetch protocol (the bare URL served a stale `1.0.0` directory in ms-install-5), and treats the downloaded bundle's `adapter.json` as authoritative for the adapter version once the checksum verifies.
+- Verified already-closed (no change): `c06b` (upgrade-collection 2.10.0 already pairs published-state). Documented-deferred: `instdir` (latent multi-collection install-dir collision; not reproducible/testable in-place). `rootsilent` folds into the accessmodel test.
+
 ## [3.15.0] — 2026-06-20 — Release B.1: ms-install-4 hardening (identity resolution, helper install, reliability)
 
 Release record: core-improvements releases/ms365-adapter/ (22 fix-batch proposal, 23 deploy-readiness register). The reliability/UX pass from the real ms-install-4 admin + member runs. Pairs with onedrive adapter 2.2.0. Architecture validated in ms-install-4; this hardens the paths it exercised.
