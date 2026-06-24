@@ -206,7 +206,7 @@ Under the least-privilege access model (adapter contract v2.0+, core 3.1.0+), a 
 
 The adapter (gdrive ≥ 2.5.0) supports two addressing modes:
 
-- **Absolute paths** (`/shared/...`, `/{collection}/...`) — for locations the caller can enumerate from the root. Members can enumerate `/shared` and collection trees via their direct `/shared` grant; admins can enumerate everything.
+- **Absolute paths** (`/shared/...`, `/{collection}/...`) — for locations the caller can enumerate from the root. Members enumerate `/shared` and collection trees via the **all-members group's direct-on-folder grants** — the group's reader on `/shared` (create-org Step 4.5) and on each collection root (install-collection cr01), conveyed by **group membership**, NOT by per-member shares. (Do not add per-member reader shares to make enumeration work — that was the obsolete `catbredundant` workaround; direct-on-folder group grants enumerate fine, validated on gdrive 2026-06 with a group-only member.) Admins can enumerate everything.
 - **ID anchors** — `id:{folderId}/relative/path` — for locations the caller is **granted on but cannot reach by walking from the root** (their own member space; items shared with them). Resolution starts at `{folderId}` and walks **downward only**. This is required because non-admin members are not Shared-Drive members and cannot enumerate containers like `/members/` (bug `20260522-8d20ea22`).
 
 **Conventions:**

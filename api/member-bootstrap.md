@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.4.0
+version: 3.5.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -168,6 +168,8 @@ Call `aifs_exists("/org-config.json")`.
 
 If it returns `exists: true`: connectivity is confirmed. Read the org config: `aifs_read("/org-config.json")`. Extract the org name and display: "Connected to {org_name}'s agent-index."
 
+**Then confirm core-collection access (group-membership prerequisite).** Capability execution requires reading `agent-index-core`, and that access is conveyed by all-members **group membership**, not by the root-file grants you just used. Call `aifs_exists("/agent-index-core/api/session-start.md")` (or any core file). If `exists: true`, access is fully established — proceed. If it returns `exists: false` / `ACCESS_DENIED` **even though `/org-config.json` read fine**, the member is **not yet effectively in the all-members group**. Surface: "You're connected, but the org's core capabilities aren't visible to your account yet — that access comes from membership in the all-members group (`{all_members_group}` from org-config). Ask your admin to add you. **If you were just added, wait a few minutes and retry** — group→library access propagation is not instant (especially on SharePoint/OneDrive). This is expected propagation lag, not a sharing gap." Halt first-time setup here and resume `@ai:member-bootstrap` once core is readable. **Do NOT conclude the collection 'isn't shared' or go hunting for a stale cache** — ms-install-5 burned a long detour doing exactly that when the real cause was group-membership propagation latency (the `pathcachestale` finding: the adapter does not cache negative lookups; this is timing, not caching).
+
 If it returns `exists: false` or errors: surface the issue. Common causes:
 - `ACCESS_DENIED`: "You're authenticated but don't have access to the org's files. Contact your org admin to grant access to the shared storage location."
 - `BACKEND_ERROR`: Surface the backend-specific error message.
@@ -216,7 +218,7 @@ Create the local `member-index.json`:
 {
   "member_hash": "{member_hash}",
   "member_folder_id": "{new_id from the ensure-my-drive-space subroutine above}",
-  "agent_index_version": "2.0.0",
+  "agent_index_version": "{the ACTUAL installed core version — read it from agent-index-core/collection.json `version` on the remote; do NOT hardcode. Hardcoding a stale default like 2.0.0 is the versionmarker bug.}",
   "last_updated": "{today YYYY-MM-DD}",
   "installed": {
     "skills": [],
@@ -227,7 +229,7 @@ Create the local `member-index.json`:
 
 If `member-index.json` already exists: do not overwrite. This is a safety check — if it exists, this might be a re-run of setup and we should not lose installed capability records.
 
-> **Verify-after-write (localcfgtrunc / member-index truncation, ms-install-4).** After writing `member-index.json` (here and any later update — e.g. when ensure-my-drive-space sets `member_folder_id`), read it back and `JSON.parse` it. The Cowork mount truncated member-index.json mid-write in ms-install-4 (caught only because the next read failed to parse). If it doesn't parse or is missing fields you just wrote, rewrite it via the shell (an executor-readable path) and re-verify before continuing. Never proceed past a member-index write you haven't read back and parsed.
+> **Write `member-index.json` shell-first, then verify (localcfgtrunc — ms-install-4 AND ms-install-5).** Compose the full JSON in-memory and write it with a single shell redirection to an executor-readable path — NOT the editor file-write path. The Cowork mount truncated/null-padded member-index.json mid-write in both ms-install-4 and ms-install-5 (caught only because the next read failed to parse); writing shell-first avoids the torn write entirely. Then read it back and `JSON.parse` it as a backstop (here and on any later update — e.g. when ensure-my-drive-space sets `member_folder_id`); if it doesn't parse or is missing fields you just wrote, rewrite via the shell and re-verify. Never proceed past a member-index write you haven't read back and parsed.
 
 **Step 6 — Register member on remote**
 

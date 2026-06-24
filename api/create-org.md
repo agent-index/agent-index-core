@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.4.0
+version: 3.5.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -518,7 +518,7 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
 {
   "org_name": "{org_name}",
   "org_id": "{org_id}",
-  "agent_index_version": "2.0.0",
+  "agent_index_version": "{the ACTUAL agent-index-core version being installed — read it from the downloaded agent-index-core/collection.json `version`. Do NOT hardcode a default like 2.0.0: that is the `versionmarker` drift that made ms-install-5's check-updates report nonsense (org-config said 2.0.0 while collection.json said 3.15.0). The installed collection.json is the source of truth for the installed version.}",
   "created": "{today YYYY-MM-DD}",
   "last_updated": "{today YYYY-MM-DD}",
   "remote_filesystem": {
@@ -557,7 +557,7 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
   "installed_collections": [
     {
       "name": "agent-index-core",
-      "version": "2.0.0",
+      "version": "{the agent-index-core collection.json `version` actually uploaded in Step 9 — not a hardcoded default (versionmarker). Must match the remote /agent-index-core/collection.json.}",
       "installed_date": "{today YYYY-MM-DD}",
       "repo_url": "https://github.com/agent-index/agent-index-core",
       "status": "installed"
@@ -599,17 +599,17 @@ If the template file is missing for any reason, fall back to generating the file
 
 **Local writes:**
 
-4.5. **Grant `all@{org_domain}` reader access on the three root-level org-readable files** (added in core 3.7.6 to close the spec half of bug `20260527-8d20ea22-3` — every non-admin member needs read access to these files; pre-3.7.6 the grants had to be applied manually).
+4.5. **Grant the all-members group reader access on `/shared/` AND the three root-level org-readable files.** This is what makes group membership the org's access mechanism: a non-admin member reads and enumerates the shared tree plus the canonical org files purely by being in the group, so `invite-member` adds **no** per-member reader shares. (The three-file grant closes the spec half of bug `20260527-8d20ea22-3`; the **`/shared/` grant is added in B.3 / 3.17.0** — it is the direct-on-folder group grant that lets `invite-member` drop its per-member `/shared/` reader, `catbredundant`.) On **gdrive** this explicit grant is required — non-admin members are not Shared-Drive members, so without it they cannot read or enumerate `/shared/`. On **OneDrive** it is belt-and-suspenders (site/library membership already conveys it).
 
 **Backend capability check (still required — do NOT silently skip):** first read the adapter's `supported_operations`. Both shipping backends now support `share` — gdrive (2.x) and **onedrive (2.1.0+, Release B)** — so the per-file group grants below run on each, using that backend's `all_members_group` (a Google Group on gdrive, an M365 group on onedrive). If a *future* backend ever lacks `share`, **do not quietly no-op**: surface it to the admin, record `all_members_access: "manual"` in the install log, and continue. (Closed for onedrive: bug `20260614-8d20ea22-spacl`.)
 
 > **(Pre-2.1.0 onedrive installs only)** If you encounter an onedrive adapter older than 2.1.0 (`share` still in `supported_operations_pending`), fall back to the interim instruction: members get read access by being **members of the SharePoint site** (`{site_web_url}`) — add them in SharePoint admin center → the site → Members — until the adapter is upgraded. The site owner (admin) is unaffected.
 
-After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members Google Group reader access on each. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and other tasks.
+After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.)
 
 **Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and do NOT go through the `permission-change-helper` skill. The admin running `create-org` is the org-creator with organizer authority on the new Shared Drive; the operations are deterministic and a one-time setup. Helper-mediated review would add friction without adding safety in this context.
 
-For each path in `["/CLAUDE.md", "/org-config.json", "/members-registry.json"]`, call:
+For each path in `["/shared/", "/CLAUDE.md", "/org-config.json", "/members-registry.json"]`, call:
 
 ```
 aifs_share(

@@ -1,5 +1,21 @@
 # Agent-Index Core — Changelog
 
+## [3.17.0] — 2026-06-24 — Release B.3: group-permission / access-model cleanup (Brainly catbredundant + ms-install-5 reliability)
+
+Core-only (adapter stays 2.2.1, marketplace unchanged). Closes the Brainly `catbredundant` bug and the testable ms-install-5 findings; the access-model change is validated on gdrive with a group-only member.
+
+### Added / Changed
+- **catbredundant (invite-member 1.10.0 + create-org 3.5.0):** removed invite-member's per-member "Category B" reader shares (`/shared/`, collection roots, root files) and the obsolete `20260522` root-listing-bug rationale they rested on. Members now read + enumerate via **all-members group membership** — and create-org Step 4.5 now grants the group reader on **`/shared/`** (it previously granted only the three root files; collection roots come from install-collection cr01). The only per-member grant invite-member still applies is the artifact-directory writer (required on gdrive, skipped on OneDrive). **Validated empirically** (gdrive, dev_install): a group-only member with no per-member shares lists + reads `/brand-book/` and `/library/`. Step 7 and the top-level step summary rewritten so group-add is the access mechanism, not a roster afterthought.
+- **recipidform (invite-member 1.10.0):** the share recipient is the resolved **UPN/mail** (email-form), never the objectId — the permission-helper rejects bare GUIDs.
+- **versionmarker (create-org 3.5.0, member-bootstrap 3.5.0):** both now stamp the **actual installed core version** into org-config (`agent_index_version` + `installed_collections[core].version`) and `member-index.json` — previously hardcoded `2.0.0`, the drift that made ms-install-5's check-updates report nonsense.
+- **member-bootstrap 3.5.0:** writes `member-index.json` **shell-first** (localcfgtrunc); adds the **group-membership prerequisite + propagation-retry** guidance at Step 4 — "core invisible right after a group-add" is expected SharePoint/Drive propagation latency, NOT a missing share or a stale cache (the `pathcachestale` finding: the adapter caches no negative lookups, so no adapter change).
+- **standards.md Addressing:** clarified that `/shared` + collection-tree enumeration is conveyed by the **all-members group's direct-on-folder grants** (group membership), not a per-member "direct /shared grant" — and that re-adding per-member reader shares was the catbredundant mistake. `/members/{hash}/` 3.9.0-legacy references in invite-member retired to the artifacts-dir model.
+
+### Deferred (own work items)
+- **nameambig** — gdrive non-member path resolution by name is ambiguous under same-name collisions; fix is id-anchor collection-root resolution via the stored `folder_id`, but `id:` anchors mean different drives per backend (onedrive `id:` = the member's own OneDrive, not the site library), so it needs a cross-backend design + test on its own.
+- **version-check accuracy** — listinglag + shasolve2 + check-updates source-of-truth (marketplace-scoped; the versionmarker root-cause fix above already removes most of the drift).
+
+
 ## [3.16.0] — 2026-06-21 — Release B.2: ms-install-5 hardening (identity resolution permission, explicit mapping, reliability)
 
 Release record: core-improvements releases/ms365-adapter/ (deploy-readiness register). Surfaced by the real ms-install-5 clean-org install + invite. Pairs with onedrive adapter 2.2.1. The B.1 identity resolver was non-functional against a live tenant (a missing Graph permission that unit-test mocks hid); this makes it actually work, and closes the realistic unverified-roster-domain mapping case.

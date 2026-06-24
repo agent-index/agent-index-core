@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.9.0
+version: 1.10.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
 stateful: false
@@ -29,23 +29,22 @@ writes_to: "/members-registry.json,/members/,/shared/members/artifacts/"
 The flow is intentionally narrow: agent-index manages team membership; the org's identity provider (Google Workspace / Microsoft Entra) manages identity. This task does **not** create an account, add the new member to the Workspace/tenant, or grant storage access at the identity-provider level. Those are out-of-scope. **In particular it does not require the admin to pre-stage the member as a SharePoint site member** — member access is provisioned by the direct per-member shares in step 3 (applied via the permission-change-helper), so the realistic flow is "invite, the framework provisions access," not "remember to add them to the site first." What it does:
 
 1. Compute the deterministic `member_hash` from the new member's email.
-2. Create the member's private directory (`/members/{hash}/`) and shared-artifact directory (`/shared/members/artifacts/{hash}/`). Apply explicit ACLs (admin + new member as writers on both) by handing a batched permission-change spec to the `permission-change-helper` skill — the admin reviews and confirms all shares on a single page, then the helper's apply-script applies them with the admin's existing OAuth token.
-3. Share the org-readable infrastructure files (CLAUDE.md, org-config.json, members-registry.json, bootstrap zip) + collection roots with the new member, as **direct per-member shares** applied through the permission-change-helper. Direct shares (not group inheritance) are what make `aifs_list` enumeration work for a non-member — established empirically on gdrive (see Category B) and ASSUMED (not yet confirmed) to hold on OneDrive/SharePoint. The ms-install-4 attempt to confirm it was **confounded** — the test member was also a SharePoint site member, so its `list` visibility couldn't be attributed to the direct shares. Until a direct-share-only / non-site-member test confirms it, treat the access model as open (see the access-model-confound finding). The `all_members_group` add is a parallel out-of-band roster step (verified by admin attestation), but the direct shares are what actually grant working access — so a member is functional even before group propagation, and no site pre-staging is needed.
+2. Create the member's shared-artifact directory (`/shared/members/artifacts/{hash}/`) and grant **admin + new member writer** on it, by handing a permission-change spec to the `permission-change-helper` skill — the admin reviews and Accepts, then the helper's apply-script applies the shares with the admin's existing OAuth token. The member's *private* space is NOT created here — it lives in the member's own My Drive / OneDrive, created at first bootstrap (see below); the legacy `/members/{hash}/` Shared-Drive directory was retired in 3.9.0.
+3. Ensure the member is added to the **all-members group** — that membership is the access mechanism: it conveys their read + enumeration of `/shared`, the collection roots, and the org-readable files (the group's direct-on-folder grants on gdrive; site/library membership on OneDrive), confirmed by the ms-install-5 accessmodel test. This task adds **no** per-member reader shares; the member reaches its own space by ID anchor. The only per-member grant it applies is the artifact-directory writer in Step 2 (needed on gdrive, redundant-and-skipped on OneDrive).
 4. Append the member's entry to `members-registry.json` using a revision-aware write (so two admins inviting members concurrently don't overwrite each other).
 5. Email the new member their install instructions.
 
-If the same email was previously invited and removed, the existing `/members/{hash}/` directory is **reused** (per access-control project decision). Old captures and ideas remain in place when the member returns.
+If the same email was previously invited and removed, the existing `/shared/members/artifacts/{hash}/` directory is **reused** (per access-control project decision); prior shared artifacts remain in place when the member returns. (The member's *private* space is in their own My Drive / OneDrive, owned by them and untouched by re-invite; the legacy `/members/{hash}/` Shared-Drive dir was retired in 3.9.0.)
 
 ### Inputs
 
 - `email` — required. New member's email address (lowercased internally for hashing).
 - `display_name` — required. How the member wants to be addressed.
-- `confirm_reuse` — implicit. If `/members/{hash}/` already exists, the task asks before reusing.
+- `confirm_reuse` — implicit. If `/shared/members/artifacts/{hash}/` already exists, the task asks before reusing.
 
 ### Outputs
 
-- `/members/{hash}/` (created or reused; ACL set to admin + member writer)
-- `/shared/members/artifacts/{hash}/` (created or reused; same ACL)
+- `/shared/members/artifacts/{hash}/` (created or reused; ACL set to admin + member writer). The member's private space is in their own My Drive / OneDrive (member-owned, created at bootstrap) — not created or granted here.
 - `members-registry.json` (member entry appended; revision-aware write)
 - Welcome email to the new member with bootstrap zip link and first-run instructions
 
@@ -116,17 +115,17 @@ This step creates the folder if it doesn't exist. It performs **no permission wr
 
 The access grants are batched into a single helper invocation. The admin reviews and confirms all shares on one page; the helper's apply-script applies them with the admin's existing OAuth token. This task never calls `aifs_share` directly — that's prohibited by the agent-side safety boundary the helper exists to navigate.
 
-**Two share-set categories** (extended in core 3.7.4 to close bug `20260522-8d20ea22` properly):
+**This task applies exactly ONE per-member grant: the member-directory writer.** The new member + admin each need **writer** on the member's shared-artifact directory `/shared/members/artifacts/{hash}/`, so the member can write its bootstrap handshake and shared outputs. On **gdrive** this is genuinely required — `create-org` Step 4.5 grants the all-members group `reader` on the three root files only, *not* write on the artifacts namespace — so without it the member cannot write its handshake. On **OneDrive** it is redundant (the all-members group is the site group, so members already hold library-wide writer); the no-op filter in step 2 skips it there.
 
-**Category A — Member-directory writer grants (narrowed in 1.6.0):** the new member + admin both need writer on the member's shared-artifact directory (`/shared/members/artifacts/{hash}/`) only. The private member space is in the member's own My Drive (member-owned; the org holds no grant on it and needs none).
+**Members get read + enumeration from group membership — this task adds NO per-member reader shares.** A member reads and enumerates `/shared`, the collection roots, and the org-readable root files through the all-members group's **direct-on-folder** grants (`create-org` Step 4.5 + `install-collection` cr01 on gdrive; site/library membership on OneDrive), and reaches its own member space by **ID anchor** (standards.md "Addressing"). So **adding the member to the all-members group is the access mechanism** — surface it as the required onboarding step (M365-admin-center / Google Admin).
 
-**Category B — Direct reader shares on org-readable roots (new in 1.3.0):** non-member access to org folders works through DIRECT shares, not group-mediated inheritance. On **gdrive** this is established empirically: the Drive API returns 0 results when a non-Drive-member tries to enumerate children of a folder they have access to only via group inheritance — even with full read rights on the contents — so direct shares are required for `aifs_list` to surface entries (verified with two-account testing during the 3.7.4 cycle; see `agent-index-filesystem-gdrive` 2.4.1 CHANGELOG; this share set is what bug `20260522-8d20ea22` originally missed).
+(Historical note, do NOT re-implement: earlier versions also applied per-member *reader* shares on every org-readable root to work around an old enumeration bug where group **inheritance** returned 0 on `aifs_list`. That problem was solved by the direct-on-folder group grant + ID-anchoring; the per-member reader shares are obsolete and were removed. Re-creating them to fix a problem that no longer exists was the `catbredundant` bug.)
 
 **OneDrive/SharePoint (Release B / B.1):** two onedrive-specific requirements, then the same helper flow.
 
 1. **Resolve the grantable identity FIRST (identitymap — bugs 20260617-8d20ea22-identitymap, 20260620-8d20ea22-identityperm).** Keep two identities distinct:
    - **Canonical identity** — `member_hash` is ALWAYS derived from the member's **roster email** (lowercase agent-index email). This never changes; it keys the member folder, registry entry, and all capability ownership, and keeps the member the *same person* across backends. Do not key identity off a tenant address.
-   - **Grantable identity (`sharing_identity`)** — the address Microsoft Graph can actually grant to, resolved via `aifs_resolve_identity`, which returns `{ id, upn, mail }`. Use the returned **`id` (objectId)** as the share recipient (most robust) and **persist it on the registry entry as `sharing_identity`** (Step 8), so every later share/unshare/remove-member uses it, not the roster email.
+   - **Grantable identity (`sharing_identity`)** — the address Microsoft Graph can actually grant to, resolved via `aifs_resolve_identity`, which returns `{ id, upn, mail }`. Use the returned **`upn` (falling back to `mail`)** — i.e. the **email-form** identity — as the share recipient, and **persist it on the registry entry as `sharing_identity`** (Step 8), so every later share/unshare/remove-member uses it, not the roster email. **Do NOT use the `id` (objectId) as the recipient** (`recipidform`): the permission-helper validates recipients as email addresses and rejects bare GUIDs, so an objectId recipient fails spec validation. (The objectId is the most *stable* directory key, so keep it available in the resolution result, but the *grantable recipient* must be the UPN/mail.)
 
    **Which reference to resolve:**
    - **If the admin supplied an explicit grant identity** at invite (a tenant UPN or objectId — e.g. *"invite testproduction@agent-index.ai, grant identity testproduction@AgentIndex.onmicrosoft.com"*), resolve **that**. This is the normal path whenever the roster email's domain is **not a verified/aliased domain** in the tenant — which is the common case (and the likely customer-B case): the roster email then has no tenant record to look up, so it can't be auto-resolved. The roster email still sets `member_hash`; the supplied address only sets `sharing_identity`.
@@ -138,50 +137,25 @@ The access grants are batched into a single helper invocation. The admin reviews
 
    On gdrive, `aifs_resolve_identity` is a passthrough (the email IS the grantable identity), so `sharing_identity == email`, the explicit-mapping path is unused, and this whole step is effectively a no-op.
 
-2. **Robust access model — require the all-members group-add (access-model fork, bug 20260620-8d20ea22-accessmodel).** Whether a direct-share-only non-site-member gets `aifs_list` (not just read) on SharePoint is not yet confirmed (the ms-install-4 test was confounded by the member also being a site member; the gdrive precedent suggests SharePoint may require site/group membership for enumeration). Until a clean fresh-member test settles it, do BOTH: apply the direct reader shares below **and** require the admin to add the member to the all-members M365 group (= site membership for a group-connected site) — surface it as a **required** step (not optional), with the M365-admin-center path, before the member's first session. That guarantees working access whichever mechanism SharePoint honors. (When the clean test confirms direct shares alone enumerate, this can relax to belt-and-suspenders.)
+2. **Add the member to the all-members group — the required onboarding step.** This is what conveys read + enumeration of `/shared`, the collection roots, and the org-readable root files (see the framing above); it is not optional. Surface it with the concrete path (M365-admin-center → the site's M365 group on OneDrive; Google Admin → the all-members Google Group on gdrive). *(Accessmodel test record, ms-install-5 2026-06-23: a non-site, non-group member holding only direct reader shares enumerated `/` and `/shared/` and read `/CLAUDE.md` — so direct shares do enumerate, but the unshared `agent-index-core` stayed invisible until the group-add, confirming group membership — not per-member shares — is the access mechanism.)*
 
-   **Validation note (how to run the clean `accessmodel` test):** to actually settle whether direct shares alone enumerate, the group-add must be *withheld* during the test — it's the confound. So for the controlled run: apply ONLY the direct reader shares (this spec), do **not** add the member to the all-members group or the site, then have the member run `aifs_list` + `aifs_read` on `/` and `/shared/` in their own session. If `list` returns entries, direct shares alone suffice (rootsilent does not occur for a directly-shared non-member) and this step can relax. If `list` returns empty while `read` works, SharePoint requires site/group membership for enumeration — keep the group-add required. After recording the result, add the group so the member can operate normally. The group-add is a manual M365-admin-center step, so the operator controls this ordering directly; no task flag is needed.
-
-The direct reader shares on org-readable roots + collection roots are then applied via `aifs_share` (onedrive 2.1.0) through the helper, using the resolved `sharing_identity` as the recipient — the same link→Accept→read-outcome flow share-idea uses. **Never apply these directly with `aifs_share` from this task, even when the helper can't be driven from a sandbox** (helperbypass, bug 20260617-8d20ea22-helperbypass): the agent emits the `agent-index://apply?spec=…` link, the admin clicks+Accepts on their host, and this task reads the outcome — that flow works from Cowork. There is no direct-apply fallback.
-
-The Category B set covers every top-level path a non-admin member needs to walk:
-- `/shared/` — folder; enables listing all org-shared subtrees (projects, marketplace-cache, updates, bug-reports, members artifacts, installed-collection-specific subfolders)
-- For each `installed_collections[]` entry in `org-config.json` with `status: "installed"`, EXCEPT `agent-index-core` and `agent-index-marketplace` (which are infrastructure-only — collection.json read via global name search by ID): `/{name}/` → reader. Enables listing `api/`, reading `collection.json`, and walking into the collection's tree.
-- **Root-level org-readable files** (added in invite-member 1.4.0 as defense-in-depth backing the `create-org` install-time grants — closes the per-invite half of bug `20260527-8d20ea22-3`):
-  - `/CLAUDE.md` → reader
-  - `/org-config.json` → reader
-  - `/members-registry.json` → reader
-
-  These three files are normally readable to non-admins via the all-members group grants `create-org` 3.1.1+ establishes at install time. The per-member direct shares here are belt-and-suspenders: if the create-org grants somehow get removed (admin manually edits ACLs, group membership semantics change, drift from any other cause), the per-invite direct grants pick up the slack. If the group grants are intact, the per-invite grants are no-ops (the pre-state filter at item 1 below excludes them from the spec).
+The helper spec below therefore contains only the **Category A** member-directory writer grant. It is applied via `aifs_share` through the permission-change-helper — the agent emits the `agent-index://apply?spec=…` link, the admin Accepts on their host, and this task reads the outcome (link→Accept→verify). **Never call `aifs_share` directly from this task, even when the helper can't be driven from a sandbox** (helperbypass, bug `20260617-8d20ea22-helperbypass`): the helper flow works from Cowork, and there is no direct-apply fallback.
 
 **Build the spec:**
 
-1. Read pre-state for ALL target paths (Category A + B) to capture current ACLs (used as the `before` field for diff visualization, and to filter shares that would be no-ops):
+1. Read pre-state for the member's artifact directory (used as the `before` field for diff visualization, and to skip the grant if it is already held):
 
    ```
    artifacts_pre = aifs_get_permissions("/shared/members/artifacts/{hash}/")
-   shared_pre    = aifs_get_permissions("/shared/")
-   # Root-level org-readable files (added in 1.4.0):
-   claude_pre    = aifs_get_permissions("/CLAUDE.md")
-   orgconfig_pre = aifs_get_permissions("/org-config.json")
-   registry_pre  = aifs_get_permissions("/members-registry.json")
-   # For each installed user-facing collection {coll_name}:
-   coll_pre[{coll_name}] = aifs_get_permissions("/{coll_name}/")
    ```
 
    Note: `aifs_get_permissions` is read-only and agent-callable directly — only *write* ops go through the helper.
 
-2. Build the operations list. **The recipient is the resolved `sharing_identity`** (the `id`/UPN from `aifs_resolve_identity`) on onedrive, the member email on gdrive — NOT the raw roster email (identitymap). Likewise the admin's recipient is the admin's resolved identity.
+2. Build the operations list. **The recipient is the resolved `sharing_identity`** (the **UPN/mail — email-form** — from `aifs_resolve_identity`, never the objectId; the helper rejects bare GUIDs, see `recipidform`) on onedrive, the member email on gdrive — NOT the raw roster email (identitymap). The admin's recipient is the admin's resolved identity.
 
-   **Category A (2 entries, narrowed in 1.6.0):** `{/shared/members/artifacts/{hash}/} × {admin_identity, new_member_identity} × {writer}`.
+   **The grant set is just the member-directory writer:** `{/shared/members/artifacts/{hash}/} × {admin_identity, new_member_identity} × {writer}` — two `share` ops. Omit either if the recipient already holds writer on that path (`artifacts_pre`), including via the all-members group. On **OneDrive** site membership already conveys library-wide writer, so both are typically no-ops and the spec is **empty**; on **gdrive** the group has no write on the artifacts namespace, so both ops apply. **No reader shares are emitted** — read and enumeration come from group membership (see step 2 above), not from this task.
 
-   **Category B (4 + N entries):** for each path in `{/shared/, /CLAUDE.md, /org-config.json, /members-registry.json} ∪ {/{coll_name}/ for each installed user-facing collection}`, add a single share `{path, new_member_identity, reader}`. Admin already has access (organizer or explicit) so no admin-side share needed here.
-
-   For each tuple, look up the recipient in the corresponding pre-state. If the recipient already has the requested role on the path (via direct grant OR group inheritance through all@): **omit** this operation (no-op). Otherwise: include it.
-
-   For a fresh invite to an org with 8 installed user-facing collections + intact `create-org` 3.1.1+ all@ grants on root-level files, the spec contains: 4 (Category A) + 1 (`/shared/`) + 3 (root-level, all no-ops because of intact group grants) + 8 (collection roots) = 13 effective operations. If the `create-org` grants are missing for any root-level file, those become effective ops (defense-in-depth at work). For a re-invite where the admin already has access on the Category A folders and only the member needs to be re-added, the spec is correspondingly smaller.
-
-3. Compose the spec. The example below shows the shape for a fresh invite on an org with 2 installed user-facing collections (`projects`, `client-intelligence`). Adapt the Category B `share` operations to whatever set of `installed_collections[]` entries with `status: "installed"` the org actually has, excluding `agent-index-core` and `agent-index-marketplace`.
+3. Compose the spec. The example below is the whole spec — the two member-directory writer ops. There is nothing per-collection to adapt (no reader shares).
 
    ```json
    {
@@ -189,20 +163,6 @@ The Category B set covers every top-level path a non-admin member needs to walk:
      "operations": [
        {
          "op": "share",
-         "resource": "/members/{hash}/",
-         "recipient": "{admin_email}",
-         "role": "writer",
-         "before": { "recipients": <members_pre.permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/members/{hash}/",
-         "recipient": "{new_member_email}",
-         "role": "writer",
-         "before": { "recipients": <members_pre.permissions> }
-       },
-       {
-         "op": "share",
          "resource": "/shared/members/artifacts/{hash}/",
          "recipient": "{admin_email}",
          "role": "writer",
@@ -214,54 +174,12 @@ The Category B set covers every top-level path a non-admin member needs to walk:
          "recipient": "{new_member_email}",
          "role": "writer",
          "before": { "recipients": <artifacts_pre.permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/shared/",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <shared_pre.permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/projects/",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <coll_pre[projects].permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/client-intelligence/",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <coll_pre[client-intelligence].permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/CLAUDE.md",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <claude_pre.permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/org-config.json",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <orgconfig_pre.permissions> }
-       },
-       {
-         "op": "share",
-         "resource": "/members-registry.json",
-         "recipient": "{new_member_email}",
-         "role": "reader",
-         "before": { "recipients": <registry_pre.permissions> }
        }
      ],
      "context": {
        "requestor": "{admin_member_hash}",
        "calling_task": "invite-member",
-       "purpose": "Onboarding {display_name} ({new_member_email}) under {org_name}: writer on their member directories + reader on org-readable roots so path-walking works (the access-control Phase 4 model relies on direct shares, not group inheritance, for list-visibility — see gdrive 2.4.1 CHANGELOG)."
+       "purpose": "Onboarding {display_name} ({new_member_email}) under {org_name}: granting the new member + admin writer on the member's artifact directory /shared/members/artifacts/{hash}/ so the member can write its bootstrap handshake. Read/enumeration access is conveyed by all-members group membership, not by this spec."
      }
    }
    ```
@@ -276,7 +194,7 @@ Call the `permission-change-helper` skill with the spec. The helper validates, o
 
 Surface to the admin before invoking, in the chat:
 
-> I'm opening a review page in your browser. It'll show {N} share operations across `/members/{hash}/` and `/shared/members/artifacts/{hash}/`. Click Accept to apply them with your own credentials.
+> I'm opening a review page in your browser. It'll show {N} share operation(s) on `/shared/members/artifacts/{hash}/` (writer for you and the new member). Click Accept to apply them with your own credentials.
 
 **Branch on the helper's outcome:**
 
@@ -286,7 +204,7 @@ Surface to the admin before invoking, in the chat:
 
 - **`timed_out`** or **`page_closed`** — The admin opened the review page but didn't decide within the helper's idle timeout, or closed the page without deciding. Surface: "The review window closed without your decision. The invite is on hold; nothing has been applied. Want to retry?" If yes, return to the start of Step 6. If no, halt cleanly.
 
-- **`partial_failure`** — Some shares applied, some failed. The helper returns `applied_operations` and `failed_operations`. Surface a per-failure summary using the helper's `error_detail` and the typed error codes from the apply-script (e.g., `INVALID_RECIPIENT` if the email is malformed or in a different Workspace; `ACCESS_DENIED` if the admin's OAuth doesn't permit the share). Offer to retry the failed operations only, or halt. **Do not** continue to Step 7 (registry update) until either all 4 shares are applied or the admin has explicitly accepted the partial state and confirmed they want to proceed anyway. The default should be halt — partial state is typical of cross-Workspace cases where the recipient's email is in a domain the org's external-sharing policy doesn't allow, and the right answer is to fix the Workspace policy first.
+- **`partial_failure`** — Some shares applied, some failed. The helper returns `applied_operations` and `failed_operations`. Surface a per-failure summary using the helper's `error_detail` and the typed error codes from the apply-script (e.g., `INVALID_RECIPIENT` if the email is malformed or in a different Workspace; `ACCESS_DENIED` if the admin's OAuth doesn't permit the share). Offer to retry the failed operations only, or halt. **Do not** continue to Step 7 (registry update) until either both artifact-directory shares are applied or the admin has explicitly accepted the partial state and confirmed they want to proceed anyway. The default should be halt — partial state is typical of cross-Workspace cases where the recipient's email is in a domain the org's external-sharing policy doesn't allow, and the right answer is to fix the Workspace policy first.
 
 - **`apply_error`** or **`verification_failed`** — Hard failure (the apply-script crashed or post-state verification revealed a discrepancy). Surface the error verbatim, halt the task, do not write to the registry.
 
@@ -296,17 +214,17 @@ The helper's verification step replaces the eventual-consistency polling loop th
 
 ### Step 7: Verify the all-members group includes the new member
 
-This is a soft check — agent-index doesn't hold identity-provider admin credentials to query group membership directly. The direct per-member shares from Step 6 are what actually grant working access; the group is the roster (and, on a group-connected SharePoint site, the site-membership signal). Instead:
+This is a **required** access step, not a roster nicety: all-members group membership is what conveys the member's read + enumeration of `/shared`, the collection roots, and the org files (the Step 6 grant only lets them *write* their own artifacts). agent-index doesn't hold identity-provider admin credentials to add or query group membership directly, so confirm it with the admin:
 
 1. Read `org-config.json remote_filesystem.connection.all_members_group` and the org's `remote_filesystem.backend`.
 2. Surface to the admin (backend-aware wording):
    > Has `{new_member_email}` been added to the all-members group `{all_members_group}`?
    >
-   > They already have working access via the direct shares I just applied — this group add is the roster step (and on OneDrive/SharePoint, group membership of a group-connected site is what keeps their access durable as the org evolves).
+   > This membership is what gives them read access to the org's shared files and collections. Without it they can write their own artifacts but cannot read `/shared` or run any capability. On OneDrive/SharePoint the group is the site group (membership = library access); on gdrive it's the all-members Google Group.
    >
    > **Yes, they're in the group** — continue.
-   > **No, not yet** — I'll continue (their direct shares already work). To add them: **gdrive** → Google Workspace Admin Console → Groups; **onedrive** → Microsoft 365 admin center → Teams & groups → the site's group → Members. Allow a couple minutes for propagation.
-   > **Add them later** — same as no.
+   > **No, not yet** — add them before their first session or they'll have no read access. **gdrive** → Google Workspace Admin Console → Groups; **onedrive** → Microsoft 365 admin center → Teams & groups → the site's group → Members. Allow a couple minutes for propagation.
+   > **Add them later** — same as no; flag that the member can't function until it's done.
 
 3. Record the admin's response in the activity (does not block).
 
@@ -382,7 +300,7 @@ Surface to the admin:
 >
 > The shares were applied via the permission-change-helper; you can review the plan that was applied at `outputs/permission-plan-{timestamp}.json` if you want a record of exactly what was approved.
 
-Append an activity event to a local audit hint file (no remote audit log — that comes from Drive Activity directly). The admin can run `view-audit /members/{hash}/` afterwards to see the share events natively.
+Append an activity event to a local audit hint file (no remote audit log — that comes from Drive Activity directly). The admin can run `view-audit /shared/members/artifacts/{hash}/` afterwards to see the share events natively.
 
 ---
 
