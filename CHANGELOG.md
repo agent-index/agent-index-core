@@ -1,5 +1,16 @@
 # Agent-Index Core — Changelog
 
+## [3.18.0] — 2026-06-25 — Release C: org-backend distribution (members never fetch from GitHub)
+
+Eliminates the stale-cache + GitHub rate-limit class (Jeff / ms-install-5 / ms-install-6 member helper-install block) by making each org's backend its distribution layer. Absorbs the deferred version-check accuracy work (listinglag/shasolve). Adapter unchanged (2.2.1). Gates customer B (ships on this from day one).
+
+### Added / Changed
+- **New subroutines (`templates/`):** `clone-script-generator` (recurring, tag-pinned, idempotent clone/pull script the admin runs — clones the backend adapter + marketplace + resource-listings + selected collections and downloads+SHA-verifies+places+`--register`s the helper binary) and `backend-distribution` (`/shared/dist/` layout, `manifest.json` as the org version authority, publish diff+hash-verify, member read+verify contract, deprecated-fallback, cross-backend).
+- **create-org 3.6.0:** generates the clone script + stages the adapter bundle from the local clone (no GitHub fetch; git-blob LF bytes); new Step 11 publishes `/shared/dist/` (directories + binary + manifest); Step 12 bakes the binary into the bootstrap zip.
+- **apply-updates 3.11.0:** reads the directory + reconciles the binary from `/shared/dist/` (manifest-verified, shell-first place, member `--register` one-liner); GitHub demoted to deprecated fallback.
+- **member-bootstrap 3.6.0:** binary comes from the unpacked bootstrap zip / `/shared/dist/`, never GitHub.
+- **standards.md:** new "Distribution: backend-first" section leads; the SHA-pinned GitHub fetch is reframed as admin-only / deprecated member fallback (removal targeted next release).
+
 ## [3.17.0] — 2026-06-24 — Release B.3: group-permission / access-model cleanup (Brainly catbredundant + ms-install-5 reliability)
 
 Core-only (adapter stays 2.2.1, marketplace unchanged). Closes the Brainly `catbredundant` bug and the testable ms-install-5 findings; the access-model change is validated on gdrive with a group-only member.

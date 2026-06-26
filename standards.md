@@ -137,7 +137,15 @@ Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setu
 
 ---
 
-## Distribution fetch protocol (SHA-pinned)
+## Distribution: backend-first (Release C — the current model)
+
+**Members never fetch from github.com.** Each org's own backend is its distribution layer: the admin (the only GitHub touchpoint, over the **git protocol** — clone/pull, which is not subject to the raw/REST rate cap) publishes everything members need — collections, the directories, and the helper binary — to `/shared/dist/` on the org backend. Members read collections from their remote trees and directories/binary from `/shared/dist/`, verifying SHAs against `/shared/dist/manifest.json` (the org's version authority). See the `backend-distribution` and `clone-script-generator` subroutines (`templates/`). This eliminates both root causes that recurred across Jeff / ms-install-5 / ms-install-6 — GitHub rate limiting (members make zero GitHub calls) and stale-cache (members read the backend, the admin's deterministic tag-pinned publish, not GitHub's cache-fronted raw layer).
+
+- **Member runtime path:** backend-first, always. `check-updates` answers "is this member current?" against `/shared/dist/manifest.json`; `apply-updates`/`member-bootstrap` fetch directories + binary from `/shared/dist/` and SHA-verify.
+- **Admin path:** local clones (tag-pinned) → publish to the backend. "Is the org current with upstream?" is an admin-only **git** check (`git fetch` + compare tags), not a raw fetch.
+- **The SHA-pinned GitHub fetch protocol below is now the ADMIN-only path and the DEPRECATED member fallback** (used only by a not-yet-migrated org, with a deprecation warning; removal targeted for the release after C). New installs always have `/shared/dist/` and never use it.
+
+## Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback
 
 Any task that fetches a directory, version, or archive file from GitHub (`infrastructure_directory_url`, `marketplace_directory_url`, `filesystem_adapter_directory_url`, fallback `*_version_url`, or a `zip_url`) **must use the SHA-pinned fetch protocol** below. Bare `/main/` (branch-form) raw URLs are cache-unsafe: the fetch layer caches them by exact URL and serves stale bytes long after a push, and query-param cache-busters (`?t=…`) are **stripped on the raw redirect**, so they do not defeat the cache (bug `20260601-8d20ea22-2`, three confirmed recurrences). A stale fetch *succeeds*, so the task reports "✓ up to date" against pre-release data with no error — the most dangerous failure mode. A commit-SHA-pinned path is immutable; the cache cannot serve it stale.
 

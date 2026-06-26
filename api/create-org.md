@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.5.0
+version: 3.6.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -38,7 +38,8 @@ Written to the remote filesystem via the on-demand executor:
 - `members-registry.json` at the remote root — the member lookup table
 - `CLAUDE.md` at the remote root — Claude context for the system
 - `/shared/` directory structure initialized with all required subdirectories
-- `/shared/bootstrap/member-bootstrap.zip` — the downloadable bootstrap package for members
+- `/shared/dist/` — the distribution layer (Release C): `manifest.json` (authoritative org version record with per-artifact sha256), `/directories/` (adapter, marketplace, resource-listings, installed collections), and `/binaries/` (the SHA-verified permission-helper). Members read from here, never from github.com (see Step 11 and the `backend-distribution` subroutine).
+- `/shared/bootstrap/member-bootstrap.zip` — the downloadable bootstrap package for members, with the permission-helper binary baked in (Step 12)
 
 Written locally:
 - `agent-index.json` updated with the configured remote filesystem section
@@ -278,18 +279,13 @@ All required domains are reachable. This step downloads the adapter bundle, writ
 
 **Idempotency guard (do this check FIRST — resume/idempotency).** Step 3c is the most-re-entered step (a session resuming after the allowlist halt can otherwise redo it). Before downloading or writing anything: if `install-state.json` already has `next_step` of `"4"` or later (or `status: "awaiting-session-restart"`), AND `mcp-servers/filesystem/aifs-exec.bundle.js` exists with a SHA matching `adapter.json`'s `exec_bundle_checksum`, AND `agent-index.json` parses with a populated `remote_filesystem` section — then Step 3c is **already complete**. Do not re-download the bundle or rewrite config; log a `step_skipped` entry and jump straight to Step 4. Only run the sub-steps below when that guard does not hold.
 
-**1. Download the adapter bundle:**
+**1. Generate the clone script, then stage the adapter bundle from the local clone (Release C — no GitHub fetch):**
 
-Read `filesystem-adapter-directory.json` from `filesystem_adapter_directory_url` **using the SHA-pinned Distribution fetch protocol (standards.md § "Distribution fetch protocol") — not the bare branch URL (`sharesolve`/`adapterdirstale`).** Bare `raw.githubusercontent.com` branch URLs are served from a stale fetch-layer cache and `?t=` busters are stripped on the redirect, so a bare fetch can return a months-old directory (this is why ms-install-5 read the onedrive entry as `1.0.0`). Resolve the repo's branch-head SHA via `api.github.com/repos/{owner}/{repo}/commits/{branch}`, then fetch the `{SHA}`-pinned raw path (immutable). On SHA-resolution failure, fall back to `cdn.jsdelivr.net/gh/...@{branch}`, then the bare URL — but treat a fallback-sourced directory as advisory. Find the entry matching the chosen backend. Download the adapter repo via its `zip_url` (rewrite a branch-form `zip_url` to its SHA-pinned `codeload` form first, same protocol). Extract `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the downloaded zip.
+Using the interview answers (backend + selected collections + the adopted release tag), generate the admin's tag-pinned clone script via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) and surface it for the admin to run. That one script clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`, and any selected collections (core is already cloned — it pins core to the tag too), and downloads + SHA-verifies + places + `--register`s the helper binary. **Do not fetch the adapter (or anything else) from GitHub here** — once the script has run, it's all in local clones. (This retires the old SHA-pinned-directory + `zip_url` download path; that path survives only as the deprecated GitHub fallback, standards.md § "Distribution: backend-first".)
 
-Verify bundle integrity: compute SHA-256 of `aifs-exec.bundle.js` and compare against `exec_bundle_checksum` in `adapter.json`. If mismatch, report the error and prompt the admin to retry.
+Stage `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the local `agent-index-filesystem-<backend>` clone into `mcp-servers/filesystem/`. Compute the bundle SHA on the **git-blob (LF) bytes** — `git -C <clone> show HEAD:dist/aifs-exec.bundle.js` — **not** the working-tree copy: a Windows checkout converts LF→CRLF and breaks the checksum (ms-install-6). Verify it matches `exec_bundle_checksum` in the clone's `adapter.json`; that `adapter.json` is authoritative for the adapter version (record it). If the adapter clone is absent, the clone script hasn't been run — re-surface the script and halt.
 
-> **The bundle's own `adapter.json` is authoritative for the adapter version — not the directory entry (`adapterdirstale`).** `filesystem-adapter-directory.json` is a pointer to the repo; its `version` field can lag the live bundle (raw.githubusercontent CDN/cache staleness — same family as the `sharesolve` stale-fetch). In ms-install-5 the directory still read `1.0.0` while the downloaded bundle was `2.2.x`. Once the SHA matches `adapter.json`'s `exec_bundle_checksum`, trust the version in the downloaded `adapter.json` and record THAT in install state, not the directory's `version`. Do not block or downgrade on a directory/bundle version disagreement once the checksum verifies.
-
-Place the files at their final locations:
-- `mcp-servers/filesystem/aifs-exec.bundle.js` — the on-demand executor bundle
-- `mcp-servers/filesystem/aifs-exec.sh` — the shell wrapper for the executor
-- `mcp-servers/filesystem/adapter.json` — adapter metadata (version, checksum, build timestamp)
+Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exec.sh` (shell wrapper), `adapter.json` (adapter metadata).
 
 **2. Write `agent-index.json`** with the `remote_filesystem` section:
 
@@ -698,6 +694,18 @@ If reachable: invoke `run agent-index-marketplace task list-marketplace-collecti
 
 ---
 
+### Step 11: Publish `/shared/dist/` (Release C — the org distribution layer)
+
+Now that the collections are on the remote, publish the **distribution layer** members read from instead of GitHub, per the **`backend-distribution`** subroutine (`templates/backend-distribution.md`):
+- Copy the three directory files (`infrastructure-directory.json`, `filesystem-adapter-directory.json`, `marketplace-directory.json`) **from the local `agent-index-resource-listings` clone** to `/shared/dist/directories/`.
+- Copy the host-matching `<backend>` permission-helper binary (the one the clone script installed) to `/shared/dist/binaries/`.
+- Write `/shared/dist/manifest.json` — the `org_release_tag`, per-artifact SHA-256s, and the installed collection versions (the org's version authority).
+- Use the publish flow's **diff + hash-verify** (upload only changed; read back + verify SHA — especially the large binary, shell-first + retry). On a fresh create-org everything is new, so all artifacts publish.
+
+This is what makes member `apply-updates` / `check-updates` / `member-bootstrap` fully backend-sourced. (`publish-updates` re-runs this same publish on every later release.)
+
+---
+
 ### Step 12: Generate and Upload Bootstrap Zip
 
 Generate the member bootstrap zip. This is the minimal package that a new member downloads and unpacks to get started.
@@ -724,9 +732,11 @@ agent-index/
 └── CLAUDE.md                           # Claude context
 ```
 
-**Include the executor bundle:**
+**Include the executor bundle AND the permission-helper binary (Release C):**
 
-The executor bundle (`aifs-exec.bundle.js`, `aifs-exec.sh`, and `adapter.json`) was already downloaded and verified in Step 3c. It is available at `mcp-servers/filesystem/` in the project directory. Copy these files into the bootstrap zip contents at `mcp-servers/filesystem/aifs-exec.bundle.js`, `mcp-servers/filesystem/aifs-exec.sh`, and `mcp-servers/filesystem/adapter.json`. Do NOT re-download the bundle.
+The executor bundle (`aifs-exec.bundle.js`, `aifs-exec.sh`, and `adapter.json`) was staged in Step 3c (from the local adapter clone). Copy these into the bootstrap zip at `mcp-servers/filesystem/…`. Do NOT re-download the bundle.
+
+**Also bake in the permission-helper binary** so first-time members get it without any fetch (Release C — members never download it from GitHub): copy the host-matching `<backend>` binary the clone script installed at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}` (+ its `version.txt`) into the zip at the same path. Members unpack it and run `--register` once; they do not download the binary. (For *updates*, members instead read the binary from `/shared/dist/binaries/` per the `backend-distribution` subroutine — see Step 11.)
 
 The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. It does NOT include any credentials.
 

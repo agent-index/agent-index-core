@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.5.0
+version: 3.6.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -283,7 +283,7 @@ status: connected
 
 **Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
 
-If the org pins a permission-helper binary (`org-config.json` → `binaries{}` includes `permission-helper-go` / its backend variant), install it now via the `apply-updates` Phase 1 step 7 binary-reconcile (download → SHA-verify → install to `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`), with the standard binary-download **user-approval prompt**. Without this, the member's first sharing action (e.g. `share-idea` with a teammate) fails with `binary_not_found` until they manually `@ai:update` (the ms-install-4 member hit exactly this). On decline, note that sharing won't work until `@ai:update` installs it.
+**Release C — the binary is already in the unpacked bootstrap zip; do NOT download it from GitHub.** create-org bakes the org's `<backend>` permission-helper binary into the bootstrap zip (Step 12), so after the member unpacked it the binary is already at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`. Read `/shared/dist/manifest.json` and **verify the local binary's SHA against it**: if present and matching, it's installed — nothing to download. If it's absent (an older zip) or the SHA doesn't match, reconcile it from **`/shared/dist/binaries/`** per `apply-updates` Step 1.6 (backend `aifs_read` → SHA-verify → shell-first place + read-back). **Never fetch it from GitHub.** Without the binary the member's first sharing action fails `binary_not_found`, but on a Release-C org it's in the zip, so this is normally already satisfied. Then the member runs `--register` (below).
 
 **Register the `agent-index://` handler — manual host step in Cowork (hostregister).** The binary's `--register` post-install CANNOT run from a Cowork session (Linux sandbox; the binary is host-native). Do NOT claim it auto-registers or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from a link until registered). Surface the exact host command as a required one-time step:
 - Windows (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
