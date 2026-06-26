@@ -145,6 +145,16 @@ Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setu
 - **Admin path:** local clones (tag-pinned) → publish to the backend. "Is the org current with upstream?" is an admin-only **git** check (`git fetch` + compare tags), not a raw fetch.
 - **The SHA-pinned GitHub fetch protocol below is now the ADMIN-only path and the DEPRECATED member fallback** (used only by a not-yet-migrated org, with a deprecation warning; removal targeted for the release after C). New installs always have `/shared/dist/` and never use it.
 
+## Release procedure (admin-side)
+
+Publishing a new version of any artifact (a collection, an adapter, or core/marketplace) follows a fixed, gated procedure. The canonical, ordered gate list is the **release-checklist** in the developer collection (`release-checklist.md`); the `release` task there **generates** the push script that encodes it. Do not hand-author release scripts — generate them, so the invariants below are never left to memory.
+
+- **Preflight is a hard gate.** Every collection in the release passes `@ai:preflight` (or `lib/preflight-cli.sh`) with zero errors before anything is pushed. The push script runs this and aborts on error (the `release-script-runs-preflight` contract).
+- **Push in dependency order, `agent-index-resource-listings` LAST.** The broadcast layer must never reference a version whose code or binary isn't live yet (else `check-updates`/adapter-update flows resolve to a 404). Order: adapter → core → marketplace → collections → resource-listings.
+- **Tag every repo `v<version>` after a successful push.** The `clone-script-generator` and `/shared/dist/manifest.json` pin to these exact tags — tags are the contract between a release and the distribution layer. **Never move or delete a published tag** (cut a new one if a re-cut is truly needed); never pin distribution to a branch.
+- **The agent never pushes or tags.** `git push`/`git tag` run natively on the admin's host, where credentials and a clean working tree are. Agent-side git over a synced/mounted filesystem produces torn commits (FCI-1).
+- **Then publish the backend** per the backend-first model above: clone at the new tags (`clone-script-generator`) → republish `/shared/dist/` + `manifest.json` (`backend-distribution`) → verify the manifest. The release is not "shipped" to members until the manifest reflects it.
+
 ## Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback
 
 Any task that fetches a directory, version, or archive file from GitHub (`infrastructure_directory_url`, `marketplace_directory_url`, `filesystem_adapter_directory_url`, fallback `*_version_url`, or a `zip_url`) **must use the SHA-pinned fetch protocol** below. Bare `/main/` (branch-form) raw URLs are cache-unsafe: the fetch layer caches them by exact URL and serves stale bytes long after a push, and query-param cache-busters (`?t=…`) are **stripped on the raw redirect**, so they do not defeat the cache (bug `20260601-8d20ea22-2`, three confirmed recurrences). A stale fetch *succeeds*, so the task reports "✓ up to date" against pre-release data with no error — the most dangerous failure mode. A commit-SHA-pinned path is immutable; the cache cannot serve it stale.
