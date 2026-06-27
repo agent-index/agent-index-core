@@ -1,5 +1,15 @@
 # Agent-Index Core — Changelog
 
+## [3.19.0] — 2026-06-26 — Release C.1: GitHub-free install orchestration + signed cross-platform helper
+
+Fixes the ms-install-7 findings and the two HIGH permission-helper bugs. Gates customer B (supersedes C). The binary entries in `infrastructure-directory.json` carry `PENDING-SIGNED-BUILD` SHAs until the signed 0.6.0 native build + `fill-shas` lands — the listings push is intentionally blocked until signed binaries exist.
+
+### Changed
+- **create-org 3.7.0 — zero-GitHub orchestration, two scripts.** create-org makes no GitHub calls; Step 3c now generates an **infra** clone script (1a), runs a **collection-selection interview** off the freshly-cloned `marketplace-directory.json` (1b — the never-asked-collections fix), then a **collections** clone script (1c). All version/binary/collection facts come from `git ls-remote` and the local clones, never `raw`/REST (fixes `binwrongbackend`, `staleversionpins`). Dist publish gates the binary on the **host-reported SHA**, not a sandbox re-read of the large file (`binmountstale`). Resume re-opens the install log first (`loggapresume`).
+- **clone-script-generator (templates/) — two modes + hardening.** `infra` and `collections` modes; tag discovery via `git ls-remote --tags` with **no main fallback** (a missing tag fails loudly — `tagnofallback`); binary resolved from the freshly-cloned `infrastructure-directory.json`, **backend-matched**; PowerShell hardened (judge by `$LASTEXITCODE` not stderr, no apostrophes in string literals, run instruction uses `-ExecutionPolicy Bypass`) — every one a real ms-install-7 failure (`clonescriptps1`); darwin registers via the `.app` installer.
+- **apply-updates 3.12.0 + member-bootstrap 3.7.0 — per-platform binary install.** darwin installs the notarized `.app` (never `--register` on a bare binary — `macosregister`); native-platform registration failure is a **HARD error** (no silent swallow) with a post-install verify; binaries verified by host hash; assets expected code-signed.
+- **Helper binary 0.6.0 — code-signed + macOS .app.** `build-all.sh` packages the macOS `.app`, signs **before** checksums, and runs a `verify-signed.sh` gate; new `SIGNING.md` runbook (Windows Trusted Signing, macOS Developer ID + notarization, optional Linux GPG). Fixes `20260626-8d20ea22-2` (Smart App Control hard-block) and `20260626-8d20ea22` (macOS .app registration). `infrastructure-directory.json` gains per-platform `post_install` (darwin → `.app` installer) and darwin `app_filename`.
+
 ## [3.18.0] — 2026-06-25 — Release C: org-backend distribution (members never fetch from GitHub)
 
 Eliminates the stale-cache + GitHub rate-limit class (Jeff / ms-install-5 / ms-install-6 member helper-install block) by making each org's backend its distribution layer. Absorbs the deferred version-check accuracy work (listinglag/shasolve). Adapter unchanged (2.2.1). Gates customer B (ships on this from day one).

@@ -1,50 +1,76 @@
 # Subroutine: clone-script-generator
 
-**Type:** shared subroutine (Release C). Generates a host-native, tag-pinned, idempotent **clone-or-pull script** the admin runs to populate their local clones and the permission-helper binary. Invoked by `create-org` (initial), `install-collection` (add a collection), and `apply-updates`/upgrade (move the org to a newer release). It is **regenerated every time the org's installed set or target version changes** — recurring by design (see Release C tech design doc 29 §1a). The git protocol it uses is NOT the rate-limited GitHub raw/REST path, so this is the sanctioned way to get files onto the admin's machine.
+**Type:** shared subroutine (Release C; reworked in C.1). Generates a host-native, tag-pinned, idempotent **clone/pull + binary script** the admin runs natively. Invoked by `create-org` (initial), `install-collection` (add a collection), and `apply-updates`/upgrade (move the org to a newer release). Regenerated every time the org's installed set or target version changes — recurring by design.
 
-## Why this exists
-Members must never read from github.com (stale-cache + rate-limit class — Jeff, ms-install-5, ms-install-6). The admin is the only GitHub touchpoint, over `git` + one binary download. This subroutine produces the script that does that, deterministically (tag-pinned) and idempotently (clone-or-pull, re-runnable).
+**C.1 invariant — the agent makes ZERO GitHub calls.** All GitHub access lives inside the scripts this subroutine generates: the **git protocol** (`git ls-remote`, `git clone`/`fetch`) and the signed binary's **release-asset** download. The agent never fetches `raw.githubusercontent.com` or the REST API to resolve versions, collections, or the binary — that path produced stale versions and a wrong-backend binary in ms-install-7 (`staleversionpins`, `binwrongbackend`). Version/availability facts come only from `git ls-remote` and the freshly-cloned listings.
+
+## Two modes
+
+This subroutine emits one of two scripts depending on the caller's phase:
+
+- **`infra` mode** (create-org Step 3c-1; apply-updates infra reconcile): clones the infrastructure set — `agent-index-core` (already cloned; pin it to the tag too), `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` — and resolves + downloads + verifies + registers the **backend-matched signed helper binary**. Emits **no** collection clones. This is what makes the authoritative `marketplace-directory.json` available locally so create-org can run its collection-selection interview.
+- **`collections` mode** (create-org Step 3c-3; install-collection): clones only the selected collection repos at their tags. No infra, no binary.
+
+The two-script split exists because collection selection is an **interactive** decision and the catalog only exists after the resource-listings clone (infra mode) lands. A single script can't pause for the interview.
 
 ## Inputs
-- `host_os` — `windows` | `darwin` | `linux` (detected from the running environment; determines PowerShell vs bash output and the binary platform/filename).
+- `mode` — `infra` | `collections`.
+- `host_os` — `windows` | `darwin` | `linux` (detected; selects PowerShell vs bash and the binary platform/filename).
 - `host_arch` — `amd64` | `arm64`.
-- `install_root` — absolute path to the admin's `agent-index/` folder (the repos are cloned as siblings under it; the running session is pointed here).
-- `backend` — `onedrive` | `gdrive` (selects the adapter repo and the binary build).
-- `repos[]` — each `{ name, git_url, tag }`. The standard set:
-  - **initial (create-org):** `agent-index-core` (already cloned — pin it to the tag too), `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`, plus any selected collection repos.
-  - **add (install-collection):** just the collection repo(s) being added, at the org's current tag.
-  - **update (apply-updates/upgrade):** the repos moving to a new tag.
-- `binary` (optional; include whenever the helper isn't already installed+current, and always on initial): `{ release_url, filename, sha256, install_destination, version }` resolved from `agent-index-resource-listings/infrastructure-directory.json` for `backend` + `host_os`/`host_arch`. Omit on an update where the pinned binary version is unchanged.
+- `install_root` — absolute path to the admin's `agent-index/` folder (repos are siblings under it).
+- `backend` — `onedrive` | `gdrive` (infra mode: selects the adapter repo AND the binary build).
+- `repos[]` — each `{ name, git_url }`. **No `tag` field is supplied** — the script resolves the tag itself via `ls-remote` (see Tag discovery). Standard sets:
+  - **infra:** core, `agent-index-filesystem-<backend>`, marketplace, resource-listings.
+  - **collections:** the selected collection repo(s).
 
-## Tag pinning
-Every repo is checked out to a **version tag** (`v<repo-version>` — e.g. core `v3.18.0`, marketplace `v2.13.0`, a collection at its own version). The same instruction therefore yields the same bytes on every machine. The org records the resulting version **set** in `org-config.json` / `/shared/dist/manifest.json` (`org_release_tag` headline + per-artifact versions). Never pin to a branch (`main`) — that's the non-reproducible failure Release C exists to remove.
+The binary is **not** an input. In infra mode the generated script resolves it from the freshly-cloned `agent-index-resource-listings/infrastructure-directory.json` (see Binary resolution) — this is the fix for `binwrongbackend`/`staleversionpins`: nothing about the binary or versions is known to the agent ahead of the clone.
 
-## Generated script behavior (same logic, per-OS syntax)
-For each repo in `repos[]`:
-1. If `<install_root>/<name>/.git` exists → `git -C <name> fetch --tags --depth=1 origin <tag>` then `git -C <name> checkout <tag>`. Else → `git clone --depth=1 --branch <tag> <git_url> <name>`.
-2. Verify HEAD is at `<tag>` after; abort that repo loudly on mismatch (don't leave a half-checked-out tree).
+## Tag discovery (no main fallback)
+For each repo, the script resolves the tag to check out itself, authoritatively, with no agent-side input:
 
-If `binary` is present:
-3. Download `release_url` → `<install_root>/<install_destination>` (host download; not the raw/REST API).
-4. Compute SHA-256 of the downloaded file; **if it ≠ `sha256`, delete it and abort** (no install on mismatch — same security rule as apply-updates' binary reconcile).
-5. Write `version` to the binary's `version.txt`.
-6. Run `<binary> --register` (registers the `agent-index://` handler under HKCU on Windows / the per-user scheme handler on mac/linux). **This is folded in here so the binary never needs a separate script.**
+1. `git ls-remote --tags --refs <git_url>` → parse `refs/tags/v*` → pick the highest semver. (`ls-remote` is the git protocol — not the rate-limited raw/REST API, and never cache-stale.)
+2. `git clone --depth=1 --branch <tag> <git_url> <name>` (or `fetch --tags --depth=1` + `checkout <tag>` if the dir already exists).
+3. Verify HEAD is at `<tag>` after; on mismatch, abort that repo loudly (non-zero exit).
 
-The script is **idempotent**: re-running clone-or-pulls to the same tag, re-verifies the binary (skips re-download if the local SHA already matches), and re-registers harmlessly.
+**There is no `main` fallback.** If a repo exposes no `v*` tag, the script **fails loudly** for that repo (`ERROR: no release tag found for <name>`) and exits non-zero — it does NOT silently pull `main`. The silent-main-fallback in the pre-C.1 generator both defeated reproducibility and masked bad version pins (`tagnofallback`, ms-install-7). A release that isn't tagged is a release bug to fix upstream, not something to paper over with `main`.
+
+## Binary resolution (infra mode only — backend-matched, from the fresh clone)
+After the resource-listings repo is cloned at its tag, the generated script — not the agent — resolves and installs the helper:
+
+1. Read `<install_root>/agent-index-resource-listings/infrastructure-directory.json` (the just-cloned, authoritative copy).
+2. Select the `binaries[]` entry whose **`backend` equals the org `backend`** (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive). **Never** install the wrong-backend build — that is `binwrongbackend`.
+3. From that entry, resolve `version`, the `platforms[]` row matching `host_os`/`host_arch` (`filename`, `sha256`), and the `release_url_template`.
+4. Download the release asset to a path under `install_destination`. The directory binary entry's **`signing`** field says what to expect: `"trusted"` ⇒ the asset is code-signed (Windows Authenticode; macOS Developer ID + notarized) and the `sha256` pins the signed bytes; `"unsigned-bypass"` ⇒ the asset is intentionally unsigned while certs are pending, so a host block at launch/register (Windows Smart App Control) is **expected** and the generated script should print the SAC Evaluation-mode workaround (SIGNING.md) rather than treating it as a failure. Either way the `sha256` pins the actual published bytes — verify it.
+5. Compute SHA-256 of the download; **if it ≠ the directory `sha256`, delete it and abort** (no install on mismatch).
+6. Write `version` to the binary's `version.txt`.
+7. **Register, per platform (`post_install` is now per-platform — see infrastructure-directory schema):**
+   - **windows:** place the signed `.exe` at `install_destination`; run `<binary> --register` (HKCU URL-scheme handler).
+   - **linux:** place the binary; run `<binary> --register` (writes `~/.local/share/applications/*.desktop` + `xdg-mime`).
+   - **darwin:** the bare binary CANNOT register a URL scheme — macOS registers **bundles**. Run the shipped macOS installer (`installer/darwin/install.sh`, or expand the shipped `.app`/`.pkg`) which places the notarized `Agent-Index Helper.app` in `~/Applications/`, then registers via `lsregister`. Do NOT run `--register` against a bare file on darwin (that is the `macosregister` bug).
+8. **Native-platform registration failure is a HARD error** — exit non-zero with an actionable message. (A Linux-sandbox registration of a Windows/Mac binary is NOT host registration; only the script running on the member's real host registers the host.)
+
+## Output format & PowerShell hardening
+- **windows** → a `.ps1` written to `<install_root>/.agent-index/<mode>-<purpose>.ps1`.
+- **darwin/linux** → a `.sh` written to the same dir.
+
+PowerShell emission rules (every one of these was a real ms-install-7 failure — `clonescriptps1`):
+- **Judge success by `$LASTEXITCODE`, not by stderr.** `git` writes normal progress to stderr; do NOT set `$ErrorActionPreference = "Stop"` such that native-command stderr aborts the script. Redirect git's chatter (`2>$null` or capture) and check the exit code explicitly.
+- **Emit NO apostrophes or single-quote characters inside string literals** (e.g. write "does not" not "doesn't", "isn t" never appears). An apostrophe in a message string broke the PowerShell parser mid-run. Prefer double-quoted strings and apostrophe-free wording.
+- The **run instruction the caller surfaces** must invoke with execution-policy bypass, not a bare call:
+  `powershell -ExecutionPolicy Bypass -File "<install_root>\.agent-index\<mode>-<purpose>.ps1"`
+  (Default Windows execution policy blocks local `.ps1`; the bare `& "...ps1"` form fails with `UnauthorizedAccess`.)
+
+Each script prints a clear per-repo / per-binary status line and exits non-zero on any abort, so both the admin and the calling task can detect failure.
 
 ## After the admin runs it (caller responsibility)
-The invoking task (`create-org`/`install-collection`/`apply-updates`) then:
-- Confirms the clones are present and at the expected tags (refuse to proceed on a missing/behind clone — process-enforced, not "please remember").
-- **Diffs the local clone against the backend and re-publishes only what changed** (diff + hash-verify): collections → their remote trees; the directories + binary → `/shared/dist/` + `manifest.json`; the bootstrap zip if the bundle or binary moved.
-
-## Output format
-- **windows** → a `.ps1` written to `<install_root>/.agent-index/clone-<purpose>-<tag>.ps1`, surfaced to the admin to run in PowerShell.
-- **darwin/linux** → a `.sh` written to the same dir, surfaced to run in a shell.
-Each script is self-contained, prints a clear per-repo / binary status line, and exits non-zero on any abort so the admin (and the calling task) can tell it failed.
+The invoking task (`create-org`/`install-collection`/`apply-updates`):
+- Confirms the clones are present and at the expected tags (refuse to proceed on a missing/behind clone — process-enforced).
+- In **infra** mode, before proceeding, reads the now-local `marketplace-directory.json` to drive collection selection, and trusts the **host-reported binary SHA** (printed by the script) for the dist publish rather than re-reading the large binary through the sandbox mount (`binmountstale`, ms-install-6/7).
+- **Diffs the local clone against the backend and republishes only what changed** (diff + hash-verify): collections → their remote trees; the directories + binary → `/shared/dist/` + `manifest.json`; the bootstrap zip if the bundle or binary moved.
 
 ## Notes
-- The adapter repo's bundle is consumed from the clone by the caller (compute the checksum on the **git-blob LF bytes**, not the working-tree copy — Windows checkout converts LF→CRLF and breaks the SHA; ms-install-6).
-- Shallow clone (`--depth=1`) keeps it light; the binary repo is NOT cloned (its built assets are GitHub Release assets, fetched by the `binary` block above, not present in the git tree).
-- This subroutine GENERATES a script; it does not itself fetch anything. The admin runs the script on the host. The agent never downloads the binary into the sandbox (it can't get intact bytes there — ms-install-6).
+- The adapter repo's bundle is consumed from the clone by the caller — compute the checksum on the **git-blob LF bytes** (`git -C <clone> show HEAD:dist/aifs-exec.bundle.js`), not the working-tree copy (Windows checkout converts LF→CRLF and breaks the SHA; ms-install-6).
+- Shallow clone (`--depth=1 --branch <tag>`) keeps it light; the binary repo is NOT cloned (its signed assets are GitHub Release assets, fetched by the binary block above).
+- This subroutine GENERATES a script; it never fetches anything itself. The admin runs the script on the host. The agent never downloads the binary into the sandbox (it cannot get intact bytes there — ms-install-6).
 
 <!-- AIFS:FILE-END -->

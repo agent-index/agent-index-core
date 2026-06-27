@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.6.0
+version: 3.7.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -285,9 +285,14 @@ status: connected
 
 **Release C — the binary is already in the unpacked bootstrap zip; do NOT download it from GitHub.** create-org bakes the org's `<backend>` permission-helper binary into the bootstrap zip (Step 12), so after the member unpacked it the binary is already at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`. Read `/shared/dist/manifest.json` and **verify the local binary's SHA against it**: if present and matching, it's installed — nothing to download. If it's absent (an older zip) or the SHA doesn't match, reconcile it from **`/shared/dist/binaries/`** per `apply-updates` Step 1.6 (backend `aifs_read` → SHA-verify → shell-first place + read-back). **Never fetch it from GitHub.** Without the binary the member's first sharing action fails `binary_not_found`, but on a Release-C org it's in the zip, so this is normally already satisfied. Then the member runs `--register` (below).
 
-**Register the `agent-index://` handler — manual host step in Cowork (hostregister).** The binary's `--register` post-install CANNOT run from a Cowork session (Linux sandbox; the binary is host-native). Do NOT claim it auto-registers or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from a link until registered). Surface the exact host command as a required one-time step:
-- Windows (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
-- macOS/Linux host: `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
+**Register the `agent-index://` handler — manual host step in Cowork (hostregister), per platform.** The registration CANNOT run from a Cowork session (Linux sandbox; the binary is host-native), and a Linux-sandbox registration of a Windows/Mac binary is NOT host registration. Do NOT claim it auto-registers or "registers on first use." Surface the exact host step as a required one-time action:
+- **Windows** (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
+- **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
+- **macOS host:** run the bundled **`.app` installer** — `--register` on the bare binary always fails on darwin (macOS registers bundles, not loose executables; bug `20260626-8d20ea22` `macosregister`). The bootstrap zip carries the notarized `Agent-Index Helper.app` / `installer/darwin/install.sh`; the member runs the installer, which places the `.app` in `~/Applications/` and registers via `lsregister`.
+
+After the member runs it on the host, **verify** rather than assume: macOS → `lsregister -dump | grep agent-index:` (or `--isregistered`); Windows → the HKCU `agent-index` scheme key; Linux → `xdg-mime query default x-scheme-handler/agent-index`. On the member's native platform a registration failure is a **hard** blocker for sharing — surface it as such, do not proceed as if registered.
+
+Signing behavior depends on the directory binary entry's **`signing`** field. If `"trusted"`: the assets are code-signed/notarized and an OS block ("unverified publisher" / Smart App Control) is a signing/release **defect** (bug `20260626-8d20ea22-2`) — report it, don't work around it. If `"unsigned-bypass"` (the interim state while certs are pending): the binary is intentionally unsigned, so a block is **expected** — point the member at the Smart App Control **Evaluation-mode** workaround in `lib/permission-helper-go/SIGNING.md` (and right-click→Open for an unsigned macOS `.app`).
 
 Re-surface until the helper setup check confirms the handler is registered. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
 

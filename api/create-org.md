@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.6.0
+version: 3.7.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -65,9 +65,11 @@ If the file exists and `status` is `"completed"` or any unrecognized value: igno
 
 If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-session-restart"`:
 
-1. Surface: "I found a saved install state from a previous session. Let me verify everything is ready to continue."
+1. **Re-open the install log FIRST (loggap).** Before anything else on a resume, locate the existing install log from the prior session and re-open it for appending; record a `session_resumed` entry immediately, and append every subsequent action of this session to that same log. A resumed session that doesn't re-open the log leaves a gap and then has to backfill (ms-install-7 `loggapresume`). Re-opening first is the standing rule for every resume, not an afterthought.
 
-2. Read the `required_domains` object from the install state file. This contains two groups:
+2. Surface: "I found a saved install state from a previous session. Let me verify everything is ready to continue."
+
+3. Read the `required_domains` object from the install state file. This contains two groups:
 
    - `infrastructure`: domains needed to download adapter bundles (e.g., `raw.githubusercontent.com`)
    - `backend`: domains needed for the chosen storage backend's API (e.g., `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com`)
@@ -76,7 +78,7 @@ If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-
 
    The test is: attempt an HTTP `CONNECT {domain}:443` request through the proxy. A `200` response means the domain is reachable. A `403` with `X-Proxy-Error: blocked-by-allowlist` means it is still blocked. DNS failure (`EAI_AGAIN`) means no proxy is being used and direct DNS is unavailable.
 
-3. If ALL required domains are reachable:
+4. If ALL required domains are reachable:
 
    Surface: "Network access confirmed — all required domains are reachable. Resuming setup."
 
@@ -86,7 +88,7 @@ If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-
 
    - If `completed_steps` only goes through `"3b"` or earlier (domains were blocked before bundle download): restore the collected state and resume at **Step 3c** (download bundle and write config files).
 
-4. If ANY required domain is still blocked: surface the specific domains that remain blocked and re-display the allowlisting instructions:
+5. If ANY required domain is still blocked: surface the specific domains that remain blocked and re-display the allowlisting instructions:
 
    > **The following domains are still not reachable:**
    > - `{domain}`: {reason}
@@ -279,11 +281,25 @@ All required domains are reachable. This step downloads the adapter bundle, writ
 
 **Idempotency guard (do this check FIRST — resume/idempotency).** Step 3c is the most-re-entered step (a session resuming after the allowlist halt can otherwise redo it). Before downloading or writing anything: if `install-state.json` already has `next_step` of `"4"` or later (or `status: "awaiting-session-restart"`), AND `mcp-servers/filesystem/aifs-exec.bundle.js` exists with a SHA matching `adapter.json`'s `exec_bundle_checksum`, AND `agent-index.json` parses with a populated `remote_filesystem` section — then Step 3c is **already complete**. Do not re-download the bundle or rewrite config; log a `step_skipped` entry and jump straight to Step 4. Only run the sub-steps below when that guard does not hold.
 
-**1. Generate the clone script, then stage the adapter bundle from the local clone (Release C — no GitHub fetch):**
+**The agent makes ZERO GitHub calls in this step (C.1 invariant).** All version/availability/binary facts come from `git ls-remote` and the freshly-cloned listings — never `raw.githubusercontent.com` or the REST API. Resolving versions/binary from `raw` is what installed a wrong-backend binary and stale version pins in ms-install-7 (`binwrongbackend`, `staleversionpins`). This step runs **two** host scripts with a collection-selection interview between them, because the catalog of installable collections only exists after the resource-listings clone lands, and a script cannot pause for an interview.
 
-Using the interview answers (backend + selected collections + the adopted release tag), generate the admin's tag-pinned clone script via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) and surface it for the admin to run. That one script clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`, and any selected collections (core is already cloned — it pins core to the tag too), and downloads + SHA-verifies + places + `--register`s the helper binary. **Do not fetch the adapter (or anything else) from GitHub here** — once the script has run, it's all in local clones. (This retires the old SHA-pinned-directory + `zip_url` download path; that path survives only as the deprecated GitHub fallback, standards.md § "Distribution: backend-first".)
+**1a. Generate + surface the infra clone script (`clone-script-generator`, `mode: infra`):**
 
-Stage `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the local `agent-index-filesystem-<backend>` clone into `mcp-servers/filesystem/`. Compute the bundle SHA on the **git-blob (LF) bytes** — `git -C <clone> show HEAD:dist/aifs-exec.bundle.js` — **not** the working-tree copy: a Windows checkout converts LF→CRLF and breaks the checksum (ms-install-6). Verify it matches `exec_bundle_checksum` in the clone's `adapter.json`; that `adapter.json` is authoritative for the adapter version (record it). If the adapter clone is absent, the clone script hasn't been run — re-surface the script and halt.
+Generate the admin's tag-pinned infra script via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra` and surface it for the admin to run natively. That script: discovers each repo's latest `v*` tag via `git ls-remote --tags` (no `main` fallback — a missing tag fails loudly), clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
+
+Wait for the admin to confirm the infra script ran. If `agent-index-resource-listings/` or `agent-index-filesystem-<backend>/` is absent afterward, the script did not complete — re-surface it and halt.
+
+**1b. Collection-selection interview (reads the freshly-cloned catalog — the fix for the never-asked-collections gap):**
+
+Now that `agent-index-resource-listings/marketplace-directory.json` is local, read it and present the available collections to the admin. Ask which (if any) they want installed at org creation. Record the selected collection repos + their `git_url`s. (If the admin wants none now, they can always add later via `@ai:download-and-install-collection`.) **This is the first time the admin is asked about collections** — pre-C.1 the flow cloned before ever asking (ms-install-7 finding).
+
+**1c. Generate + surface the collections clone script (`clone-script-generator`, `mode: collections`) — only if collections were selected:**
+
+If the admin selected any collections, generate a second script with `mode: collections` for the selected repos (tag-pinned via `ls-remote`, same hardening) and surface it. Wait for confirmation it ran. If none were selected, skip this sub-step.
+
+**1d. Stage the adapter bundle from the local clone:**
+
+Stage `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the local `agent-index-filesystem-<backend>` clone into `mcp-servers/filesystem/`. Compute the bundle SHA on the **git-blob (LF) bytes** — `git -C <clone> show HEAD:dist/aifs-exec.bundle.js` — **not** the working-tree copy: a Windows checkout converts LF→CRLF and breaks the checksum (ms-install-6). Verify it matches `exec_bundle_checksum` in the clone's `adapter.json`; that `adapter.json` is authoritative for the adapter version (record it). For the helper binary, record the **host-reported SHA** printed by the infra script — do NOT re-read the large binary through the sandbox mount to verify it (the mount serves stale/torn bytes for large files; `binmountstale`, ms-install-6/7).
 
 Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exec.sh` (shell wrapper), `adapter.json` (adapter metadata).
 
@@ -684,7 +700,7 @@ Proceed to Step 11.
 
 ---
 
-### Step 11: Check Network Access and Open Marketplace
+### Step 10.5: Check Network Access and Open Marketplace
 
 Before invoking any marketplace task, perform a lightweight connectivity check by attempting to fetch the `marketplace_directory_url` from `agent-index.json`:
 
@@ -698,9 +714,10 @@ If reachable: invoke `run agent-index-marketplace task list-marketplace-collecti
 
 Now that the collections are on the remote, publish the **distribution layer** members read from instead of GitHub, per the **`backend-distribution`** subroutine (`templates/backend-distribution.md`):
 - Copy the three directory files (`infrastructure-directory.json`, `filesystem-adapter-directory.json`, `marketplace-directory.json`) **from the local `agent-index-resource-listings` clone** to `/shared/dist/directories/`.
-- Copy the host-matching `<backend>` permission-helper binary (the one the clone script installed) to `/shared/dist/binaries/`.
-- Write `/shared/dist/manifest.json` — the `org_release_tag`, per-artifact SHA-256s, and the installed collection versions (the org's version authority).
-- Use the publish flow's **diff + hash-verify** (upload only changed; read back + verify SHA — especially the large binary, shell-first + retry). On a fresh create-org everything is new, so all artifacts publish.
+- Copy the host-matching, **backend-matched signed** permission-helper binary (the one the infra clone script installed and verified) to `/shared/dist/binaries/`. Its expected SHA is the **host-reported SHA printed by the infra script** (equal to the `infrastructure-directory.json` entry for this backend/platform). **Confirm the publish against that host SHA — do NOT verify by re-reading the large binary through the sandbox mount**, which serves stale/torn bytes for large files and caused a wrong/stale binary to be published in ms-install-7 (`binmountstale`). If the sandbox read of the binary disagrees with the host SHA, trust the host SHA and use the host-named-copy technique (read a freshly-named copy) rather than publishing sandbox bytes.
+- Write `/shared/dist/manifest.json` — the `org_release_tag`, per-artifact SHA-256s (the binary's = the host SHA), and the installed collection versions (the org's version authority).
+- Use the publish flow's **diff + hash-verify** (upload only changed; for the three small directory files, read back + verify SHA; for the large binary, gate on the host SHA as above, shell-first + retry). On a fresh create-org everything is new, so all artifacts publish.
+- **Do not publish or bake a binary whose version is not the backend-matched directory `current_version`.** (In ms-install-7 a stale `0.3.0` gdrive binary reached dist + the bootstrap zip before being corrected at Step 13b; with 1a now resolving the backend-matched signed binary up front, dist/zip and the pin are consistent from the start.)
 
 This is what makes member `apply-updates` / `check-updates` / `member-bootstrap` fully backend-sourced. (`publish-updates` re-runs this same publish on every later release.)
 
