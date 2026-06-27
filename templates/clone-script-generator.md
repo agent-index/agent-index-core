@@ -25,22 +25,31 @@ The two-script split exists because collection selection is an **interactive** d
 
 The binary is **not** an input. In infra mode the generated script resolves it from the freshly-cloned `agent-index-resource-listings/infrastructure-directory.json` (see Binary resolution) — this is the fix for `binwrongbackend`/`staleversionpins`: nothing about the binary or versions is known to the agent ahead of the clone.
 
-## Tag discovery (no main fallback)
-For each repo, the script resolves the tag to check out itself, authoritatively, with no agent-side input:
+## Version resolution — DIFFERENT per mode (C.1.1)
 
-1. `git ls-remote --tags --refs <git_url>` → parse `refs/tags/v*` → pick the highest semver. (`ls-remote` is the git protocol — not the rate-limited raw/REST API, and never cache-stale.)
-2. `git clone --depth=1 --branch <tag> <git_url> <name>` (or `fetch --tags --depth=1` + `checkout <tag>` if the dir already exists).
-3. Verify HEAD is at `<tag>` after; on mismatch, abort that repo loudly (non-zero exit).
+The two repo classes ship differently and MUST be resolved differently (ms-install-8 `colltags`):
+- **Infrastructure repos** (infra mode: core, adapter, marketplace, resource-listings) are **release-tagged** → pin to the highest `v*` tag.
+- **Collection repos** (collections mode) are **NOT tagged** — they ship from the default branch (`main`), versioned via `current_version` in the marketplace directory → clone the default branch and pin the exact **HEAD commit**.
 
-**There is no `main` fallback.** If a repo exposes no `v*` tag, the script **fails loudly** for that repo (`ERROR: no release tag found for <name>`) and exits non-zero — it does NOT silently pull `main`. The silent-main-fallback in the pre-C.1 generator both defeated reproducibility and masked bad version pins (`tagnofallback`, ms-install-7). A release that isn't tagged is a release bug to fix upstream, not something to paper over with `main`.
+### Infra repos — tag-pinned (single-tag safe)
+1. `git ls-remote --tags --refs <git_url>` → parse `refs/tags/v*`.
+2. **Pick the highest semver — in ARRAY context.** A repo with exactly one tag is the common case (the adapter ships a single `v2.2.1`). In PowerShell, `(… | Sort-Object …)[-1]` on a single match returns a **scalar string**, so `[-1]` then indexes the last **character** (`"1"`) and git tries to clone branch "1" (`singletag`, ms-install-8). The generated script MUST force array context — `@(… | Sort-Object {[version]($_ -replace '^v')} )[-1]`, or `… | Select-Object -Last 1` — so a one-tag repo still yields the whole tag string. (Same hazard in bash is absent, but emit the equivalent guard for parity.)
+3. `git clone --depth=1 --branch <tag> <git_url> <name>` (or `fetch --tags --depth=1` + `checkout <tag>` if the dir exists). Verify HEAD is at `<tag>`; on mismatch, abort that repo loudly (non-zero exit).
+4. **No `main` fallback** for infra repos. If an infra repo exposes no `v*` tag, **fail loudly** (`ERROR: no release tag found for <name>`) — do NOT silently pull `main` (`tagnofallback`, ms-install-7). An untagged infra release is an upstream release bug.
+
+### Collection repos — default-branch, HEAD-SHA pinned
+Collections have no release tags by design (`colltags`). For each selected collection repo:
+1. `git clone --depth=1 <git_url> <name>` (default branch — do NOT pass `--branch v*`; there is no tag, and requiring one is the bug).
+2. Record the exact pinned commit: `git -C <name> rev-parse HEAD` → report `OK clone <name> at <branch>@<sha>`. The HEAD SHA is the reproducibility anchor (the org records it; `current_version` from `marketplace-directory.json` is the human-facing version).
+3. Verify `collection.json` is present after clone; abort that collection loudly if not.
 
 ## Binary resolution (infra mode only — backend-matched, from the fresh clone)
 After the resource-listings repo is cloned at its tag, the generated script — not the agent — resolves and installs the helper:
 
 1. Read `<install_root>/agent-index-resource-listings/infrastructure-directory.json` (the just-cloned, authoritative copy).
 2. Select the `binaries[]` entry whose **`backend` equals the org `backend`** (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive). **Never** install the wrong-backend build — that is `binwrongbackend`.
-3. From that entry, resolve `version`, the `platforms[]` row matching `host_os`/`host_arch` (`filename`, `sha256`), and the `release_url_template`.
-4. Download the release asset to a path under `install_destination`. The directory binary entry's **`signing`** field says what to expect: `"trusted"` ⇒ the asset is code-signed (Windows Authenticode; macOS Developer ID + notarized) and the `sha256` pins the signed bytes; `"unsigned-bypass"` ⇒ the asset is intentionally unsigned while certs are pending, so a host block at launch/register (Windows Smart App Control) is **expected** and the generated script should print the SAC Evaluation-mode workaround (SIGNING.md) rather than treating it as a failure. Either way the `sha256` pins the actual published bytes — verify it.
+3. From that entry, resolve the version from **`current_version`** (NOT `version` — the directory field is `current_version`; reading the wrong field yields an empty string and a broken `.../download/v//...{version}` URL — `binfield`, ms-install-8), the `platforms[]` row matching `host_os`/`host_arch` (`filename`, `sha256`), and the `release_url_template`. Substitute `{version}` into BOTH the `release_url_template` and the `filename` **before** assembling the URL (the template embeds `{version}` in the filename too).
+4. Download the release asset to a path under `install_destination`. **On Windows PowerShell 5.1, force TLS 1.2 first** — `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12` — because PS 5.1 defaults to TLS 1.0, which GitHub's download CDN rejects with "The connection was closed unexpectedly" (`tls12`, ms-install-8). The directory binary entry's **`signing`** field says what to expect: `"trusted"` ⇒ the asset is code-signed (Windows Authenticode; macOS Developer ID + notarized) and the `sha256` pins the signed bytes; `"unsigned-bypass"` ⇒ the asset is intentionally unsigned while certs are pending, so a host block at launch/register (Windows Smart App Control) is **expected** and the generated script should print the SAC Evaluation-mode workaround (SIGNING.md) rather than treating it as a failure. Either way the `sha256` pins the actual published bytes — verify it.
 5. Compute SHA-256 of the download; **if it ≠ the directory `sha256`, delete it and abort** (no install on mismatch).
 6. Write `version` to the binary's `version.txt`.
 7. **Register, per platform (`post_install` is now per-platform — see infrastructure-directory schema):**
@@ -53,9 +62,11 @@ After the resource-listings repo is cloned at its tag, the generated script — 
 - **windows** → a `.ps1` written to `<install_root>/.agent-index/<mode>-<purpose>.ps1`.
 - **darwin/linux** → a `.sh` written to the same dir.
 
-PowerShell emission rules (every one of these was a real ms-install-7 failure — `clonescriptps1`):
+PowerShell emission rules (every one was a real failure — `clonescriptps1` in ms-install-7, then `singletag`/`tls12` in ms-install-8):
 - **Judge success by `$LASTEXITCODE`, not by stderr.** `git` writes normal progress to stderr; do NOT set `$ErrorActionPreference = "Stop"` such that native-command stderr aborts the script. Redirect git's chatter (`2>$null` or capture) and check the exit code explicitly.
-- **Emit NO apostrophes or single-quote characters inside string literals** (e.g. write "does not" not "doesn't", "isn t" never appears). An apostrophe in a message string broke the PowerShell parser mid-run. Prefer double-quoted strings and apostrophe-free wording.
+- **Emit NO apostrophes or single-quote characters inside string literals** (e.g. write "does not" not "doesn't"). An apostrophe in a message string broke the PowerShell parser mid-run. Prefer double-quoted, apostrophe-free wording.
+- **Force array context for any single-result pipeline you index** (`@(...)[-1]` / `Select-Object -Last 1`). A scalar from a one-element pipeline indexed with `[-1]` returns a character, not the item (`singletag`). This bit tag selection; apply it anywhere the script does `(...)[-1]`/`[0]`.
+- **Force TLS 1.2 before any `Invoke-WebRequest`/download** (`[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`). PS 5.1 defaults to TLS 1.0, which GitHub's CDN rejects (`tls12`).
 - The **run instruction the caller surfaces** must invoke with execution-policy bypass, not a bare call:
   `powershell -ExecutionPolicy Bypass -File "<install_root>\.agent-index\<mode>-<purpose>.ps1"`
   (Default Windows execution policy blocks local `.ps1`; the bare `& "...ps1"` form fails with `UnauthorizedAccess`.)

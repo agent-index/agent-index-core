@@ -1,0 +1,26 @@
+# Build artifacts & binaries — agent-index-core ships SOURCE only.
+# The permission-helper binary is distributed via the GitHub release +
+# the org backend's /shared/dist/binaries/, never committed into core.
+# (corebin / distnoignore — ms-install-8: a committed bin/*.exe was cloned into
+# every org and uploaded to every backend; lib/**/dist/ was one `git add -A`
+# away from committing ~200MB of built binaries.)
+
+# Committed-binary bloat (remove with: git rm --cached -r bin)
+bin/
+
+# Native build output (build-all.sh / build-onedrive-b.sh write here)
+lib/permission-helper-go/dist/
+**/dist/
+
+# Compiled binaries / bundles of any platform
+*.exe
+*.app/
+agent-index-show-plan
+agent-index-show-plan-*
+
+# Node
+node_modules/
+
+# Local credentials / install state (never commit)
+.agent-index/credentials/
+*.credentials.json

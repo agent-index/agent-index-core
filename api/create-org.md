@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.7.0
+version: 3.8.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -619,17 +619,21 @@ If the template file is missing for any reason, fall back to generating the file
 
 After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.)
 
-**Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and do NOT go through the `permission-change-helper` skill. The admin running `create-org` is the org-creator with organizer authority on the new Shared Drive; the operations are deterministic and a one-time setup. Helper-mediated review would add friction without adding safety in this context.
+**Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and may be applied directly via `aifs_share` — the admin running `create-org` is the org-creator with organizer authority on the new drive/site; the operations are deterministic, one-time setup of resources the admin already fully owns. This is the one sanctioned exception to the helper-gated model. Helper-mediated review would add friction without adding safety here.
+
+**Fallback when the direct call is refused or unavailable (helperfallback — required, do NOT halt).** Calling `aifs_share` directly is the *preferred* path, but it is **not guaranteed**: a given agent instance may decline to make a permission-modifying call (the standing agent-safety rule), or the op may be unavailable. If, for any reason, you do not apply a grant directly, **do not halt the install** — fall back to the **`permission-change-helper`** skill for the remaining grants: build the grant spec (all four root grants here as one spec, the collaborative-folder grants in Step 10 as another), surface the helper review page, and the admin Accepts — the helper applies them under the **admin's own OAuth token** (the same token already authenticated this session). End state is identical. The helper binary was installed + registered in Phase 1, so it is available now. (If the helper is unsigned-bypass and the host blocks it, route the admin through the SAC Evaluation-mode workaround, SIGNING.md — same as any helper use in the interim.) Only after BOTH the direct attempt and the helper fallback fail do you surface the failure-handling block below.
 
 For each path in `["/shared/", "/CLAUDE.md", "/org-config.json", "/members-registry.json"]`, call:
 
 ```
 aifs_share(
-  resource: "<path>",
-  recipient: "{all_members_group}",
+  path: "<path>",
+  subject: "{all_members_group}",
   role: "reader"
 )
 ```
+
+**Argument names (sharedocbug, ms-install-8):** the adapter's `aifs_share` op takes **`path`**, **`subject`**, and **`role`** — NOT `resource`/`recipient`. Earlier revisions of this doc showed `resource`/`recipient`, which fail against adapter 2.2.x. Use `path`/`subject`/`role` for every `aifs_share` call in this task (root grants here AND the collaborative-folder grants in Step 10).
 
 Where `{all_members_group}` is the org's all-members group, persisted in `org-config.json` at `remote_filesystem.connection.all_members_group`. On **gdrive** this is a Google Group address (typically `all@{org_domain}`) collected in Step 7. On **onedrive** this is the tenant **Microsoft 365 group** (email or objectId) connected to the SharePoint site — create-org captures it during the M365 connection step or derives it from the site's owners/members group; `aifs_share` passes it to a Graph `invite` (additive). Same grant, same role vocabulary, on both backends.
 
@@ -664,9 +668,13 @@ Confirm: "Your org '{org_name}' is configured. Org config and directory structur
 
 Upload `agent-index-core/` to the remote filesystem so that members can read collection definitions via MCP during their setup.
 
-Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. Skip `node_modules/`, `.git/`, and other non-essential directories. **Upload files sequentially** — one `aifs_write` at a time, waiting for each to complete before the next. See the sequential write note in Step 8.
+Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. **Upload files sequentially** — one `aifs_write` at a time, waiting for each to complete before the next. See the sequential write note in Step 8.
 
-**Large / binary files (default, not an escape hatch):** a file passed as the inline `content` string is capped by the shell argument length (~128KB) and binaries break as a CLI arg. For any file larger than ~100KB or any binary (e.g. the permission-helper `.exe`), use the `content_file` form: `aifs_write` with `{"path": "...", "content_file": "<local path>", "encoding": "base64"}`. The adapter reads the bytes from disk and, for OneDrive, uses an upload session automatically for >4MB. Prefer `content_file` for *every* file in a bulk upload — it avoids the arg-size cliff entirely and `aifs_write`'s size-verification confirms each file landed intact.
+**Exclude build artifacts and binaries from the core upload (corebin, ms-install-8).** Skip: `node_modules/`, `.git/`, `bin/`, any `**/dist/` directory, and any compiled binary (`*.exe`, Mach-O/ELF executables, `*.app/` bundles). Core is *source + capability definitions* only — the permission-helper binary is distributed via `/shared/dist/binaries/` (Step 11), NOT bundled inside the core tree. (ms-install-8 uploaded a stray committed 9 MB `bin/agent-index-show-plan.exe` to the org — pure bloat and the cause of the slow Step-9 transfer. That file is being removed from the repo + gitignored in C.1.1, but this exclusion is the belt-and-suspenders guard so no build output ever rides along.)
+
+**Large / non-binary files (the `content_file` default):** a file passed as the inline `content` string is capped by the shell argument length (~128KB). For any text file larger than ~100KB, use the `content_file` form: `aifs_write` with `{"path": "...", "content_file": "<local path>"}`. Prefer `content_file` for *every* file in a bulk upload — it avoids the arg-size cliff and `aifs_write`'s size-verification confirms each file landed intact.
+
+**If a large binary genuinely must be uploaded (e.g. the helper in Step 11):** do it in a **single foreground `aifs_write` call** — do NOT background it (`nohup`/`&`). Cowork background processes do not persist across tool calls and only one VM process runs at a time, so a backgrounded upload silently dies and wastes calls (`biguploadbg`, ms-install-8). A ~15MB `content_file` upload completes within a single call's window; if it ever times out, retry the same single foreground call (the adapter write is atomic + size-verified). Gate success on the host-reported SHA, not a sandbox re-read.
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 

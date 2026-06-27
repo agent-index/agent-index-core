@@ -1,5 +1,20 @@
 # Agent-Index Core — Changelog
 
+## [3.20.0] — 2026-06-27 — Release C.1.1: ms-install-8 hardening (first full OneDrive install)
+
+ms-install-8 completed the first end-to-end OneDrive org install on the C.1 stack (validating the two-script flow, the collection interview, the backend-matched 0.6.0 helper, and full Phase 2). It surfaced bugs the admin had to patch live — all in the *generated* clone script and the upload path, not the architecture. Helper binary unchanged (0.6.0); no rebuild — ships unsigned-bypass.
+
+### Fixed
+- **clone-script-generator `singletag`:** a single-tag repo (the adapter ships only `v2.2.1`) made PowerShell's `Sort-Object` return a scalar, so `[-1]` grabbed the character `"1"` and git cloned branch "1". Tag selection now forces array context (`@(...)[-1]` / `Select-Object -Last 1`).
+- **clone-script-generator `colltags`:** collections ship from `main` with **no release tags** (versioned via `current_version`), but the collections script required a tag → "no release tag found." Collections now clone the default branch and pin the **HEAD commit**; infra repos stay tag-pinned. (Version resolution is now explicitly per-mode.)
+- **clone-script-generator `binfield` + `tls12`:** the binary version read `version` instead of `current_version` (empty → broken `/download/v//…{version}` URL), and PS 5.1 defaulted to TLS 1.0 (GitHub CDN rejects → "connection closed unexpectedly"). Fixed the field name + `{version}` substitution and forced TLS 1.2 before download. Added both to the PowerShell hardening checklist.
+- **create-org `sharedocbug`:** documented `aifs_share` args were `resource`/`recipient`; the adapter takes **`path`/`subject`/`role`**. Corrected at the call site + a note covering all `aifs_share` calls in the task.
+- **create-org / `corebin`:** removed the committed 9 MB `bin/agent-index-show-plan.exe` from core and added a `.gitignore` (`bin/`, `**/dist/`, `*.exe`, `*.app`) — it was cloned into every org and uploaded to every backend. Step 9 also now **excludes binaries/build-artifacts** from the core upload (belt-and-suspenders), and large binaries upload in a **single foreground call** (never backgrounded — `biguploadbg`).
+
+### Changed
+- **standards.md + create-org `directapply` / `helperfallback`:** documents create-org's install-time bootstrap as the **one sanctioned exception** to the helper-gated permission model — the org creator is interactively authenticated and owns the entire tenant at creation, so root + collaborative-folder grants may apply `aifs_share` directly; all runtime/member-facing sharing stays helper-gated. **Crucially, the direct path is preferred but not guaranteed** (a given agent instance may still decline a permission-modifying call), so create-org now has a required **helper fallback**: any grant not applied directly routes through the `permission-change-helper` (admin Accepts, applied under their own token — same end state); the install halts only if BOTH paths fail. create-org never depends on the direct call succeeding.
+- create-org 3.7.0 → 3.8.0.
+
 ## [3.19.0] — 2026-06-26 — Release C.1: GitHub-free install orchestration + signed cross-platform helper
 
 Fixes the ms-install-7 findings and the two HIGH permission-helper bugs. Gates customer B (supersedes C). The binary entries in `infrastructure-directory.json` carry `PENDING-SIGNED-BUILD` SHAs until the signed 0.6.0 native build + `fill-shas` lands — the listings push is intentionally blocked until signed binaries exist.
