@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.8.1
+version: 3.9.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -515,6 +515,21 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 ---
 
+### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
+
+**This step is mandatory on every publish that changes any distributed artifact** (a directory file, a collection version, or the backend binary). Before C.1.3, publish-updates wrote the `/shared/updates/` log but never refreshed `/shared/dist/` — so `manifest.json` (the org's version authority) went stale after an in-place update, and members reading the backend-distribution layer saw the *old* versions/SHAs. `/shared/dist/` is only as current as its last publish; this step keeps it current.
+
+Run the **backend-distribution publish flow** (canonical definition: `templates/backend-distribution.md` § "Publish flow") against the artifacts touched by this publish:
+
+1. **Recompute the manifest.** For each directory file (from the local `resource-listings` clone) and the backend binary (host-reported SHA from the infra clone script), compute the SHA **per the Canonical SHA-256 rule** in `backend-distribution.md` (stored/git-blob LF bytes for directories — **never `aifs_read` stdout**; host-reported SHA for the binary). Diff against the current `/shared/dist/manifest.json` and upload only changed/new artifacts; read back and verify each upload with the canonical member-side recipe (stat `size` + `head -c` truncation).
+2. **Rewrite `/shared/dist/manifest.json`** with the new `org_release_tag` (= the core version just published), the refreshed artifact SHAs, and the **`collections[]` versions reconciled to what this publish set** (so `check-updates`/`apply-updates` read the correct "latest" per collection). Verify it reads back + parses.
+3. **Round-trip self-check (manifestsha guard):** after writing the manifest, re-verify the `infrastructure-directory.json` artifact via the member-side recipe and confirm the computed SHA equals the value just written. If it does not, the publish computed a SHA members will reject — **abort and fix** (do not report success). This is the gate that would have caught the `412094b4` vs `e1d549e4` mismatch at publish time.
+4. **Re-bake the bootstrap zip** binary if the backend binary changed (Step 12 / create-org parity).
+
+If this publish changed nothing distributed (e.g. a docs-only org-config edit), this step is a no-op — but still confirm `/shared/dist/manifest.json` already advertises the current versions; if it doesn't (a pre-C.1.3 org whose dist was never refreshed), republish it now to heal the org.
+
+---
+
 ### Step 7: Verify Propagation, Then Confirm to Admin
 
 **Propagation check (added in core 3.11.0 — closes the "pushed ≠ visible" class structurally).** If this publish involved any upstream listing change (directory files in `agent-index-resource-listings`: infrastructure, marketplace, adapter, or binary directories — whether pushed in this session or assumed pushed beforehand), verify the org-visible state BEFORE reporting success:
@@ -522,8 +537,9 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — standards.md.
 2. Confirm the fetched copy advertises the versions just published (and that `directory_version` itself was bumped — a listing content change under an unchanged `directory_version` is invisible to consumers; see bug `20260607-8d20ea22-131906-d1rv`).
 3. If the fetched copy does NOT reflect the publish: **the publish report must say so as a failure**, naming the stale or unbumped file. Do not report overall success. Typical causes: the listing push was missed, or `directory_version` wasn't bumped. Direct the admin to push/bump and re-run the check.
+4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read("/shared/dist/manifest.json")` and confirm it advertises the versions/`org_release_tag` just published AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
 
-If no listing was touched, skip the propagation check.
+If no listing/collection/binary was touched, skip steps 1–3 but still run step 4 (the dist manifest must always be current for members).
 
 After Step 5, Step 6, and the propagation check succeed, surface confirmation:
 

@@ -1,5 +1,20 @@
 # Agent-Index Core — Changelog
 
+## [3.22.0] — 2026-06-28 — Release C.1.3: distribution integrity + cross-drive read
+
+Folds the findings from the ms_prod_9 member-apply session and the admin-side discovery run. The backend-distribution loop is now real end-to-end, and members can finally open content shared to them from another member's personal drive.
+
+### Fixed
+- **publish-updates 3.9.0 — `publishdistgap` (new Step 6.5).** publish-updates wrote the `/shared/updates/` log but never refreshed `/shared/dist/`, so the manifest (the org's version authority) went stale after an in-place update and members read old versions/SHAs. Step 6.5 now republishes `/shared/dist/` (manifest + directories + binary) on every publish, with a publish-time **round-trip SHA self-check** (re-verifies the infrastructure-directory entry via the member-side recipe before reporting success). Step 7's propagation check now also verifies the dist manifest (members read dist, not the GitHub listing).
+- **apply-updates 3.13.0 + check-updates (marketplace 2.10.0) — `shagateunimplemented` + `manifestsha`.** Both tasks read the dist manifest for version numbers but **never hashed the artifacts**, so the integrity property the model promises did not exist; and a manifest computed from `aifs_read` stdout (which appends a trailing newline → `412094b4…`) didn't match the stored bytes (`e1d549e4…`). `templates/backend-distribution.md` now mandates a **Canonical SHA-256 rule** — hash exactly the `aifs_stat`-reported `size` bytes (`head -c <size>`), never shell-captured stdout — applied identically on the publish and member sides. apply-updates Step 1.6 and check-updates now actually compute + verify and **refuse mismatches**.
+- **apply-updates 3.13.0 — `memberapplynotdistaware` (Option A).** Collection files are read via `id:{folder_id}` **only**; the silent legacy `/{collection}` fallback is **removed** (one read path, one authority). A pre-backfill org with no `folder_id` is skipped with an explicit logged notice (re-publish backfills it), never silently root-read.
+- **apply-updates 3.13.0 — `applyerrorpollution` (new Step 1.6 guard).** A truncated `agent-index.json` from a mount-tear made every `aifs-exec` call return `CONFIG_ERROR`, and the error text was written into all 38 manifest files. apply-updates now validates config up front, **aborts the whole run on any error envelope, never persists a payload that parses as an aifs error**, validates each file's shape before writing, and bounds the read/write fan-out to ≤4 concurrent.
+- **org-setup 3.6.0 — `helpernoreg` (new Phase 5b).** "Set up my workspace" routes to org-setup, but the helper-registration fix had only landed in member-bootstrap, so this path still buried registration as an optional closing footnote. Phase 5b now presents `--register` as a **do-it-now, verified, re-surfaced** step with the dead-link consequence stated.
+
+### Changed
+- **standards.md** — corrected the Distribution section to match reality (real SHA gate; one id-anchored read path; publish republishes dist); added a **"Reads go through aifs only"** rule (`wrongconnectorfallback` — never improvise via an external connector when a bare anchor 404s) and a **"Cross-drive ID anchors"** addressing bullet + pointer-convention update (`item_drive_id`).
+- Pairs with **onedrive adapter 2.3.0** (`crossdriveread`) and **library 1.1.0 / projects 4.1.0 / strategy 1.2.0 / client-intelligence 2.3.0** (pointers carry `item_drive_id`; readers open shared private content via the cross-drive anchor). Adapter bundle rebuild required.
+
 ## [3.21.0] — 2026-06-27 — Release C.1.2: ms-install-9 collsetupgap (collections set up at create-org)
 
 ms-install-9 was the first **clean** OneDrive install on the C.1.1 stack — Phase 1 generated scripts ran **first-try, no live patching** (singletag/colltags/binfield/tls12 all validated), and Phase 2 completed (loggap/sharedocbug/corebin/directapply held). One real finding remained.

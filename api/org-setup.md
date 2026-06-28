@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.5.1
+version: 3.6.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -242,6 +242,16 @@ Write onboarding completion state to `/members/{member-hash}/profile/onboarding-
 ```
 
 After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` on the remote filesystem (read via `aifs_read("/members-registry.json")`, modify, write back via `aifs_write("/members-registry.json", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
+
+**Phase 5b — Permission-helper registration (do-it-now, verified — added in core 3.22.0, `helpernoreg`).** Onboarding installs sharing-capable capabilities (Library docs, Projects ideas, owned-content shares), so the `agent-index://` URL handler must be registered on the host or the member's **first share will emit a link that does nothing.** This is the same do-it-now/verified treatment `member-bootstrap` applies — it MUST also run here, because "set up my workspace" routes to **this skill**, not member-bootstrap, and a closing "optional, everything else works without it" footnote (the pre-3.22.0 behavior on this path) is exactly the framing that left members with a dead first-share link.
+
+1. **Check whether the helper is registered.** If a registration-state probe is available for the platform (Windows HKCU `agent-index` scheme key; macOS `lsregister -dump | grep agent-index:`; Linux `xdg-mime query default x-scheme-handler/agent-index`), use it. In a Cowork/Linux sandbox you cannot register a host-native Windows/Mac binary and a sandbox registration does not count — so do not claim it auto-registers.
+2. **If not confirmed registered, present it as a required action the member runs now** (not a footnote), per platform:
+   - **Windows** (PowerShell, note the leading `&`): `& "{project_dir}\mcp-servers\permission-helper-go\agent-index-show-plan.exe" --register`
+   - **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
+   - **macOS host:** run the bundled `.app` installer (`installer/darwin/install.sh`) — **never** `--register` the bare darwin binary (macOS registers bundles; bug `20260626-8d20ea22`).
+3. **State the consequence plainly:** "Until this is registered, your first owned-content share will produce an `agent-index://` link that does nothing. The fallback is the helper's headless `--cli <spec PATH>` (pass the spec **file path**, not the `agent-index://` URL — see `permission-change-helper` § headless fallback)."
+4. **Re-surface until confirmed.** Do not report onboarding "complete (sharing works)" while registration is unconfirmed on the member's native platform — on that platform an unregistered handler is a hard blocker for the click-to-approve flow. Record the registration state in `onboarding-state.md`. (If the member's install pre-dates a pinned helper, skip this silently.)
 
 Surface the completion summary to the member:
 
