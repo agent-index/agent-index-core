@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.8.0
+version: 3.9.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -578,7 +578,9 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
 }
 ```
 
-3. Write `members-registry.json` to the remote root:
+3. Write `members-registry.json` to the remote root.
+
+**Resolve and persist the admin's `sharing_identity` (`adminregidentity`, ms-install-9).** The admin is also a member — content gets shared *to* them (the first owned-content share in ms-install-9 was to the admin). Tasks that target a member by `sharing_identity` read it from the registry; if the admin's entry omits it, every share/remove targeting the admin must **re-resolve live** (and on a non-tenant-verified roster domain that means re-probing the `.onmicrosoft.com` form each time). So resolve it once here — the same way `invite-member` does: `aifs_resolve_identity(email)`; on onedrive if the roster email isn't a tenant identity, resolve the tenant UPN (the `.onmicrosoft.com` form / admin-supplied) — and write it into the admin's entry. On gdrive `sharing_identity == email`. Include `member_folder_id: null` (reconciled from the admin's own handshake on the next `publish-updates`, matching member entries). The admin entry should be schema-identical to an `invite-member` entry.
 
 ```json
 {
@@ -589,8 +591,10 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
       "member_hash": "{member_hash}",
       "display_name": "{display_name}",
       "email": "{email}",
+      "sharing_identity": "{resolved grantable identity — tenant UPN on onedrive, = email on gdrive}",
       "org_role": null,
-      "joined_date": "{today YYYY-MM-DD}"
+      "joined_date": "{today YYYY-MM-DD}",
+      "member_folder_id": null
     }
   ]
 }
@@ -678,6 +682,28 @@ Walk the local `agent-index-core/` directory and upload each file using `aifs_wr
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 
+**On success:** Proceed to Step 9.5.
+
+---
+
+### Step 9.5: Upload AND Provision the Selected Collections (collsetupgap — ms-install-9)
+
+The collections the admin chose in the Phase-1 collection-selection interview (Step 3c-1b) were cloned locally (Step 3c-1c) but are **not yet on remote and not yet set up**. For each, do **both — upload AND provision** — in this step. Uploading without provisioning is the `collsetupgap` bug: the collection is present but `org-setup` **hard-blocks every member (including the admin) from installing any of its capabilities** until `collection-setup-responses.md` exists (bug `20260615-8d20ea22-setupresp`). In ms-install-9 this surfaced as "capabilities can't be installed" and required a manual recovery; it must be a planned step.
+
+For **each** selected collection `{name}`:
+
+1. **Upload** the local `{name}/` clone to `/{name}/` on remote (same sequential, binary-excluded process as Step 9).
+2. **Register** it in `org-config.json` `installed_collections` (safe org-config rewrite rule) as `status: downloaded` initially.
+3. **Provision it — run the `install-collection` flow** (`agent-index-marketplace` task `install-collection`, Steps 4–5.7; invoke it per collection, or perform the equivalent inline). That flow:
+   - **Setup interview / defaults** — read `/{name}/setup/collection-setup.md`, collect org-level params. Offer "accept defaults," but per the **setupresp guardrail** a defaults install STILL writes the responses file. Flag any default that is really a decision — notably **bug-reports `admin_roles`**, which depends on org roles: if roles were skipped (Step 14) it defaults to empty (triage is admin-status-only); the admin can define roles via `@ai:edit-org` and re-run later.
+   - **Write** `/{name}/setup/collection-setup-responses.md` with `setup_status: complete`; **verify read-back** (`aifs_read` returns `setup_status: complete`) before the next collection.
+   - **Seed** files the setup's Setup Completion section declares (e.g. bug-reports manifest + log key; library taxonomy/doc-types; the `/shared/{name}-index/` directory; projects commons/index).
+   - **Provision grants** — the collection's `collaborative-acls.json` writer grants PLUS the unconditional collection code-dir reader grant (`all_members_group` reader on `/{name}/`, id-anchored). **Apply via create-org's sanctioned install-time direct path (+ helper fallback)** — same bootstrap authority as the Step 8 root grants (the admin owns the whole tenant at creation; this also avoids launching the helper, which matters in the unsigned-bypass interim). Idempotent no-op filter; resolve `{all_members_group}` / `{param}` placeholders, skip + flag if unresolvable.
+   - **Register capability providers** if the collection declares `provides[]`.
+   - **Set** `status: installed` + `installed_date` in `org-config.json`.
+
+Only after **every** selected collection is uploaded AND provisioned are their capabilities installable — Step 13 then installs them into the admin's own workspace, and members install via `@ai:setup`. Do NOT defer this to Step 10.5's marketplace flow (that flow is for adding *further* collections interactively; the Phase-1 selections are handled here).
+
 **On success:** Proceed to Step 10.
 
 ---
@@ -714,7 +740,7 @@ Before invoking any marketplace task, perform a lightweight connectivity check b
 
 If not reachable: surface the whitelisting guidance and halt. The admin can say 'open marketplace' once resolved.
 
-If reachable: invoke `run agent-index-marketplace task list-marketplace-collections`. The marketplace flow takes over from here. Any collections installed by the marketplace should also be uploaded to the remote filesystem.
+If reachable: invoke `run agent-index-marketplace task list-marketplace-collections`. The marketplace flow takes over from here. **The Phase-1-selected collections are already uploaded AND provisioned in Step 9.5** — this step is only for adding *further* collections the admin didn't pick during setup; any added here go through the normal `download-collection` → `install-collection` path (which uploads + provisions them the same way). This is optional — most admins skip it and add collections later via `@ai:marketplace`.
 
 ---
 

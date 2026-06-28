@@ -1,5 +1,23 @@
 # Agent-Index Core — Changelog
 
+## [3.21.0] — 2026-06-27 — Release C.1.2: ms-install-9 collsetupgap (collections set up at create-org)
+
+ms-install-9 was the first **clean** OneDrive install on the C.1.1 stack — Phase 1 generated scripts ran **first-try, no live patching** (singletag/colltags/binfield/tls12 all validated), and Phase 2 completed (loggap/sharedocbug/corebin/directapply held). One real finding remained.
+
+### Fixed
+- **create-org 3.9.0 — `collsetupgap` (new Step 9.5).** The C.1 two-script flow pre-cloned + raw-uploaded the selected collections but never ran their org-level setup/provisioning, so `org-setup` hard-blocked **every member (and the admin) from installing any of their capabilities** until a manual recovery (no `collection-setup-responses.md`). Step 9.5 now uploads **and provisions** each selected collection — the `install-collection` Steps 4–5.7 flow: setup interview/defaults → write `collection-setup-responses.md` (`setup_status: complete`, setupresp guardrail, read-back verified) → seed files (manifests, taxonomy, `/shared/{name}-index/`) → collaborative-acls + the unconditional code-dir reader grant (applied via create-org's sanctioned install-time direct path + helper fallback) → provider registration → `status: installed`. Step 10.5's marketplace flow is now explicitly for *additional* collections only.
+- Surfaces the **bug-reports `admin_roles`** dependency on org roles (if roles were skipped, it defaults empty — admin-status triage only; set roles via `@ai:edit-org` and re-run).
+- **invite-member 1.11.0 — `welcomeemail` + `bootstraplink` (ms-install-9).** The welcome email dropped the Google-Drive-specific access boilerplate ("your account isn't a member of the org's Shared Drive…") that was inaccurate/confusing on OneDrive, and now **resolves a real clickable bootstrap download link** (onedrive: the item `webUrl` or a Graph org-scope sharing link; gdrive: the Drive share link) instead of emitting a bare `/shared/bootstrap/...` path + "ask me for a link." Frontmatter description de-gdrive-ified (all-members group, not "Google Group").
+
+**Member-arm fixes (ms-install-9 live testing — invite → bootstrap → share → lifecycle on OneDrive):**
+- **`specresource` (HIGH) — permission-change-helper 1.3.0.** Owned-content share specs must use the target's **own** id-anchor (`id:{itemId}`, resolved via `aifs_stat`), not a parent-folder-id + relative name (`id:{folderId}/name`) — the helper binary rejects the composite form (it broke the first real owned-content share until the file's own id was resolved). The skill now documents the `resource` contract and pre-validates it (rejecting the composite with an actionable error instead of emitting a doomed URL).
+- **`clihelpurl` — permission-change-helper 1.3.0.** Documented the headless `--cli <spec PATH>` fallback for when the `agent-index://` handler isn't registered — and that `--cli` takes the **spec file path, not the agent-index:// URL** (passing the URL fails). Surface it proactively when the handler isn't registered.
+- **`helpernoreg` — member-bootstrap 3.8.0.** Helper registration is now a do-it-now, verified completion step, not a closing footnote — with the plain consequence stated (skip it and the first share's `agent-index://` link is dead → use the `--cli` fallback). In ms-install-9 the member deferred registration and hit a dead link at first share.
+- **`owncontentdisco` — standards.md.** A share without a pointer is invisible to agent-index; owned-content shares must write a discovery pointer (item's own id-anchor), and ad-hoc shares with no index are backend-native-discovery-only — the sharing flow must say so ("find it in OneDrive → Shared with me") rather than leaving the recipient to discover the gap.
+- **`adminregidentity` (low) — create-org 3.9.0.** Persist the admin's resolved `sharing_identity` (+ `member_folder_id: null`) in the registry, schema-identical to invite-member entries, so share/remove tasks targeting the admin don't re-resolve live every time.
+
+Helper binary unchanged (0.6.0, unsigned-bypass) — no rebuild. Touched: create-org 3.9.0, invite-member 1.11.0, member-bootstrap 3.8.0, permission-change-helper 1.3.0; standards.md.
+
 ## [3.20.0] — 2026-06-27 — Release C.1.1: ms-install-8 hardening (first full OneDrive install)
 
 ms-install-8 completed the first end-to-end OneDrive org install on the C.1 stack (validating the two-script flow, the collection interview, the backend-matched 0.6.0 helper, and full Phase 2). It surfaced bugs the admin had to patch live — all in the *generated* clone script and the upload path, not the architecture. Helper binary unchanged (0.6.0); no rebuild — ships unsigned-bypass.

@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.2.0
+version: 1.3.0
 collection: agent-index-core
 description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
@@ -55,6 +55,7 @@ This skill is invoked with a permission-change spec. The full schema is document
 
 - `version` (string) — schema version (`"1.0"` for the original shape; `"1.1"` for specs that use the `inherit` field added in core 3.7.3). Both versions are accepted; `"1.1"` enables `inherit` validation, `"1.0"` rejects `inherit` if present.
 - `operations` (array, non-empty) — list of operations, each one of `op: "share"` / `"unshare"` / `"transfer_ownership"` with `resource`, `recipient`, and `role` (for shares). May include a `before` field with current permission state for diff visualization.
+  - **`resource` format (`specresource`, ms-install-9).** Must be EITHER an absolute path starting with `/`, OR the target item's **own** id-anchor `id:{itemId}`. It must **NOT** be a composite of a parent-folder id plus a relative name (e.g. `id:{folderId}/handoff-test.md`) — the helper binary rejects that ("resource must be a path starting with / or an ID anchor of the form id:{folderId}"). When sharing a **file inside an id-anchored space** (e.g. a member's `Agent-Index-Private`), the calling task MUST resolve the **file's own** item id via `aifs_stat` and pass `id:{fileItemId}` — not `id:{parentFolderId}/{name}`. (This broke the first real owned-content share: the spec used the parent folder's id + filename and the binary refused it until the file's own id was resolved.)
 - `operations[].inherit` (boolean, optional, share operations only) — added in core 3.7.3. When `true` (the default if omitted, matching v1.0 behavior), the share is additive on top of parent-folder inheritance. When `false`, the share is applied as an explicit override: the recipient sees only this resource, not the parent. Used for narrower-than-parent ACLs (per-instance grants in client-intelligence, per-idea ACLs in access-control Phase 5, etc.). Requires `organizer` role on the Shared Drive (or `owner` on My Drive) to set — the adapter surfaces an `AccessDeniedError` with an actionable message if the applying user lacks the role. Backward-compatible: specs without `inherit` behave exactly as v1.0.
 - `context` (object) — `requestor` member_hash, `calling_task` slug, plain-English `purpose` string for display.
 - `mode` (optional) — `"fail_soft"` (default) or `"all_or_nothing"`.
@@ -67,7 +68,7 @@ When invoked with a valid spec, perform these steps in order:
 
 **Step 1 — Validate the spec.**
 
-Run schema validation. Required fields must be present. `operations` must be non-empty. Each operation's `op` must be one of the allowed values. `resource` must start with `/`. `recipient` must look like a valid email or group address. For specs with `version: "1.1"`, validate `inherit` on share operations: must be boolean if present; rejected on non-share operations. For `version: "1.0"` specs that include `inherit`, reject with a clear error pointing at the version bump. If validation fails, return immediately to the calling task with `{ outcome: "validation_error", error_detail: <description> }`. Do not emit the URL.
+Run schema validation. Required fields must be present. `operations` must be non-empty. Each operation's `op` must be one of the allowed values. **`resource` must be a valid target reference (`specresource`):** either an absolute path starting with `/`, or a bare item id-anchor `id:{itemId}` — but NOT a parent-folder-id-plus-relative-name composite like `id:{folderId}/{name}`. If you detect a composite `id:{...}/{...}` form, return `{ outcome: "validation_error", error_detail: "resource is a folder-id + relative path; resolve the target's OWN item id via aifs_stat and pass id:{itemId}" }` — do not emit the URL (the binary would reject it anyway). `recipient` must look like a valid email or group address. For specs with `version: "1.1"`, validate `inherit` on share operations: must be boolean if present; rejected on non-share operations. For `version: "1.0"` specs that include `inherit`, reject with a clear error pointing at the version bump. If validation fails, return immediately to the calling task with `{ outcome: "validation_error", error_detail: <description> }`. Do not emit the URL.
 
 **Step 2 — Capture pre-state if not already provided.**
 
@@ -97,6 +98,12 @@ Emit, in this order:
 
 3. A single-sentence narration:
    > "Review the proposed changes and click Accept to apply with your own credentials. If the link above doesn't open a review page, your OS URL-scheme handler may not be registered — copy the URL from the code block into your browser, or run `@ai:member-bootstrap` to verify your install."
+
+**Headless / unregistered-handler fallback (`clihelpurl`, ms-install-9).** If the member reports the `agent-index://` link does nothing (the handler was never registered — common until `--register` is run, and unavoidable in the unsigned-bypass interim where SAC may block the handler), give them the binary's `--cli` command. **`--cli` takes the spec FILE PATH, not the `agent-index://` URL** — passing the URL fails with "could not read spec … The filename, directory name, or volume label syntax is incorrect." The correct command (run by the member, in their own terminal, under their own credentials — this preserves the trust boundary exactly like the click would):
+```
+<install_path>/mcp-servers/permission-helper-go/agent-index-show-plan{ext} --cli "outputs/permission-plan-{timestamp}.json"
+```
+It prints the same review, applies on the member's `y`/Accept, and writes the same `outputs/permission-plan-{timestamp}-outcome.json`. Do NOT pass `--cli "agent-index://apply?spec=..."` — strip it to the bare spec path. (And surface this proactively when you know the handler isn't registered, rather than after the member hits the dead link.)
 
 The Go binary is what the URL-scheme handler invokes. The binary lives at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. Pre-3.7.4 also shipped a Node fallback at `<project_dir>/mcp-servers/permission-helper/show-plan.sh`; that fallback was removed in 3.7.4 (closes idea `remove-node-permission-helper-fallback`). If the Go binary isn't present at the expected path, surface a `binary_not_found` outcome and direct the member to `@ai:update` or `@ai:member-bootstrap`.
 

@@ -1,9 +1,9 @@
 ---
 name: invite-member
 type: task
-version: 1.10.0
+version: 1.11.0
 collection: agent-index-core
-description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members Google Group, registers them in members-registry.json, and emails install instructions.
+description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
 produces_artifacts: false
 produces_shared_artifacts: true
@@ -266,27 +266,32 @@ If `REVISION_CONFLICT`: re-read, re-apply, retry. Cap at 5 retries before surfac
 
 ### Step 9: Send welcome email
 
-Compose and offer to send an email to `{email}`:
+**First, resolve a real clickable download link for the bootstrap zip (`bootstraplink`, ms-install-9).** `{bootstrap_zip_download_link}` MUST be an actual URL the member can click — NOT a bare path like `/shared/bootstrap/member-bootstrap.zip` (the member cannot navigate the backend by path), and never "ask me for a link." Resolve it backend-appropriately:
+- **onedrive:** `aifs_stat("/shared/bootstrap/member-bootstrap.zip")` → use the item's `webUrl`; if that is not a directly openable download, create an **org-internal sharing link** (Graph `createLink`, type `view`, scope `organization`) so any tenant member can fetch it. Prefer the sharing link.
+- **gdrive:** the file's shareable link (`webViewLink` / `webContentLink`).
+If you genuinely cannot resolve a link, say so and ask the admin to paste one — do not fall back to a bare path.
+
+Then compose and offer to send an email to `{email}`:
 
 ```
 Subject: Welcome to {org_name} on agent-index
 
 Hi {display_name},
 
-You've been invited to {org_name}'s agent-index install. Here's what you need to get started:
+You've been invited to {org_name}'s agent-index workspace. To get started:
 
-1. Download the bootstrap kit: {bootstrap_zip_share_link}
-2. Unpack it to a folder of your choice (this becomes your local agent-index workspace).
-3. Open Claude (Cowork or Claude Desktop with the folder selected). On first run, Claude will guide you through authenticating to {backend_display_name} as yourself.
+1. Download the bootstrap kit: {bootstrap_zip_download_link}
+2. Unpack it to a folder of your choice — that folder becomes your local agent-index workspace.
+3. Open Claude (Cowork or Claude Desktop) with that folder selected and say "set up my agent-index member workspace." Claude walks you through the rest, including signing in to {backend_display_name} as yourself.
 
-A note on access: your account isn't a member of the org's Shared Drive itself — that's by design. Instead, you have reader access to org-readable files (CLAUDE.md, org-config.json, the marketplace cache, etc.) via the all-members group, plus writer access on your own member directory via an explicit per-file share. Practically: everything you need works; you'll just notice you can't see the Shared Drive in your Drive UI's left sidebar, which is correct. If you have questions about the access model, ask your admin.
-
-If your first session reports "access denied" reading the org infrastructure files, wait two minutes and retry — Workspace group membership propagation can lag a couple of minutes.
+If your first session reports "access denied" on the org files, wait a couple of minutes and retry — group membership can take a moment to propagate.
 
 Questions? Reply to this email. — {admin_display_name}
 ```
 
-Use the existing email-send capability (or surface the draft for the admin to send themselves if no email integration is available). Drive's "share" sendNotificationEmail flag is intentionally NOT used (and the helper's apply-script also leaves it false) — this welcome email replaces it.
+**Keep the email backend-neutral and accurate (`welcomeemail`, ms-install-9).** Do NOT include Google-Drive-specific access boilerplate (e.g. "your account isn't a member of the org's Shared Drive," "you can't see the Shared Drive in your sidebar") — it is inaccurate and confusing on OneDrive/SharePoint (and unnecessary detail on gdrive). The access model is conveyed by group membership; the member does not need an essay about it. Keep step 3 simple; member-bootstrap handles the sign-in details when they run it.
+
+Use the existing email-send capability (or surface the draft for the admin to send themselves if no email integration is available). The backend "share" send-notification flag is intentionally NOT used — this welcome email replaces it.
 
 ### Step 10: Confirm and log
 

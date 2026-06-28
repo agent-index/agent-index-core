@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.7.0
+version: 3.8.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -294,7 +294,7 @@ After the member runs it on the host, **verify** rather than assume: macOS → `
 
 Signing behavior depends on the directory binary entry's **`signing`** field. If `"trusted"`: the assets are code-signed/notarized and an OS block ("unverified publisher" / Smart App Control) is a signing/release **defect** (bug `20260626-8d20ea22-2`) — report it, don't work around it. If `"unsigned-bypass"` (the interim state while certs are pending): the binary is intentionally unsigned, so a block is **expected** — point the member at the Smart App Control **Evaluation-mode** workaround in `lib/permission-helper-go/SIGNING.md` (and right-click→Open for an unsigned macOS `.app`).
 
-Re-surface until the helper setup check confirms the handler is registered. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
+**Registration is a do-it-now completion step, not a closing footnote (`helpernoreg`, ms-install-9).** Present the register command as a required action the member runs **during bootstrap**, and re-surface until the helper setup check confirms the handler is registered. Do NOT defer it to a one-line "note at the end," and do NOT report bootstrap "complete" in a way that implies sharing works — because if the member skips registration, their **first owned-content share will emit an `agent-index://` link that does nothing** (the handler isn't registered; and in the unsigned-bypass interim SAC may block it even if it is). When that happens, the fallback is the helper's headless **`--cli <spec PATH>`** path (see `permission-change-helper` § headless fallback — pass the spec FILE path, not the `agent-index://` URL). State that consequence plainly so the member registers now rather than discovering the dead link at first share. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
 
 **Step 8 — Confirm and hand off**
 
