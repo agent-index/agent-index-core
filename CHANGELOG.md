@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.22.3] — 2026-06-29 — Release C.1.3.3: fresh-install version-truth + welcome-email link
+
+From the ms_install_10 fresh-org validation. Three version/onboarding-hygiene fixes; no functional blockers. Validated end-to-end on a fresh OneDrive org (create-org → invite → onboard → crossdriveread open → unshare → transfer NOT_IMPLEMENTED, all green).
+
+### Fixed
+- **K1 `createorgversionstale` — create-org 3.9.1.** Every fresh org was born with `agent-index.json` `version: 3.1.1` (the template's hardcoded value) because create-org never overwrote it, and apply-updates' core-update (the only corrector) never fires on a brand-new org. create-org now writes `version` from the installed core `collection.json` at write time.
+- **K2 `migration5wrongdir` — apply-updates 3.13.3 (regression fix).** The 3.22.1 Migration 5 copied `agent-index.json.version` → member-index, assuming the former is authoritative — backwards on a fresh org (member-index correct = 3.22.x, agent-index.json stale = 3.1.1), so it would have downgraded the correct value. It now reconciles BOTH fields to `org-config.agent_index_version` (the org's authority) and does nothing if org-config can't be read — never reconciles two local fields against each other.
+- **K3 `bootstraplinkunavailable` — invite-member 1.11.1 + adapters.** The welcome email's clickable bootstrap link couldn't be generated on OneDrive (adapter exposed no webUrl/createLink op), so the email was skipped on ms_install_10. `stat` now returns `web_url` (onedrive adapter 2.4.0 via Graph `webUrl`; gdrive 2.7.0 via `webViewLink`); invite-member builds the link from it, with an explicit admin-paste fallback when absent — never a bare path.
+
+### Pairs with
+onedrive adapter **2.4.0** + gdrive adapter **2.7.0** (both add `web_url` to `stat`).
+
 ## [3.22.2] — 2026-06-29 — Release C.1.3.2: admin-rollout hardening + the I1 regression fix
 
 Driven by the C.1.3 live test rounds on the OneDrive org. One real functional bug (the I1 regression), the rest reliability/UX so the admin's install/update/share-approval path on OneDrive + Windows doesn't need hand-fixing. No end-user behavior change; no adapter/binary runtime change.

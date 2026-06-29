@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.13.2
+version: 3.13.3
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -100,13 +100,14 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 4. Surface a one-line summary: "✓ Backfilled collection access: {n} folder_id(s) captured, {m} read grant(s) provisioned." Idempotent: on a fully-backfilled org this migration is a no-op (every collection has folder_id and the grant).
 5. Never block the update on a backfill failure — surface what couldn't be done and continue; the next admin update retries.
 
-**Migration 5 — `agent_index_version` field sync (introduced core 3.22.1, closes `versionfielddrift`):**
+**Migration 5 — `agent_index_version` field sync (introduced core 3.22.1; direction corrected in 3.22.3, `migration5wrongdir`):**
 
-`agent-index.json` `version` is bumped by the core-update step, but `member-index.json` `agent_index_version` was a separate field that drifted (observed live: agent-index.json `3.21.0` vs member-index `3.20.0`). It's purely informational, but the drift confuses `check-updates`-style reporting and any tooling that reads the member-index for the installed version.
+`agent-index.json` `version` and `member-index.json` `agent_index_version` both record the installed core version and can drift apart (observed: 3.21.0 vs 3.20.0). It's informational, but drift confuses `check-updates`-style reporting. **The authoritative source is NOT either local field** — the 3.22.1 version of this migration copied `agent-index.json.version` → member-index, which is **backwards on a fresh org**: create-org sets member-index correctly from `collection.json` (e.g. 3.22.2) while `agent-index.json.version` was born stale at the template's 3.1.1 (the `createorgversionstale` bug, fixed in create-org 3.9.1 but still present on orgs created before that). Copying the stale field would have **downgraded the correct one**. So reconcile to the org's authority instead:
 
-1. Read local `agent-index.json` `version` (authoritative for the installed core version) and `member-index.json` `agent_index_version`.
-2. If they differ, set `member-index.json` `agent_index_version` = `agent-index.json` `version` and write it back (verify-after-write). Surface one line: "✓ Synced member-index agent_index_version to {version}." Otherwise silent.
-3. Idempotent no-op once aligned. Never block the update on failure.
+1. Read **`org-config.json` `agent_index_version`** (the org's authoritative installed core version — set by create-org, advanced by publish-updates) via `aifs_read`. Also read local `agent-index.json` `version` and `member-index.json` `agent_index_version`.
+2. If `org-config.agent_index_version` is present and **either** local field differs from it, set **both** `agent-index.json.version` AND `member-index.json.agent_index_version` to the org-config value (verify-after-write each). Surface one line: "✓ Synced local version fields to org core version {version}." Otherwise silent.
+3. If `org-config.json` can't be read (offline/transient), do **nothing** — never reconcile two local fields against each other (that's the `migration5wrongdir` footgun: it can't tell which is stale). Skip and retry next run.
+4. Idempotent no-op once all three agree. Never block the update on failure.
 
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 

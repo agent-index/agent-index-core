@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.11.0
+version: 1.11.1
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
@@ -267,9 +267,9 @@ If `REVISION_CONFLICT`: re-read, re-apply, retry. Cap at 5 retries before surfac
 ### Step 9: Send welcome email
 
 **First, resolve a real clickable download link for the bootstrap zip (`bootstraplink`, ms-install-9).** `{bootstrap_zip_download_link}` MUST be an actual URL the member can click — NOT a bare path like `/shared/bootstrap/member-bootstrap.zip` (the member cannot navigate the backend by path), and never "ask me for a link." Resolve it backend-appropriately:
-- **onedrive:** `aifs_stat("/shared/bootstrap/member-bootstrap.zip")` → use the item's `webUrl`; if that is not a directly openable download, create an **org-internal sharing link** (Graph `createLink`, type `view`, scope `organization`) so any tenant member can fetch it. Prefer the sharing link.
-- **gdrive:** the file's shareable link (`webViewLink` / `webContentLink`).
-If you genuinely cannot resolve a link, say so and ask the admin to paste one — do not fall back to a bare path.
+- **onedrive:** `aifs_stat("/shared/bootstrap/member-bootstrap.zip")` → use the returned **`web_url`** field (adapter 2.4.0+ returns it from Graph `webUrl`; opens the item in SharePoint where a tenant member can download it). On adapters older than 2.4.0, `web_url` is absent — see the fallback below; do NOT assume a `createLink` op exists (the adapter exposes none — this was the `bootstraplinkunavailable` gap, ms_install_10).
+- **gdrive:** `aifs_stat(...)` → the returned **`web_url`** (adapter 2.7.0+, from `webViewLink`).
+- **Fallback when `web_url` is absent (older adapter / null):** do NOT emit a bare backend path and do NOT say "ask me for a link." Instead give the admin an explicit one-liner to fetch the link themselves and paste it: "open the SharePoint library, right-click `member-bootstrap.zip` under `/shared/bootstrap/` → Copy link, and paste it here," then use what they provide. The member must receive a clickable link.
 
 Then compose and offer to send an email to `{email}`:
 

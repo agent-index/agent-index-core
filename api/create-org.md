@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.9.0
+version: 3.9.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -305,6 +305,7 @@ Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exe
 
 **2. Write `agent-index.json`** with the `remote_filesystem` section:
 
+- **Set the top-level `version` to the ACTUAL installed core version (`createorgversionstale`, ms_install_10).** Read it from the cloned core's `collection.json` (`agent-index-core/collection.json` → `version`, e.g. `3.22.2`) and write that into `agent-index.json` `version`. Do **NOT** leave the template's hardcoded value (the template ships `"version": "3.1.1"`, which is stale — it does not track core releases). Every fresh org was being born with `version: 3.1.1` because this step never overwrote it, and apply-updates' core-update step (the only other corrector) never fires on a brand-new org (it's already latest), so the field sat wrong forever, skewing `check-updates` and tripping the version-sync migration. Set it here, at write time, from the installed core version.
 - Set `backend` to the chosen backend identifier (`gdrive`, `onedrive`, or `s3`)
 - Set `exec.adapter` to the chosen backend identifier
 - Set `exec.adapter_version` to the version from the adapter directory
