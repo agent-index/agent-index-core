@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.13.0
+version: 3.13.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -99,6 +99,14 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 3. **Apply:** if any folder_id was staged, write `org-config.json` once (revision-aware, `if_revision`). If any reader grants are needed, invoke `permission-change-helper` ONCE with the batched spec — the admin reviews and Accepts all missing grants in one page (verified-outcome HARD GATE; idempotent — skip if the grant already exists). Do not write a pointer/scope; these are infrastructure grants.
 4. Surface a one-line summary: "✓ Backfilled collection access: {n} folder_id(s) captured, {m} read grant(s) provisioned." Idempotent: on a fully-backfilled org this migration is a no-op (every collection has folder_id and the grant).
 5. Never block the update on a backfill failure — surface what couldn't be done and continue; the next admin update retries.
+
+**Migration 5 — `agent_index_version` field sync (introduced core 3.22.1, closes `versionfielddrift`):**
+
+`agent-index.json` `version` is bumped by the core-update step, but `member-index.json` `agent_index_version` was a separate field that drifted (observed live: agent-index.json `3.21.0` vs member-index `3.20.0`). It's purely informational, but the drift confuses `check-updates`-style reporting and any tooling that reads the member-index for the installed version.
+
+1. Read local `agent-index.json` `version` (authoritative for the installed core version) and `member-index.json` `agent_index_version`.
+2. If they differ, set `member-index.json` `agent_index_version` = `agent-index.json` `version` and write it back (verify-after-write). Surface one line: "✓ Synced member-index agent_index_version to {version}." Otherwise silent.
+3. Idempotent no-op once aligned. Never block the update on failure.
 
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 

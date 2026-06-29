@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.3.0
+version: 1.3.1
 collection: agent-index-core
 description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
@@ -104,6 +104,12 @@ Emit, in this order:
 <install_path>/mcp-servers/permission-helper-go/agent-index-show-plan{ext} --cli "outputs/permission-plan-{timestamp}.json"
 ```
 It prints the same review, applies on the member's `y`/Accept, and writes the same `outputs/permission-plan-{timestamp}-outcome.json`. Do NOT pass `--cli "agent-index://apply?spec=..."` — strip it to the bare spec path. (And surface this proactively when you know the handler isn't registered, rather than after the member hits the dead link.)
+
+**Give a runnable command, not a relative fragment (`clihelpcwd`, ms_prod_9).** The spec path is **relative to the project_dir** (where `outputs/` lives), but the member's shell may be anywhere — a member who pasted the command from `~/agent-index/ms_prod_9` (the parent) hit `No such file or directory` because both the binary and the spec resolved against the wrong cwd. So hand them a command that runs regardless of cwd: **either** an absolute spec path, **or** an explicit `cd` into the project_dir first. Prefer:
+```
+cd "<project_dir>" && ./mcp-servers/permission-helper-go/agent-index-show-plan{ext} --cli "outputs/permission-plan-{timestamp}.json"
+```
+where `<project_dir>` is the directory containing `agent-index.json` (resolve it; don't leave it as a placeholder). State it plainly: "run this from inside your agent-index project folder."
 
 The Go binary is what the URL-scheme handler invokes. The binary lives at `<project_dir>/mcp-servers/permission-helper-go/agent-index-show-plan{.exe}`. Pre-3.7.4 also shipped a Node fallback at `<project_dir>/mcp-servers/permission-helper/show-plan.sh`; that fallback was removed in 3.7.4 (closes idea `remove-node-permission-helper-fallback`). If the Go binary isn't present at the expected path, surface a `binary_not_found` outcome and direct the member to `@ai:update` or `@ai:member-bootstrap`.
 

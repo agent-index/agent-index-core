@@ -1,5 +1,13 @@
 # Agent-Index Core — Changelog
 
+## [3.22.1] — 2026-06-28 — Release C.1.3 patch: low-priority cleanup (I5)
+
+### Fixed
+- **permission-change-helper 1.3.1 — `clihelpcwd`.** The `--cli` fallback handed a spec path relative to the project_dir, but a member running from the parent folder (`~/agent-index/ms_prod_9`) hit `No such file or directory`. It now hands a cwd-independent command — `cd "<project_dir>" && ./mcp-servers/permission-helper-go/agent-index-show-plan{ext} --cli "outputs/permission-plan-….json"` (resolved, not a placeholder) — and says to run it from inside the project folder.
+- **apply-updates 3.13.1 — `versionfielddrift` (standing Migration 5).** `member-index.json` `agent_index_version` drifted from `agent-index.json` `version` (observed live: 3.20.0 vs 3.21.0). A new idempotent self-heal syncs it on every `@ai:update`.
+- **standards.md — `gitwritelock`.** Documented that agent-side git in the sandbox is read-only via `git show <ref>:<path>`; never `checkout`/`switch`/`add` (index.lock + torn writes over the mount, FCI-1) — all mutating git runs natively on the host.
+- **`marketplacestaleraw`** — no code change required: the admin "what's upstream" check is already git-based and members read the backend `/shared/dist/manifest.json`, never raw GitHub (Release C backend-first). Recorded as resolved-by-design.
+
 ## [3.22.0] — 2026-06-28 — Release C.1.3: distribution integrity + cross-drive read
 
 Folds the findings from the ms_prod_9 member-apply session and the admin-side discovery run. The backend-distribution loop is now real end-to-end, and members can finally open content shared to them from another member's personal drive.
