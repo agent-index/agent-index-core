@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.22.2] — 2026-06-29 — Release C.1.3.2: admin-rollout hardening + the I1 regression fix
+
+Driven by the C.1.3 live test rounds on the OneDrive org. One real functional bug (the I1 regression), the rest reliability/UX so the admin's install/update/share-approval path on OneDrive + Windows doesn't need hand-fixing. No end-user behavior change; no adapter/binary runtime change.
+
+### Fixed
+- **J0 — `i1onedrivebreak` (HIGH, regression).** C.1.3's I1 made member apply read collection files by a bare `id:{folder_id}` anchor. On OneDrive a bare id-anchor resolves against the member's OWN drive (`/me/drive`), but collection files live on the SharePoint site drive — so the read 404'd and OneDrive members couldn't receive collection updates. apply-updates 3.13.2 now reads **path-primary (`/{collection}`) with `id:{folder_id}` fallback** (the path is the correct site-drive read; org-setup already used it, which is why onboarding was unaffected). gdrive keeps id-anchor (global ids). Re-test member apply on OneDrive before client B.
+- **J4 — `aifsreadflaky`.** apply-updates retries transient `aifs_read` failures (≤3×, small backoff) under concurrency, kept distinct from the CONFIG_ERROR hard-abort (applyerrorpollution). OneDrive intermittently fails concurrent reads even at ≤4.
+- **J5 — `clihelppwsh`/`clihelpcwd`.** The `--cli` fallback command used `&&` (invalid in PowerShell 5.1) and the wrong binary name. permission-change-helper 1.3.2 now hands a shell-aware **absolute-path** command (Windows PowerShell `&` call operator; bash plain) using the canonical binary name — runs from any folder, no `&&`.
+- **J2 — `clonescriptdirty`.** clone-script-generator now emits a resilient infra-clone: clear `index.lock` + `git reset --hard` before checkout, and continue past a single repo's failure with a per-repo summary (was: exit on first error, manual `reset --hard` rescue).
+- **J1 — `crlfcheckout`.** Repos carry a `.gitattributes` (`* text=auto eol=lf`, `*.exe binary`) so Windows autocrlf can't dirty the working tree (which blocked `git checkout <tag>`) or corrupt the byte-exact adapter bundle on a working-tree copy. In-tag for core + resource-listings now; committed to the adapter/collection repos' main (effective at their next tag; J2's reset --hard + J3's git-cat-file deploy cover the interim).
+- **J3 — `adapterdeploydoc`/`stalemountexec` (standards).** Host byte-exact deploy uses `git cat-file blob <tag>:…`, never a working-tree copy (CRLF trap). A truncated-executor read (`SyntaxError`/`CONFIG_E…`) is a stale Cowork mount, not corruption → fully relaunch Cowork first; member-bootstrap only if that fails.
+
 ## [3.22.1] — 2026-06-28 — Release C.1.3 patch: low-priority cleanup (I5)
 
 ### Fixed
