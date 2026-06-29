@@ -1021,4 +1021,4 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `agent-index.json` — root registry with filesystem paths and marketplace configuration
 - `org-config-schema.json` — reference schema for org-config.json
 - `standards.md` — open marketplace collection specification
-- Setup templates and manifests for all skills and tasks
+- Setup templates and manifests for all skills and tasks.
