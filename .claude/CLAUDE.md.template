@@ -101,10 +101,11 @@ The general pattern: all task and skill definitions live at `/{collection}/api/{
 
 ### "Check for updates" disambiguation (added in core 3.7.0)
 
-The phrase "check for updates" (and near-paraphrases — "are there updates available", "what's new", "am I up to date", "check {something} for updates") maps to **two distinct intents** that look identical from the surface:
+The phrase "check for updates" (and near-paraphrases — "are there updates available", "what's new", "am I up to date", "check {something} for updates") maps to **distinct intents** that look identical from the surface:
 
 1. **Member-apply intent.** "Are there pending org updates I need to apply to my local workspace?" → `apply-updates` task. Source of truth: the org's `/shared/updates/` log. Answers in terms of *what's been published for me*.
-2. **Admin-available intent.** "Are there newer versions available upstream than what my org has installed?" → `check-updates` task (in `agent-index-marketplace`). Source of truth: the resource-listings directory files (which broadcast the latest GitHub releases). Answers in terms of *what's available for the org to publish*.
+2. **Admin-available intent.** "Are there newer versions available upstream than what my org has installed?" → `check-updates` task (in `agent-index-marketplace`). Source of truth for a **self-distributing org** (this org — the admin publishes releases from local git clones): the **admin's local clones via git** (`git fetch --tags`; compare the clone working-tree `collection.json` `version` / highest tag against installed). **NOT** the resource-listings/public directory — for a self-distributing org that directory is the member-facing broadcast and is *by design behind* the org's internal versions, so comparing against it falsely reports "org is ahead / nothing to do." **NEVER `WebSearch` to answer this** — a web search returns a cached, weeks-stale snapshot (this is the `adminupstreamstale` bug, C.1.3.4). Answers in terms of *what's available for the org to publish*.
+3. **Admin publish intent.** "Update our org [to the new release]", "publish the new release", "roll out the latest to the org" → **clone-script refresh (`git fetch --tags`) → `publish-updates` from the refreshed clones**. This is an *action*, not a diagnostic: move the org to the latest release the clones hold. Do NOT route this to `check-updates`, and do NOT web-discover a version — refresh the clones (git) and publish what they hold. (Repairing a corrupt remote file likewise re-sources from the clone, `git show HEAD:<path>`, never a web fetch.)
 
 **Routing rule:**
 

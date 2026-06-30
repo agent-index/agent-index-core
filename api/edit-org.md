@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.1.0
+version: 3.2.0
 collection: agent-index-core
 description: Edit org configuration — update the admin list or launch the marketplace to install or manage collections.
 stateful: false
@@ -144,9 +144,9 @@ This step downloads the latest adapter bundle and regenerates the member bootstr
 
 Read the local `mcp-servers/filesystem/adapter.json`. Note the current `version` and `bundle_built_at`.
 
-**2. Download the latest adapter bundle:**
+**2. Obtain the adapter bundle:**
 
-Read `filesystem-adapter-directory.json` (fetch from `filesystem_adapter_directory_url` in `agent-index.json` if not cached). Find the entry matching the org's configured backend (`remote_filesystem.backend` in `agent-index.json`). Download the adapter repo via its `zip_url`. Extract `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the downloaded zip.
+**For a self-distributing org (M1/M3, C.1.3.4), prefer the admin's local adapter clone over a `zip_url` download.** The `infra-clone` script already cloned the adapter repo at the org's pinned tag; that clone is the canonical, tag-correct source and avoids a stale `zip_url`/directory fetch (same source-of-truth rule as `publish-updates`). Take `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the clone at the target tag. Only fall back to the `filesystem-adapter-directory.json` → `zip_url` download if no local adapter clone is present (a non-self-distributing org). Whichever source: do NOT `WebSearch` for the adapter version.
 
 Verify bundle integrity: compute SHA-256 of `aifs-exec.bundle.js` and compare against `exec_bundle_checksum` in the downloaded `adapter.json`. If mismatch, report the error and halt.
 
@@ -154,7 +154,12 @@ Compare the downloaded `adapter.json` version against the local version. If the 
 
 **3. Replace the local bundle:**
 
-Overwrite `mcp-servers/filesystem/aifs-exec.bundle.js`, `mcp-servers/filesystem/aifs-exec.sh`, and `mcp-servers/filesystem/adapter.json` with the downloaded files.
+Overwrite the three deployed files in `mcp-servers/filesystem/`. **Source the text files (`aifs-exec.sh`, `adapter.json`) from the git blob, never a working-tree/zip copy (M3, `adapterdeploydoc`, C.1.3.4 — standards.md "Host-deploy byte-exact files via `git cat-file`/`git show`").** A Windows working-tree copy CRLF-converts the shell wrapper and corrupts the executor — observed live in the ms_install_10 publish, where the deployed `aifs-exec.sh` came up CRLF and broke `bash` until it was re-deployed from the blob. So:
+
+- `aifs-exec.bundle.js` — copy **byte-exact** (it is checksum-gated against `exec_bundle_checksum`; preserve it exactly, do not normalize). If sourced from a clone, `git -C <adapter-clone> cat-file blob <tag>:dist/aifs-exec.bundle.js > mcp-servers/filesystem/aifs-exec.bundle.js`.
+- `aifs-exec.sh` and `adapter.json` — deploy from the git blob (`git -C <adapter-clone> show <tag>:dist/aifs-exec.sh` / `:adapter.json`), which is LF-correct on every platform, **not** a `Copy-Item`/`cp` from the working tree.
+
+After deploying, **smoke-test the new executor** (an `aifs_auth_status` + a verified read) and confirm the wrapper is LF (no CRLF) before proceeding — catch a torn/CRLF deploy here, not after the bootstrap zip ships it to members.
 
 Surface: "Adapter bundle updated from version {old_version} (built {old_date}) to version {new_version} (built {new_date})."
 

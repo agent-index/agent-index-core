@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.9.0
+version: 3.10.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -41,6 +41,12 @@ Optionally, the admin can provide:
 ---
 
 ## Workflow
+
+> **Source-of-truth rule for "update our org" / publishing a new release (M1, `adminupstreamstale`, core 3.22.4 / C.1.3.4 — HIGH).** This org is **self-distributing**: the admin holds the infrastructure source as local **git clones** (created/refreshed by the `infra-clone` / `collections-clone` scripts, which `git fetch` and check out the highest release **tags**), and `publish-updates` broadcasts what those clones hold to `/shared/dist/` + `/shared/updates/`. Two hard rules follow:
+> 1. **The canonical "what is the latest release?" source is the admin's local clones (git), never a web search.** When the admin says "update our org," "publish the new release," or "is there a newer version," the answer comes from `git` in the clones (refresh via the clone scripts, then `git describe --tags` / compare `collection.json` `version` in the clone working tree). **NEVER use `WebSearch` to discover versions, releases, or directory state** — `WebSearch` returns a cached, weeks-stale snapshot of the *public* directory and was the exact cause of `adminupstreamstale` (an admin "update our org" concluded "nothing to update" against a June-9 cache while the org was many releases ahead). Do not web-search the resource-listings/public directory for this purpose at all.
+> 2. **The public broadcast directory (`infrastructure_directory_url`, etc.) is the MEMBER-facing authority and is by design BEHIND a self-distributing org's internal versions.** It is meaningful only as the upstream-consume input for orgs that pull releases from the public directory — which a self-distributing org does not. For this org, treat the local clones as upstream. The SHA-pinned GitHub fetch in Step 0a below applies ONLY when an org genuinely consumes infrastructure from the public GitHub directory; for a clone-publishing org, "refresh upstream" means re-running the clone scripts (git), and Step 0 then syncs the refreshed clones to remote.
+>
+> If you find yourself about to `WebSearch` or raw-fetch a directory to answer an admin version/release question, stop — read the clone's `collection.json`/tags instead. Repairs of a corrupt remote file likewise re-source from the local clone (`git show HEAD:<path>`), never from a web fetch.
 
 ### Step 0a: Pull Upstream Updates (added in core 3.5.0; only when `--check-upstream` flag is passed)
 
@@ -85,6 +91,10 @@ Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> →
 ### Step 0: Sync Local Infrastructure to Remote (added in core 3.4.0)
 
 Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
+
+**Pre-publish version-mismatch guard (M3, core 3.22.4 / C.1.3.4).** Before uploading anything, cross-check that the pieces about to be published are version-consistent, and surface any drift for the admin to resolve up front rather than discover mid-publish: (a) the local `agent-index-core/collection.json` `version` and the version the core CHANGELOG's top entry claims; (b) the deployed adapter (`mcp-servers/filesystem/adapter.json` `version`) against the adapter version the core release notes pair with — if core's notes say "pairs with onedrive adapter X.Y.Z" and the deployed bundle is behind, flag it ("deploy the adapter via `@ai:edit-org` first, then publish, or the baseline records the older adapter"); (c) each installed collection's local `collection.json` `version` against its `api/*-manifest.json` `collection_version` (restamp drift). Report drift as a checklist with the resolving action; proceed only on the admin's confirmation. This makes the adapter/core mismatch the ms_install_10 publish caught *by hand* an explicit gate.
+
+**Durable read-back verify on every uploaded file (M2, `collectionjson-tornwrite`, core 3.22.4 / C.1.3.4 — HIGH).** Every file this step uploads (and every file `create-org` Step 9 uploads) MUST be verified by **reading the committed bytes back from the backend and comparing byte count + canonical SHA-256 against the local source** — NOT by trusting `aifs_write`'s response-size check alone. The response size is write-time metadata; a OneDrive simple-PUT can report a full size while durably committing a truncated object, and the adapter's only re-read is gated to sentinel-bearing files, so a non-sentinel `collection.json`/manifest can ship truncated and undetected (this is exactly how ms_install_10's core `collection.json` shipped at 31030/32402 bytes). Use the **Canonical SHA-256 rule** (`templates/backend-distribution.md`: `aifs_stat` `size` → `head -c <size>` → `sha256sum`; never hash `aifs_read` stdout). On mismatch, re-upload from source and re-verify (retry up to 2×); if still mismatched, halt naming the file. This is the `/shared/dist/` round-trip self-check extended to the source-sync uploads.
 
 **Source-tree skip-list (applied symmetrically to upload AND delete decisions; revised in core 3.6.0).** The following paths are filtered out of the diff entirely — neither uploaded nor proposed for deletion. Step 0 is a **source-tree** sync; non-source files are out of scope in both directions:
 

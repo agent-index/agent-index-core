@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.22.4] — 2026-06-30 — Release C.1.3.4: admin-path write & source integrity
+
+From the ms_install_10 in-place update test. Two HIGH fixes + two siblings; not a client-B launch blocker (B is a fresh 3.22.4 install).
+
+### Fixed
+- **M1 `adminupstreamstale` (HIGH).** An admin "update our org" web-searched the public directory, got a weeks-stale snapshot, and concluded "nothing to update" while the org was many releases ahead — the update never ran. Admin upstream/update/repair source-of-truth is now the local git clones (`git fetch --tags`), never WebSearch or the member-facing public directory (which is by design behind a self-distributing org's internal versions). "Update our org" routes to clone-refresh → publish-updates. publish-updates + check-updates (marketplace 2.15.0) + standards + the CLAUDE.md template carry the rule; WebSearch is explicitly forbidden for version/release/directory/source discovery.
+- **M2 `collectionjson-tornwrite` (HIGH).** Core collection.json shipped truncated (31030/32402) on ms_install_10, found only when a member failed to parse it. The adapter's write-verify trusted the PUT response's `item.size`; the only durable re-read was gated to sentinel files, so a non-sentinel JSON slipped through. onedrive adapter 2.5.0 now does a durable committed-size read-back (fresh `?$select=size` GET) on every write; create-org Step 9 + publish-updates Step 0 mandate the same durable read-back (size + canonical SHA, retry, halt) on every bulk upload; collection.json / JSON config carry a `_file_end` sentinel.
+- **M3 (med).** edit-org sources the adapter from the local clone and deploys text files from the git blob (CRLF recurrence fix — the ms_install_10 publish hit a CRLF `aifs-exec.sh`) with a post-deploy smoke-test + LF check; publish-updates Step 0 adds a pre-publish version-mismatch guard.
+- **M4 `scriptnulltail` (low).** Orchestrator/resync scripts authored via heredoc-to-native-tmp + compile-check, never the Write tool onto the mount (the ms_install_10 member apply hit a null-tail-truncated resync script). standards.md note added.
+
+Pairs with onedrive adapter 2.5.0 (gdrive parity read-back rides the gdrive arm).
+
 ## [3.22.3] — 2026-06-29 — Release C.1.3.3: fresh-install version-truth + welcome-email link
 
 From the ms_install_10 fresh-org validation. Three version/onboarding-hygiene fixes; no functional blockers. Validated end-to-end on a fresh OneDrive org (create-org → invite → onboard → crossdriveread open → unshare → transfer NOT_IMPLEMENTED, all green).
