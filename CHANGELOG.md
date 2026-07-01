@@ -1,5 +1,12 @@
 # Agent-Index Core — Changelog
 
+## [3.22.5] — 2026-07-01 — Release C.1.3.5: mitmcadefer + gdrive-arm parity
+
+Companion to gdrive adapter 2.8.0 (M2 durable committed-size read-back — the gdrive half of the C.1.x write-integrity parity). Reference: `/shared/reference/ms365-adapter/59-gdrive-arm-M2-and-mitmcadefer-design.md`.
+
+### Fixed
+- **`mitmcadefer` (low).** `apply-updates` Phase 3 (adapter bundle) previously deferred the bundle update when it saw the expected `[aifs] Proxy detected — added CA certificate …` sandbox-proxy notice, leaving an unattended member stalled at cursor n-1 on the prior adapter (it self-corrected on a re-prompt, but should not have paused). The notice is documented, benign transport behavior — **not** a trust signal. Phase 3 now states this explicitly and **codifies the verification the deferral was standing in for**, as required steps: (1) a **checksum gate** — SHA-256 of the fetched `aifs-exec.bundle.js` vs the backend `adapter.json` `exec_bundle_checksum`, fail-loud on mismatch; (2) an **embedded-URL/domain scan** against the adapter's `required_domains`; (3) a post-install **`aifs_auth_status` smoke test** before the cursor advances. Only the unwarranted deferral is removed; the verification is mandatory and stays. Closes bug `20260630-8d20ea22-mitmcadefer`.
+
 ## [3.22.4] — 2026-06-30 — Release C.1.3.4: admin-path write & source integrity
 
 From the ms_install_10 in-place update test. Two HIGH fixes + two siblings; not a client-B launch blocker (B is a fresh 3.22.4 install).
