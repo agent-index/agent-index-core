@@ -1,5 +1,14 @@
 # Agent-Index Core — Changelog
 
+## [3.22.6] — 2026-07-02 — Release C.1.3.6: member onboarding + hygiene
+
+From the Agent Index Dev 1 gdrive-arm validation (member arm). Companion to gdrive adapter 2.8.1.
+
+### Fixed
+- **`memberauthbootstrap` (HIGH) — new-member onboarding was blocked.** A first-time member's session had no way to complete OAuth: the `needs_setup` bootstrap protocol routed them to `@ai:setup`/org-setup (the admin org-creation flow, unreadable pre-auth), the bootstrap zip carries no capability docs, and the gdrive `start` response didn't name the completion call — so the member's agent guessed parameters, never sent `action:"complete"`, and gave up. **Fix (core side):** the CLAUDE.md bootstrap protocol now routes a member with a backend-configured `agent-index.json` to **member-bootstrap** (not org-setup), and embeds the OAuth `start`→`complete` flow (with the `pkcerestart` "don't re-start" rule) directly in the local CLAUDE.md so a member's agent can authenticate before any remote skill is readable. Paired with gdrive adapter 2.8.1 (dispatch infers `complete` from `auth_code` + self-documenting `start` message — both ported from onedrive, which already had them). Closes bug `20260701-8d20ea22-memberauthbootstrap`.
+- **`staletmpinject` (medium) — cross-session `/tmp` reuse injected stale context.** standards.md now forbids reading/consuming a `/tmp` scratch file the session did not itself create: use a unique `mktemp` path (never a fixed shared name) and assert the populate step succeeded before consuming it. Surfaced when a `> /tmp/reg.json` redirect silently failed during `invite-member` and a stale file clobbered `/members-registry.json` with a phantom member. Closes bug `20260701-8d20ea22-staletmpinject`.
+- **`upload-install-log` secret scan false-positive (low).** The pre-upload credential scan now matches secret **values** (token followed by an assignment + value, `Bearer <token>`, high-entropy strings), not bare token **names** in descriptive prose — so a diagnostic line mentioning `client_secret` no longer trips a needless redaction/rebuild.
+
 ## [3.22.5] — 2026-07-01 — Release C.1.3.5: mitmcadefer + gdrive-arm parity
 
 Companion to gdrive adapter 2.8.0 (M2 durable committed-size read-back — the gdrive half of the C.1.x write-integrity parity). Reference: `/shared/reference/ms365-adapter/59-gdrive-arm-M2-and-mitmcadefer-design.md`.

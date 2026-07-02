@@ -17,7 +17,9 @@ Agent-index is the source of truth for project tracking, action items, ideas, de
 When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTSTRAP` signals:
 
 - **`needs_auth`**: The remote filesystem exec bundle is present but the member is not authenticated. Automatically attempt re-authentication using stored credentials. If automatic re-auth fails, surface the issue and suggest `@ai:member-bootstrap` as a manual fallback.
-- **`needs_setup`**: The member has no local workspace (`member-index.json` not found). Guide them to run `@ai:setup` for first-time onboarding.
+- **`needs_setup`**: No local workspace (`member-index.json` not found). **Route by whether the org already exists** — do NOT blindly run `@ai:setup`:
+  - **Member joining an existing org** — `agent-index.json` already has a configured `remote_filesystem` backend (the person unpacked a bootstrap zip). Run **member-bootstrap** (`@ai:member-bootstrap`); it authenticates to the remote and creates the local workspace. This is the common case and the correct entry for a new member — do NOT send them to `org-setup`/create-org (that is the admin org-creation flow). The OAuth flow member-bootstrap uses, which you can drive directly from here: call `aifs_authenticate(action="start")` to get the sign-in URL; then, after the person pastes the redirected `localhost` URL (or the bare code), call `aifs_authenticate(action="complete", auth_code="{pasted value}")` to finish. Do NOT re-issue `action="start"` after showing the URL (that restarts the flow — bug `pkcerestart`); only issue a fresh `start` if `complete` reports the code expired.
+  - **Admin creating a brand-new org** — no `remote_filesystem` backend configured yet (a fresh `agent-index-core` clone). Only then does this map to `@ai:setup` (org-setup → create-org).
 - **`ready`**: Everything is configured. Proceed normally.
 
 ## Handling Member Requests
