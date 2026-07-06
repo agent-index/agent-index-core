@@ -12,6 +12,8 @@ Agent-index is a capability management system for AI-assisted orgs. It manages s
 
 Agent-index is the source of truth for project tracking, action items, ideas, decisions, status reports, strategy, bug tracking, and communication triage. External tools are supplementary.
 
+**A query naming an agent-index collection goes to that collection's capability — never a same-scope connector.** When the member says "our library", "our projects", "our docs/bugs/strategy", etc., that phrase names an installed agent-index collection: route to its capability (e.g. "find the doc in our library" → the Library's `find-doc`/`browse-library`, read via `aifs`), NOT a general-purpose connector — **including the org's own storage backend connector (Google Drive / OneDrive / SharePoint).** Reading org content straight from the raw storage connector bypasses the org's catalog, access model, and pointer semantics and yields wrong conclusions (e.g. an unshared doc read as "deleted", or a private doc's title-only pointer read as "broken") — org-data reads go through `aifs` only (`wrongconnectorfallback`). Exception 1 above ("member explicitly names the external tool") does **not** license using the storage connector to answer an "our {collection}" query — that phrasing names the agent-index collection, not the connector.
+
 ## Bootstrap Protocol
 
 When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTSTRAP` signals:

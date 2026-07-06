@@ -1,5 +1,12 @@
 # Agent-Index Core — Changelog
 
+## [3.22.7] — 2026-07-06 — Release C.1.3.7: agent-index-first enforcement
+
+From the Agent Index Dev 1 gdrive-arm validation (admin read-back leaked to a raw Google Drive connector). Companion to gdrive adapter 2.8.2 + library 1.2.0.
+
+### Fixed
+- **`connectorbypass` (medium) — org-data queries leaked to an external connector.** The CLAUDE.md **Agent-Index First** rule listed Jira/Asana/Confluence/Slack but not the org's own storage backend connector, so "find the doc in our library" was answered by a raw Google Drive connector instead of the Library capability — bypassing the catalog/ACL/pointer model and producing wrong conclusions (an unshared doc read as "deleted"; a private doc's title-only pointer read as "broken"). The rule now states explicitly that a query **naming an agent-index collection** ("our library", "our projects", "our docs/bugs/strategy") MUST route to that collection's capability (read via `aifs`), never a same-scope external connector — **including the storage backend** (Google Drive / OneDrive / SharePoint) — and that "member explicitly names the external tool" does not license using the storage connector to answer an "our {collection}" query. Applied to the `CLAUDE.md.template`. Closes bug `20260706-8d20ea22-connectorbypass`.
+
 ## [3.22.6] — 2026-07-02 — Release C.1.3.6: member onboarding + hygiene
 
 From the Agent Index Dev 1 gdrive-arm validation (member arm). Companion to gdrive adapter 2.8.1.
