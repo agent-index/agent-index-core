@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.9.2
+version: 3.10.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -731,7 +731,7 @@ If the admin says yes:
    - Add entry to `installed_collections`
    - Update `last_updated`
 
-> **Safe org-config rewrite rule (MUST follow for every `org-config.json` read-modify-write — bug `20260615-8d20ea22-ocstale`):** Never stage the rewritten config at a fixed, shared scratch path like `/tmp/oc.json` — a leftover file from another org's install can be picked up and uploaded, corrupting the canonical config (observed in two installs). (a) Build the new content **in memory** or in a **unique** path (`mktemp`), never a fixed name; (b) **before** the authoritative `aifs_write`, parse the bytes you are about to upload and **assert `org_id` matches this org and `remote_filesystem.connection.site_id`/`drive_id` match the in-session values** — abort if they don't; (c) only then write. This is the source-identity complement to `aifs_write`'s size-verify: confirm you're uploading the *right* config, not just that it landed intact.
+> **Safe org-config rewrite rule (MUST follow for every `org-config.json` read-modify-write — bug `20260615-8d20ea22-ocstale`):** Never stage the rewritten config at a fixed, shared scratch path like `/tmp/oc.json` — a leftover file from another org's install can be picked up and uploaded, corrupting the canonical config (observed in two installs). (a) Build the new content **in memory** or in a **unique** path (`mktemp`), never a fixed name; (b) **before** the authoritative `aifs_write`, parse the bytes you are about to upload and **assert `org_id` matches this org and `remote_filesystem.connection.site_id`/`drive_id` match the in-session values** — abort if they don't; (c) only then write. This is the source-identity complement to `aifs_write`'s size-verify: confirm you're uploading the *right* config, not just that it landed intact. **(d) Never re-select the staged file by `ls`/newest-mtime/glob (`ocstalereselect`, C.1.4.0)** — hold the exact `mktemp` path in a variable and reference *that* directly; an ambient "newest staged config" pick can grab an older same-session copy whose `org_id` still matches (so (b) passes) and silently revert the edit you just made. **(e) Assert content, not just identity:** before the write, confirm the staged config actually contains the change (e.g. the collection you're registering appears in `installed_collections`) so a stale same-org copy is caught pre-write, not only by the read-back.
 
 Proceed to Step 11.
 
@@ -751,7 +751,7 @@ If reachable: invoke `run agent-index-marketplace task list-marketplace-collecti
 
 Now that the collections are on the remote, publish the **distribution layer** members read from instead of GitHub, per the **`backend-distribution`** subroutine (`templates/backend-distribution.md`):
 - Copy the three directory files (`infrastructure-directory.json`, `filesystem-adapter-directory.json`, `marketplace-directory.json`) **from the local `agent-index-resource-listings` clone** to `/shared/dist/directories/`.
-- Copy the host-matching, **backend-matched signed** permission-helper binary (the one the infra clone script installed and verified) to `/shared/dist/binaries/`. Its expected SHA is the **host-reported SHA printed by the infra script** (equal to the `infrastructure-directory.json` entry for this backend/platform). **Confirm the publish against that host SHA — do NOT verify by re-reading the large binary through the sandbox mount**, which serves stale/torn bytes for large files and caused a wrong/stale binary to be published in ms-install-7 (`binmountstale`). If the sandbox read of the binary disagrees with the host SHA, trust the host SHA and use the host-named-copy technique (read a freshly-named copy) rather than publishing sandbox bytes.
+- **Publish the FULL build matrix of the backend-matched signed permission-helper (`regenzipnobinary`).** Upload **every supported os×arch build** of the pinned binary version for this org's backend to `/shared/dist/binaries/` — one file per build (`agent-index-show-plan-<backend>-<version>-<os>-<arch>[.exe]`) and one `manifest.json` `binaries[]` entry per build carrying `os`/`arch`/`sha256`. **Do NOT publish only the admin's host build** — a member on a different OS/arch than the admin must be able to fetch a runnable binary, and a single-arch publish is exactly the defect this fixes. **Source of the builds:** the signed release ships all-platform assets (`build-all.sh` in `lib/permission-helper-go`); obtain and upload all of them, not just the one the infra clone script fetched for the admin's host. Each build's expected SHA is the **published per-platform SHA** for that os/arch (from `infrastructure-directory.json` → the binary's `platforms[]` row); verify each build against its own SHA, and **do NOT verify by re-reading a large binary through the sandbox mount** (stale/torn bytes for large files — `binmountstale`) — trust the published per-platform SHA and use the host-named-copy technique if a sandbox read disagrees. (The admin's own host build was already installed+registered by the infra clone script; this step populates the dist matrix for *all* members.)
 - Write `/shared/dist/manifest.json` — the `org_release_tag`, per-artifact SHA-256s (the binary's = the host SHA), and the installed collection versions (the org's version authority).
 - Use the publish flow's **diff + hash-verify** (upload only changed; for the three small directory files, read back + verify SHA; for the large binary, gate on the host SHA as above, shell-first + retry). On a fresh create-org everything is new, so all artifacts publish.
 - **Do not publish or bake a binary whose version is not the backend-matched directory `current_version`.** (In ms-install-7 a stale `0.3.0` gdrive binary reached dist + the bootstrap zip before being corrected at Step 13b; with 1a now resolving the backend-matched signed binary up front, dist/zip and the pin are consistent from the start.)
@@ -790,7 +790,7 @@ agent-index/
 
 The executor bundle (`aifs-exec.bundle.js`, `aifs-exec.sh`, and `adapter.json`) was staged in Step 3c (from the local adapter clone). Copy these into the bootstrap zip at `mcp-servers/filesystem/…`. Do NOT re-download the bundle.
 
-**Also bake in the permission-helper binary** so first-time members get it without any fetch (Release C — members never download it from GitHub): copy the host-matching `<backend>` binary the clone script installed at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}` (+ its `version.txt`) into the zip at the same path. Members unpack it and run `--register` once; they do not download the binary. (For *updates*, members instead read the binary from `/shared/dist/binaries/` per the `backend-distribution` subroutine — see Step 11.)
+**Do NOT bake an arch-specific permission-helper binary into the zip (`regenzipnobinary`).** The admin cannot know each member's os/arch at zip-build time, so baking the admin's host build strands any member on a different arch (and it made regenerated zips inconsistent with first-install zips). The bootstrap zip carries **no binary** and is therefore arch-neutral and identical for every member. Instead, **member-bootstrap detects the member's host os/arch and fetches the matching build from `/shared/dist/binaries/`** (the full matrix published in Step 11), SHA-verifies it, places it at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}` (+ `version.txt`), and prompts `--register`. This is the same source members use on update — so first-install and post-update are consistent. (`regenerate-bootstrap.md` likewise carries no binary — that is now the correct end state, not the narrow omission originally filed.)
 
 The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. It does NOT include any credentials.
 
@@ -1076,12 +1076,4 @@ If the admin's generated org ID collides with a collection name already present 
 
 If `agent-index.json` cannot be read at the expected local path: surface: "I couldn't find the agent-index root configuration file. Make sure you've cloned agent-index-core into this directory before running org setup." Halt.
 
-If the running admin's email cannot be determined from Cowork session context, ask for it directly. The email is required for identity resolution.
-
-If the executor wrapper cannot be found or is not executable: surface the error clearly. Common causes: the bootstrap zip was not correctly unpacked, or the shell wrapper file permissions were lost. Offer guidance: "Make sure the executor bundle was correctly unpacked and that `aifs-exec.sh` has execute permissions. Check that the file exists at `mcp-servers/filesystem/aifs-exec.sh`."
-
-If a remote write fails partway through Step 8 (some files written, some not): surface which writes succeeded and which failed. The admin can retry — all writes are idempotent (they overwrite existing files).
-
-If the admin wants to use a backend not yet supported: surface: "Currently supported backends are Google Drive, Microsoft OneDrive/SharePoint, and Amazon S3. Support for additional backends is planned." Do not proceed with an unsupported backend.
-
-Emails are the canonical identity input — not an edge case.
+If the running admin's email ca

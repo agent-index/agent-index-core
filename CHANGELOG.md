@@ -1,5 +1,15 @@
 # Agent-Index Core — Changelog
 
+## [3.23.0] — 2026-07-08 — Release C.1.4.0: update-propagation, create-org robustness, multi-arch distribution
+
+Track-1 of the C.1.4.0 backlog build (the non-multi-org fixes). Pairs with gdrive adapter 2.9.0 / onedrive 2.6.0 (batch ops), marketplace 2.16.0, library 1.3.0.
+
+### Fixed
+- **`claudemdnorender` (HIGH) — CLAUDE.md fixes never reached *updated* orgs.** A core update that changed `CLAUDE.md.template` synced the template but never re-rendered the org's active root `/CLAUDE.md`, so CLAUDE.md-borne behavior (routing, Agent-Index-First, the OAuth start→complete flow) reached only fresh create-orgs. `publish-updates` now re-renders the root `/CLAUDE.md` from the new template whenever the template is in Step 0's diff — new Step 0b prereq row + a `render_root_claude_md` Step 0c handler (back up, substitute org placeholders, preserve org edits, write local+remote, verify) — which flows through the normal `claude-md-update` + bootstrap-regen path automatically.
+- **`pubstep0versionmatch` (medium) — publish Step 0 could shortcut the source→remote sync on a version match.** Reasserted that Step 0 MUST do the content-based SHA diff every run (publish-side sibling of `d1rv`); a file edited without a version bump would otherwise silently never publish. Points at `aifs_write_batch`/`aifs_stat_batch` (adapter 2.9.0) to keep the full walk inside the tool window, plus an optional git-blob-SHA fast-path.
+- **`ocstalereselect` (medium) — a stale same-org staged config could be re-selected.** Strengthened the Safe-org-config-rewrite rule (create-org) and the `staletmpinject` standard: never re-discover a staged file by `ls`/newest-mtime/glob (hold the exact unique path in a variable), and assert the staged content contains the edit you just made, not only that `org_id` matches.
+- **`regenzipnobinary` (HIGH) — permission-helper distribution was single-architecture.** create-org now publishes the FULL os×arch build matrix to `/shared/dist/binaries/` (all-platform signed builds, one manifest entry each); the bootstrap zip carries NO arch-specific binary; and both `apply-updates` Step 1.6 and `member-bootstrap` detect the host os/arch, select the matching build, SHA-verify it, and fail loud if none is published — with member-bootstrap installing it during onboarding, not deferring to first share. Canonical `backend-distribution` publish/read flows updated to match.
+
 ## [3.22.7] — 2026-07-06 — Release C.1.3.7: agent-index-first enforcement
 
 From the Agent Index Dev 1 gdrive-arm validation (admin read-back leaked to a raw Google Drive connector). Companion to gdrive adapter 2.8.2 + library 1.2.0.

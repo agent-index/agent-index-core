@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.8.0
+version: 3.9.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -283,12 +283,12 @@ status: connected
 
 **Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
 
-**Release C — the binary is already in the unpacked bootstrap zip; do NOT download it from GitHub.** create-org bakes the org's `<backend>` permission-helper binary into the bootstrap zip (Step 12), so after the member unpacked it the binary is already at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`. Read `/shared/dist/manifest.json` and **verify the local binary's SHA against it**: if present and matching, it's installed — nothing to download. If it's absent (an older zip) or the SHA doesn't match, reconcile it from **`/shared/dist/binaries/`** per `apply-updates` Step 1.6 (backend `aifs_read` → SHA-verify → shell-first place + read-back). **Never fetch it from GitHub.** Without the binary the member's first sharing action fails `binary_not_found`, but on a Release-C org it's in the zip, so this is normally already satisfied. Then the member runs `--register` (below).
+**Release C + `regenzipnobinary` — the bootstrap zip carries NO binary; fetch the member's-arch build from `/shared/dist/binaries/` as an onboarding step (never from GitHub).** The zip is arch-neutral because the admin cannot know each member's os/arch at build time. So member-bootstrap MUST install the binary here — do **not** defer it to the member's first share (the `regenzipnobinary` miss was onboarding completing without a binary, leaving the member to hit `binary_not_found` at first share). Steps: **detect the host `os`/`arch`; select the matching build** from the manifest's per-backend×os×arch `binaries[]`; **`aifs_read` that specific build** from `/shared/dist/binaries/`; **SHA-verify** it against its own manifest entry; place it (shell-first + read-back) at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`; write `version.txt`; then prompt `--register` (below). This is the same arch-select-and-fetch as `apply-updates` Step 1.6. **If no build is published for the member's `<os>/<arch>`, FAIL LOUD** — "no permission-helper build published for your platform (`<os>/<arch>`) — ask your admin to publish it via `@ai:pin-binary-version` / `@ai:update`" — and do **not** report onboarding complete with a missing/mismatched binary. **Never fetch it from GitHub.**
 
 **Register the `agent-index://` handler — manual host step in Cowork (hostregister), per platform.** The registration CANNOT run from a Cowork session (Linux sandbox; the binary is host-native), and a Linux-sandbox registration of a Windows/Mac binary is NOT host registration. Do NOT claim it auto-registers or "registers on first use." Surface the exact host step as a required one-time action:
 - **Windows** (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
 - **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
-- **macOS host:** run the bundled **`.app` installer** — `--register` on the bare binary always fails on darwin (macOS registers bundles, not loose executables; bug `20260626-8d20ea22` `macosregister`). The bootstrap zip carries the notarized `Agent-Index Helper.app` / `installer/darwin/install.sh`; the member runs the installer, which places the `.app` in `~/Applications/` and registers via `lsregister`.
+- **macOS host:** run the bundled **`.app` installer** — `--register` on the bare binary always fails on darwin (macOS registers bundles, not loose executables; bug `20260626-8d20ea22` `macosregister`). The darwin build fetched from `/shared/dist/binaries/` (the matrix's darwin entry) is the notarized `Agent-Index Helper.app` / `installer/darwin/install.sh`, not a loose binary; the member runs the installer, which places the `.app` in `~/Applications/` and registers via `lsregister`.
 
 After the member runs it on the host, **verify** rather than assume: macOS → `lsregister -dump | grep agent-index:` (or `--isregistered`); Windows → the HKCU `agent-index` scheme key; Linux → `xdg-mime query default x-scheme-handler/agent-index`. On the member's native platform a registration failure is a **hard** blocker for sharing — surface it as such, do not proceed as if registered.
 
@@ -361,8 +361,4 @@ If `members-registry.json` cannot be read from remote (e.g., file doesn't exist)
 
 If the remote `org-config.json` version is newer than the local `agent-index.json` version: surface as an advisory notice. The bootstrap zip may be outdated. The member can still proceed, but they should request an updated bootstrap zip from their admin.
 
-If the exec shell wrapper is not found at `mpc-servers/filesystem/aifs-exec.sh`, the exec bundle is missing from the install. Surface an error: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip." In Cowork, the plugin validates the exec bundle presence — if the plugin is installed and the bundle is missing, it will surface this error during plugin installation.
-
-If the member workspace already exists locally but member-index.json does not: this is a partial prior setup. Create member-index.json without recreating the directory structure. Proceed normally.
-
-If a network timeout occurs during any remote call: surface the timeout, explain that the remote filesystem may be temporarily unavailable, and offer to retry. For auth flows, the auth code may still be valid — try completing with the same code before regenerating.
+If the exec shell wrapper is not found at `mpc-servers/filesystem/aifs-exec.sh`, the exec bundle is missing from the install. Surface an error: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip." In Cowork, the plugin validates the exec bundle presence — if the plugin is installed and the bundle is missing, it will surface this error during plugin in

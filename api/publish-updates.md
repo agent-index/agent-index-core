@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.10.0
+version: 3.11.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -92,6 +92,8 @@ Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> →
 
 Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
 
+**Step 0 MUST compute and compare file-level SHA-256 hashes on every run — never conclude "already synced" from a version match (pubstep0versionmatch, C.1.4.0).** A source file can be hand-edited without any version bump; a version-equality check misses it entirely — this is the publish-side sibling of `d1rv` ("staleness keyed off version alone; content changed without a bump is invisible"), and a file edited without a bump would then silently never publish. Always do the content-based walk defined below (hash each in-scope source file, compare to the remote bytes, upload what differs). Do **not** substitute "versions match remote and I didn't edit source this session" for the walk. To keep the walk feasible in the tool window — the reason agents were tempted to shortcut it — use the batch stat/write op (`aifs_write_batch`, gdrive adapter 2.9.0+ / onedrive 2.x+; bug `bulkuploadserial`) so hundreds of files reconcile in one process instead of timing out. Optional exact fast-path: since the admin publishes from git clones, compare the git-blob SHAs the admin already has (`git cat-file`) instead of re-hashing every file live. Either way the comparison is content-based, never version-based.
+
 **Pre-publish version-mismatch guard (M3, core 3.22.4 / C.1.3.4).** Before uploading anything, cross-check that the pieces about to be published are version-consistent, and surface any drift for the admin to resolve up front rather than discover mid-publish: (a) the local `agent-index-core/collection.json` `version` and the version the core CHANGELOG's top entry claims; (b) the deployed adapter (`mcp-servers/filesystem/adapter.json` `version`) against the adapter version the core release notes pair with — if core's notes say "pairs with onedrive adapter X.Y.Z" and the deployed bundle is behind, flag it ("deploy the adapter via `@ai:edit-org` first, then publish, or the baseline records the older adapter"); (c) each installed collection's local `collection.json` `version` against its `api/*-manifest.json` `collection_version` (restamp drift). Report drift as a checklist with the resolving action; proceed only on the admin's confirmation. This makes the adapter/core mismatch the ms_install_10 publish caught *by hand* an explicit gate.
 
 **Durable read-back verify on every uploaded file (M2, `collectionjson-tornwrite`, core 3.22.4 / C.1.3.4 — HIGH).** Every file this step uploads (and every file `create-org` Step 9 uploads) MUST be verified by **reading the committed bytes back from the backend and comparing byte count + canonical SHA-256 against the local source** — NOT by trusting `aifs_write`'s response-size check alone. The response size is write-time metadata; a OneDrive simple-PUT can report a full size while durably committing a truncated object, and the adapter's only re-read is gated to sentinel-bearing files, so a non-sentinel `collection.json`/manifest can ship truncated and undetected (this is exactly how ms_install_10's core `collection.json` shipped at 31030/32402 bytes). Use the **Canonical SHA-256 rule** (`templates/backend-distribution.md`: `aifs_stat` `size` → `head -c <size>` → `sha256sum`; never hash `aifs_read` stdout). On mismatch, re-upload from source and re-verify (retry up to 2×); if still mismatched, halt naming the file. This is the `/shared/dist/` round-trip self-check extended to the source-sync uploads.
@@ -168,6 +170,7 @@ Walk the file paths from Step 0's `upload` + `delete` sets. For each path, apply
 | `mcp-servers/filesystem/aifs-exec.sh` | Bootstrap regen REQUIRED | (folded into adapter-bundle-update if bundle.js also changed; otherwise standalone adapter-bundle-update) |
 | `mcp-servers/filesystem/adapter.json` | (no prereq) | (folded into adapter-bundle-update if bundle.js also changed) |
 | `CLAUDE.md` (root) | Bootstrap regen REQUIRED (canonical CLAUDE.md ships in bootstrap) | `claude-md-update` |
+| `agent-index-core/.claude/CLAUDE.md.template` | **`render_root_claude_md`** — re-render the root `/CLAUDE.md` from the new template (Step 0c), which then triggers the `CLAUDE.md (root)` row above (bootstrap regen + `claude-md-update`). Without this, a template change never reaches an *updated* org — bug `claudemdnorender` | `claude-md-update` (via the re-render) |
 | `members-registry.json` (root) | Bootstrap regen REQUIRED (members-registry ships as bootstrap seed) | `members-registry-update` (new entry type as of 3.5.0 — `update-log.json` consumers must tolerate unknown entry types) |
 | `org-config.json` → `remote_filesystem.connection.all_members_group` change | Bootstrap regen REQUIRED (controls bootstrap zip share recipients) | `org-config-update` with `changes: ["all_members_group"]` |
 | `org-config.json` → `paths.bootstrap_zip_path` change | Bootstrap regen REQUIRED (location changed) | `org-config-update` |
@@ -227,7 +230,16 @@ If the subroutine reports the bootstrap content was unchanged (the `<allow-skip>
 
 If the subroutine fails: surface the error and halt. Files from Step 0 stay at remote (idempotent retry-friendly), but no CHANGELOG entry is written. Admin can fix the cause and re-run.
 
-After all prerequisites complete, surface a one-line summary per prereq (`✓ Bootstrap regenerated and uploaded`) and proceed to Step 1.
+**`render_root_claude_md` (claudemdnorender, C.1.4.0):** A core update that changes `agent-index-core/.claude/CLAUDE.md.template` does NOT by itself change the org's active root `/CLAUDE.md` — so CLAUDE.md-borne behavior (natural-language routing, Agent-Index-First, member-bootstrap routing, the OAuth start→complete flow) would silently reach only *fresh create-orgs*, never an org that *updates*. This prerequisite (fired when the template is in Step 0's `differs`/upload set) re-renders the root `/CLAUDE.md` from the new template **before** the CLAUDE.md-hash step, so the change flows through the normal `claude-md-update` + bootstrap path automatically instead of depending on the admin remembering to re-render.
+
+1. **Back up** the current root `/CLAUDE.md` (local `/CLAUDE.md.bak-{YYYYMMDD-HHMMSS}`) so an org-specific customization can be recovered.
+2. **Render** the new template: substitute the same org placeholders `create-org` uses (`{org_name}` and any others) from `org-config.json`. Preserve any org-specific hand-edits found between the template's designated preserve markers. If the current root `/CLAUDE.md` has diverged from a clean render of the *previous* template in ways that can't be safely reconciled (i.e. an out-of-band manual edit outside the preserve markers), surface the diff and ask the admin before overwriting — never silently clobber a customization.
+3. **Write** the re-rendered file to BOTH the local project-dir `/CLAUDE.md` and the remote org root, and verify each with the **Canonical SHA-256 rule** (read committed bytes back, compare byte count + SHA).
+4. Because the root `/CLAUDE.md` content now changes, the **`CLAUDE.md (root)`** prereq row applies: fold in `bootstrap_regen`, and the CLAUDE.md-hash step (Step 2) will see the new hash and generate the `claude-md-update` automatically. This makes template→render propagation automatic on the update path (the template→render sibling of the `d1rv`/`pubstep0versionmatch` content-vs-version class).
+
+If the re-render fails or the admin declines the reconcile: surface it and halt; Step 0's file sync already happened and is idempotent, so a re-run after resolving is safe.
+
+After all prerequisites complete, surface a one-line summary per prereq (`✓ Bootstrap regenerated and uploaded`, `✓ Root CLAUDE.md re-rendered from template`) and proceed to Step 1.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.13.3
+version: 3.14.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -120,7 +120,7 @@ Moved out of Phase 1 in 3.9.0 (closes finding F11): binary pins are changed by `
 This step is **self-contained** — it does not depend on any cache produced by other steps:
 
 1. Read `/shared/dist/manifest.json` (the org's version authority) **first**, then read `infrastructure-directory.json` from **`/shared/dist/directories/` on the org backend** (Release C — backend-first; standards.md § "Distribution: backend-first"). **Actually compute and verify the directory's SHA against the manifest entry — do not skip the hash and fall through to a version-only comparison** (the `shagateunimplemented` failure: pre-C.1.3 this step claimed to "verify" but never computed the SHA, so the integrity gate did not exist). Use the **Canonical SHA-256 recipe** in `templates/backend-distribution.md` (`aifs_stat` the artifact for its `size`, `aifs_read` to a file, `head -c <size>` to drop any shell-appended trailing byte, then `sha256sum`). **On mismatch, refuse to use the artifact** and surface "backend artifact corrupt/stale — ask your admin to re-publish via `@ai:update`". **Members never fetch this from GitHub.** *(Deprecated fallback only — a not-yet-migrated org with no `/shared/dist/`: use the SHA-pinned GitHub Distribution fetch protocol and emit the deprecation warning; a fallback-sourced result must not conclude a pinned binary is current.)*
-2. Read `org-config.json` → `binaries{}` (remote). For each pinned binary, reconcile against the manifest: if the member's `version_file` (`version.txt`) ≠ the published version, **`aifs_read` the binary from `/shared/dist/binaries/`** (NOT a GitHub release), SHA-verify against the manifest entry (binaries use the host-reported SHA in the manifest; verify the placed file's host SHA, not a sandbox mount re-read — `binmountstale`), place it on the host-mounted `install_destination` (**shell-first + read-back verify** — large file, mount-truncation risk), write `version.txt`, and surface the member **`--register`** one-liner (host-side; the agent can't register the URL scheme). On first bootstrap the binary comes from the unpacked bootstrap zip instead, so this reconcile is then a no-op.
+2. Read `org-config.json` → `binaries{}` (remote). For each pinned binary, reconcile against the manifest: if the member's `version_file` (`version.txt`) ≠ the published version, **detect the host `os`/`arch` and select the matching build** (`regenzipnobinary`): the manifest's `binaries[]` carries one entry per backend×os×arch, so pick the entry matching this org's backend + the member's `os`/`arch`. **If no build is published for `<os>/<arch>`, FAIL LOUD** — "no permission-helper build published for `<os>/<arch>` — ask your admin to publish it via `@ai:pin-binary-version` / `@ai:update`" — and never place a non-matching build. Then **`aifs_read` that specific build from `/shared/dist/binaries/`** (NOT a GitHub release), SHA-verify against **its own** manifest entry (binaries use the host-reported SHA in the manifest; verify the placed file's host SHA, not a sandbox mount re-read — `binmountstale`), place it on the host-mounted `install_destination` (**shell-first + read-back verify** — large file, mount-truncation risk), write `version.txt`, and surface the member **`--register`** one-liner (host-side; the agent can't register the URL scheme). On first bootstrap the bootstrap zip no longer carries a binary (`regenzipnobinary`), so member-bootstrap runs this same arch-select-and-fetch from `/shared/dist/binaries/` — not a no-op.
 3. If local matches the pin: silent (or one summary line). If no binaries are pinned: silent.
 
 Phase 1 step 7 remains in place for infra batches but is now just an invocation of this standing step (do not run it twice in one update).
@@ -602,10 +602,4 @@ The merge algorithm in Step 3 must produce a correct net plan regardless of how 
 
 Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
 
-Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
-
-Never advance the cursor without completing or explicitly declining all operations in the merged plan. If the session must end mid-plan (adapter restart, interruption), write `pending-update-plan.json` with the remaining operations (Step 1's resume path) and leave the cursor unmoved — the cursor advances only when the plan is fully resolved.
-
-<!-- RECONSTRUCTED 2026-06-10: final-sentence completion of a tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); reviewed and approved by Bill. -->
-
-<!-- AIFS:FILE-END -->
+Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already p
