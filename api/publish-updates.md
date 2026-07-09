@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.11.0
+version: 3.11.1
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -112,7 +112,7 @@ The principle: **Step 0 only manages files it would itself upload. If a file's p
 For each of the two infrastructure roots (`agent-index-core/`, `agent-index-marketplace/`):
 
 1. **Walk the local directory recursively.** For each file, compute the relative path from the directory root and the SHA-256 of the local file's content. Apply the skip-list above; filtered files are excluded entirely (they will not appear as `local_only`, `differs`, or `synced`).
-2. **Read the corresponding remote file** via `aifs_read("/{collection_root}/{relative_path}")`. If the remote file exists, compute its SHA-256. If it does not exist (NOT_FOUND), treat as "missing remotely."
+2. **Get the remote side in ONE process, not per-file (`bulkuploadserial`).** Pass all the walked relative paths to **`aifs_stat_batch`** (gdrive 2.9.0+ / onedrive 2.6.0+); for each it returns existence, `size`, and the backend `md5Checksum`. Use md5 (or `size`) as the change signal: a file is `differs` when its remote md5/size ≠ the local file's, `local_only` when the remote entry is absent. This performs the mandated content-based comparison in a single process instead of ~150 separate `aifs_read` spawns — the timeout that used to push agents to shortcut this walk. **Exact fast-path (preferred when publishing from git clones):** compare local git-blob SHAs (`git cat-file`) against the last-published state — cheaper still. **Fallback** (adapter predates the batch op): per-file `aifs_read` + SHA-256. Never substitute a version match for this content comparison (`pubstep0versionmatch`).
 3. **Classify each local file:**
    - `local_only` — local exists, remote missing → upload
    - `differs` — local exists, remote exists, hashes differ → upload (overwrite)
@@ -143,7 +143,7 @@ On `N`: abort, no changes written. Surface "Sync cancelled. Re-run @ai:publish-u
 
 On `Y`:
 
-1. **Upload all `local_only` and `differs` files** sequentially via `aifs_write`. Use the same LF-normalization as `apply-updates` Phase 1 step 6: read the local bytes, replace `\r\n` with `\n` and standalone `\r` with `\n` for all text file types (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`, `.template.json`). Binary files are not currently in scope — they ship via the binaries registry. If a non-text non-shipped file is encountered, surface a warning and skip it.
+1. **Upload all `local_only` and `differs` files in ONE process via `aifs_write_batch`** (`bulkuploadserial`; falls back to sequential per-file `aifs_write` only if the deployed adapter predates the batch op). Use the same LF-normalization as `apply-updates` Phase 1 step 6: read the local bytes, replace `\r\n` with `\n` and standalone `\r` with `\n` for all text file types (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`, `.template.json`). Binary files are not currently in scope — they ship via the binaries registry. If a non-text non-shipped file is encountered, surface a warning and skip it.
 2. **Delete `remote_only` files** sequentially via `aifs_delete`. Each deletion is logged so the admin sees what was removed.
 3. **Surface a one-line confirmation** per file processed (`✓ upload {path}`, `✓ delete {path}`).
 4. **On any individual file failure:** surface the error, continue with the rest of the batch (best-effort). At the end, report `N succeeded, M failed`. The admin can re-run to retry only the failures.

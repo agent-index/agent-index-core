@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.10.0
+version: 3.10.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -673,7 +673,9 @@ Confirm: "Your org '{org_name}' is configured. Org config and directory structur
 
 Upload `agent-index-core/` to the remote filesystem so that members can read collection definitions via MCP during their setup.
 
-Walk the local `agent-index-core/` directory and upload each file using `aifs_write`. Preserve the directory structure. **Upload files sequentially** — one `aifs_write` at a time, waiting for each to complete before the next. See the sequential write note in Step 8.
+Walk the local `agent-index-core/` directory and upload it, preserving the directory structure.
+
+**Use `aifs_write_batch` — one process for the whole upload (`bulkuploadserial`, gdrive adapter 2.9.0+ / onedrive 2.6.0+).** A per-file `aifs_write` loop spawns a fresh Node process per file and times out well before a ~120-file core upload finishes — that per-file-spawn timeout is exactly what this op removes. Build ONE `entries` array of `{path, content_file}` covering all in-scope files and pass it to `aifs_write_batch` (chunk into groups of ~40–60 if the array is very large). It ensures the unique parent folders once (duplicate-parent-safe) and runs each file's full M2 durable read-back verify (below) inside the single process. **Fallback:** if the deployed adapter predates `aifs_write_batch` (pre-2.9.0/2.6.0), fall back to sequential per-file `aifs_write`, one at a time (the Step 8 sequential-write note). Check availability via `adapter.json` `version` (or a probe) before choosing the path. Do **not** hand-roll a per-file resuming uploader when the batch op is available.
 
 **Exclude build artifacts and binaries from the core upload (corebin, ms-install-8).** Skip: `node_modules/`, `.git/`, `bin/`, any `**/dist/` directory, and any compiled binary (`*.exe`, Mach-O/ELF executables, `*.app/` bundles). Core is *source + capability definitions* only — the permission-helper binary is distributed via `/shared/dist/binaries/` (Step 11), NOT bundled inside the core tree. (ms-install-8 uploaded a stray committed 9 MB `bin/agent-index-show-plan.exe` to the org — pure bloat and the cause of the slow Step-9 transfer. That file is being removed from the repo + gitignored in C.1.1, but this exclusion is the belt-and-suspenders guard so no build output ever rides along.)
 
@@ -695,7 +697,7 @@ The collections the admin chose in the Phase-1 collection-selection interview (S
 
 For **each** selected collection `{name}`:
 
-1. **Upload** the local `{name}/` clone to `/{name}/` on remote (same sequential, binary-excluded process as Step 9).
+1. **Upload** the local `{name}/` clone to `/{name}/` on remote (same `aifs_write_batch` one-process upload + binary-exclusion + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
 2. **Register** it in `org-config.json` `installed_collections` (safe org-config rewrite rule) as `status: downloaded` initially.
 3. **Provision it — run the `install-collection` flow** (`agent-index-marketplace` task `install-collection`, Steps 4–5.7; invoke it per collection, or perform the equivalent inline). That flow:
    - **Setup interview / defaults** — read `/{name}/setup/collection-setup.md`, collect org-level params. Offer "accept defaults," but per the **setupresp guardrail** a defaults install STILL writes the responses file. Flag any default that is really a decision — notably **bug-reports `admin_roles`**, which depends on org roles: if roles were skipped (Step 14) it defaults to empty (triage is admin-status-only); the admin can define roles via `@ai:edit-org` and re-run later.
@@ -726,7 +728,7 @@ If the admin says yes:
 3. If git is not available: proceed with ZIP silently.
 4. Download `agent-index-marketplace` locally from the `marketplace_repo_url` in `agent-index.json`.
 5. Verify the download by confirming `collection.json` is readable.
-6. Upload the entire marketplace collection to the remote filesystem via MCP (same process as Step 9).
+6. Upload the entire marketplace collection to the remote filesystem (same `aifs_write_batch` one-process upload + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
 7. Update `org-config.json` on remote via `aifs_read` then `aifs_write` (follow the **safe org-config rewrite rule** below):
    - Add entry to `installed_collections`
    - Update `last_updated`

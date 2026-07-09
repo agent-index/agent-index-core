@@ -1,5 +1,13 @@
 # Agent-Index Core — Changelog
 
+## [3.23.1] — 2026-07-09 — Release C.1.4.1: wire batch ops + permission-spec path (validation follow-ups)
+
+Follow-up to C.1.4.0 from the Agent Index Dev 1 validation pass. Spec-only — no adapter rebuild (the batch ops already shipped in gdrive 2.9.0 / onedrive 2.6.0).
+
+### Fixed
+- **`createorgnobatch` (core side) — the upload/sync steps now CALL the batch ops.** create-org Steps 9/9.5/10 upload agent-index-core, the selected collections, and the marketplace via `aifs_write_batch` (one process, duplicate-parent-safe, per-file M2 read-back verify) instead of a per-file `aifs_write` loop that timed out and had to be hand-rolled. publish-updates Step 0 now diffs source→remote with `aifs_stat_batch` (size + `md5Checksum`, or the git-blob-SHA fast-path) and uploads with `aifs_write_batch` — so the mandated content SHA diff runs in one process and the "already synced"/version shortcut (`pubstep0versionmatch`) is no longer timeout-driven. Per-file fallback retained for adapters that predate the ops.
+- **`permspecscratchpad` — permission-change-helper writes the spec to the host-visible project dir.** Step 3 now mandates writing the permission spec to the absolute `<project_dir>/outputs/` (the directory containing `agent-index.json`) — never the agent's session scratchpad — and verifies the file exists there before emitting the review link / `--cli` command. Fixes the first-run `could not read spec … The system cannot find the path specified` that broke invite-member (and every permission-change-helper caller) out of the box.
+
 ## [3.23.0] — 2026-07-08 — Release C.1.4.0: update-propagation, create-org robustness, multi-arch distribution
 
 Track-1 of the C.1.4.0 backlog build (the non-multi-org fixes). Pairs with gdrive adapter 2.9.0 / onedrive 2.6.0 (batch ops), marketplace 2.16.0, library 1.3.0.

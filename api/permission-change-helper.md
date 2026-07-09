@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.3.2
+version: 1.3.3
 collection: agent-index-core
 description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
@@ -76,7 +76,7 @@ For each operation in the spec, if the `before` field is missing or empty, call 
 
 **Step 3 — Write the spec to disk.**
 
-Write the spec to `outputs/permission-plan-{ISO-timestamp}.json` using a native file write. The agent-index project_dir's `outputs/` directory is the standard location for tool inputs/outputs. The timestamp ensures uniqueness if the calling task generates multiple plans in the same session.
+Write the spec to **`<project_dir>/outputs/permission-plan-{ISO-timestamp}.json`, resolving `<project_dir>` to the real ABSOLUTE path** — the directory that contains `agent-index.json`. **This MUST be the host-mounted project `outputs/` directory — NOT the agent's session scratchpad / sandbox working directory (`permspecscratchpad`).** The permission helper runs NATIVELY on the host and can only read files under the mounted project directory; a spec written to the session scratchpad is invisible to it, and the `--cli` / URL-handler run then fails with `could not read spec … The system cannot find the path specified` (`validation_error`). Concretely: create `<project_dir>/outputs/` if absent, write the file there, and **verify it exists at that absolute path (`test -f` / stat) BEFORE emitting the review link or the `--cli` command** — never advertise a path you haven't confirmed on disk. Surface the exact absolute path you wrote. The timestamp ensures uniqueness across multiple plans in one session.
 
 **Step 4 — Emit the canonical URL surface in chat.** (Rewritten in core 3.7.3 to realign with `standards.md` § "Trust contract for the agent in the URL-handler invocation flow" — closes bug `20260519-8d20ea22`.)
 
