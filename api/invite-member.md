@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.11.1
+version: 1.11.2
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
@@ -191,6 +191,8 @@ The helper spec below therefore contains only the **Category A** member-director
 **Invoke the helper:**
 
 Call the `permission-change-helper` skill with the spec. The helper validates, opens a review page in the admin's browser (or its `--cli` fallback), waits for the admin's deliberate Accept, then runs the apply-script which calls the actual `aifs_share` ops. The apply-script's per-op verification reads back the post-state and includes it in the helper's structured outcome.
+
+**Spec-file location (hard requirement — `permspecscratchpad`).** The spec MUST be written under the mounted project directory (`<project_dir>/.agent-index/…`, where `<project_dir>` contains `agent-index.json`) — NEVER the session scratchpad, which the host helper cannot read. Before printing the `--cli` command, **assert the spec's absolute path begins with `<project_dir>`** (not just that the file exists — an exists-check passes from the agent's scratchpad view, which is exactly how this failed first-run in testing). See permission-change-helper Step 3.
 
 Surface to the admin before invoking, in the chat:
 

@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.24.0] — 2026-07-10 — Release C.1.4.2: member-onboarding cluster + validation follow-ups
+
+From the C.1.4.0/4.1 on-org validation (fresh Agent Index Dev 1). Pairs with gdrive adapter 2.10.0 / onedrive 2.7.0, marketplace 2.17.0, library 1.4.0.
+
+### Fixed
+- **`memberorgreadblocked` (re-scoped, HIGH) — members can now read core + marketplace.** create-org grants the all-members group reader on `/agent-index-core/` and `/agent-index-marketplace/` right after upload (Steps 9/10, id-anchored), and `publish-updates` Step 6e back-fills the grant on existing orgs. Without this, a non-drive-member's member-bootstrap couldn't read its own procedure and ran degraded. This is the linchpin that unblocks member private-space + binary provisioning.
+- **`memberprivspacenotprovisioned` + `memberbootstrapfabricates` (HIGH).** With core readable, member-bootstrap runs its full spec: provisions the member's My Drive `Agent-Index-Private` space (records `member_folder_id`) and installs the arch-matched helper binary; and if the org catalog is ever unreadable it HARD-HALTS (guidance in `CLAUDE.md.template`) instead of fabricating a workspace and reporting success. `create-doc`'s private-space halt remedy now routes to `@ai:member-bootstrap` (the member's My Drive), never `@ai:update`.
+- **`permspecscratchpad` (hard-fix).** permission-change-helper Step 3 now resolves `<project_dir>` (dir of `agent-index.json`), writes the spec under it (`.agent-index/`), and **asserts the path begins with `<project_dir>`** before emitting the `--cli` command (an exists-check alone passed from the agent's scratchpad view — the recurrence cause). Enforced as a hard step in invite-member too.
+- **`memberdupcollfolders` / `nameambig` (single-org).** standards.md: installed-collection roots resolve by their `org-config` `folder_id` id-anchor, never a bare `/{name}` (ambiguous for a non-drive-member when a code dir shares a name with a data folder).
+- **`pubstep0versionmatch` follow-up.** Step 0 newline hygiene — the diff compares canonical LF-normalized bytes vs the backend `md5Checksum`/`size`, never `aifs_read` stdout, so trailing-newline noise stops cluttering it.
+- **`-3`** — the binary-install prompt now shows the `install_destination` filename (`agent-index-show-plan{ext}`), not the source/display name.
+
 ## [3.23.1] — 2026-07-09 — Release C.1.4.1: wire batch ops + permission-spec path (validation follow-ups)
 
 Follow-up to C.1.4.0 from the Agent Index Dev 1 validation pass. Spec-only — no adapter rebuild (the batch ops already shipped in gdrive 2.9.0 / onedrive 2.6.0).

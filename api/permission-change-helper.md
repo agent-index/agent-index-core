@@ -1,7 +1,7 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.3.3
+version: 1.3.4
 collection: agent-index-core
 description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
@@ -76,7 +76,14 @@ For each operation in the spec, if the `before` field is missing or empty, call 
 
 **Step 3 — Write the spec to disk.**
 
-Write the spec to **`<project_dir>/outputs/permission-plan-{ISO-timestamp}.json`, resolving `<project_dir>` to the real ABSOLUTE path** — the directory that contains `agent-index.json`. **This MUST be the host-mounted project `outputs/` directory — NOT the agent's session scratchpad / sandbox working directory (`permspecscratchpad`).** The permission helper runs NATIVELY on the host and can only read files under the mounted project directory; a spec written to the session scratchpad is invisible to it, and the `--cli` / URL-handler run then fails with `could not read spec … The system cannot find the path specified` (`validation_error`). Concretely: create `<project_dir>/outputs/` if absent, write the file there, and **verify it exists at that absolute path (`test -f` / stat) BEFORE emitting the review link or the `--cli` command** — never advertise a path you haven't confirmed on disk. Surface the exact absolute path you wrote. The timestamp ensures uniqueness across multiple plans in one session.
+**Resolve `<project_dir>` = the absolute directory that contains `agent-index.json`.** Write the spec to **`<project_dir>/.agent-index/permission-plan-{ISO-timestamp}.json`** — an absolute path **UNDER the mounted project directory**. Do **NOT** use the agent's session scratchpad / sandbox working directory (`permspecscratchpad`): the permission helper runs NATIVELY on the host and can only read files under the mounted project directory, so a scratchpad spec is invisible to it and the `--cli` / URL-handler run fails with `could not read spec … The system cannot find the path specified` (`validation_error`).
+
+**Hard gate — do all three BEFORE emitting any `--cli` command or review link:**
+1. Compute the **absolute** path you actually wrote to.
+2. **ASSERT that absolute path begins with the resolved `<project_dir>`.** A scratchpad path fails this and MUST be rewritten under `<project_dir>` before continuing. *(A plain `test -f`/exists check is NOT sufficient on its own — it passes from the agent's own view of the scratchpad, which the host cannot read; that exists-only check is exactly why the C.1.4.1 fix recurred non-deterministically. The startswith-`<project_dir>` assertion is the check that catches it.)*
+3. `test -f` the file at that absolute path.
+
+Only after all three pass, surface the exact absolute path in the review link / `--cli` command. The timestamp ensures uniqueness across multiple plans in one session. **`.agent-index/` is the canonical location** (it's the member/admin workspace metadata dir, always under `<project_dir>`, and was the path the invite-member recovery used successfully); `<project_dir>/outputs/` is also acceptable — the only hard requirement is that the path is under `<project_dir>`.
 
 **Step 4 — Emit the canonical URL surface in chat.** (Rewritten in core 3.7.3 to realign with `standards.md` § "Trust contract for the agent in the URL-handler invocation flow" — closes bug `20260519-8d20ea22`.)
 

@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.10.1
+version: 3.10.2
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -622,7 +622,7 @@ If the template file is missing for any reason, fall back to generating the file
 
 > **(Pre-2.1.0 onedrive installs only)** If you encounter an onedrive adapter older than 2.1.0 (`share` still in `supported_operations_pending`), fall back to the interim instruction: members get read access by being **members of the SharePoint site** (`{site_web_url}`) — add them in SharePoint admin center → the site → Members — until the adapter is upgraded. The site owner (admin) is unaffected.
 
-After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.)
+After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.) **Members ALSO need reader on `/agent-index-core/` and `/agent-index-marketplace/` (bug `memberorgreadblocked`):** members read core + marketplace capability definitions by path (`apply-updates`, `preferences-management`, `session-start`, `member-bootstrap`, `browse`/`find`, etc.), so without these two grants a non-drive-member's `member-bootstrap` runs blind and skips its provisioning. Those two roots are uploaded later (Steps 9 and 10), so their group-reader grants are applied **right after each upload** (id-anchored on the folder's Drive id) using the same sanctioned install-time direct `aifs_share` + helper fallback. Never assume a member is a Drive member — a non-drive-member sees only what is explicitly shared.
 
 **Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and may be applied directly via `aifs_share` — the admin running `create-org` is the org-creator with organizer authority on the new drive/site; the operations are deterministic, one-time setup of resources the admin already fully owns. This is the one sanctioned exception to the helper-gated model. Helper-mediated review would add friction without adding safety here.
 
@@ -687,6 +687,8 @@ Walk the local `agent-index-core/` directory and upload it, preserving the direc
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 
+**Grant members reader on `/agent-index-core/` (memberorgreadblocked).** Immediately after the upload, `aifs_stat("/agent-index-core")` for its Drive id and grant the all-members group reader on it — `aifs_share(path: "id:{core_folder_id}", subject: "{all_members_group}", role: "reader")` — via the same sanctioned install-time direct path (+ `permission-change-helper` fallback) as the Step 8 root grants. Without this, non-drive-members cannot read core capability definitions and `member-bootstrap` runs degraded (skips provisioning). Idempotent; id-anchored so it's unambiguous.
+
 **On success:** Proceed to Step 9.5.
 
 ---
@@ -729,6 +731,7 @@ If the admin says yes:
 4. Download `agent-index-marketplace` locally from the `marketplace_repo_url` in `agent-index.json`.
 5. Verify the download by confirming `collection.json` is readable.
 6. Upload the entire marketplace collection to the remote filesystem (same `aifs_write_batch` one-process upload + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
+6a. **Grant members reader on `/agent-index-marketplace/` (memberorgreadblocked).** After the upload, `aifs_stat("/agent-index-marketplace")` for its Drive id, then `aifs_share(path: "id:{marketplace_folder_id}", subject: "{all_members_group}", role: "reader")` via the sanctioned install-time direct path (+ `permission-change-helper` fallback). Members read marketplace capability definitions by path; without this grant a non-drive-member can't. Idempotent; id-anchored.
 7. Update `org-config.json` on remote via `aifs_read` then `aifs_write` (follow the **safe org-config rewrite rule** below):
    - Add entry to `installed_collections`
    - Update `last_updated`

@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.14.0
+version: 3.14.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -294,7 +294,7 @@ If `core-update` is present:
       - Detect host platform: `os` (`windows` / `darwin` / `linux`) and `arch` (`amd64` / `arm64`).
       - Look up the matching `platforms[]` entry. If none matches, surface "no binary published for `<os>/<arch>`; ask admin to upload one to <release_url>" and skip.
       - Substitute `{version}` and `{filename}` into `release_url_template` to form the download URL.
-      - **Prompt the user** with the upgrade summary: source URL, target version, SHA256 (truncated to 12 hex chars), local version (or "not installed"), install destination. Wait for explicit Y/N confirmation in chat. (Per the trust contract: binary downloads always require user approval. This is the one place that approval happens.)
+      - **Prompt the user** with the upgrade summary: source URL, target version, SHA256 (truncated to 12 hex chars), local version (or "not installed"), and the **install destination — which is the directory entry's `install_destination` path (e.g. `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`), NOT the binary's display/source name or the versioned download `{filename}`** (bug `20260530-8d20ea22-3`: the prompt has rendered `permission-helper-go.exe` instead of the correct `agent-index-show-plan.exe`; the actual install used the right path, but the displayed destination must match `install_destination` so the member looks in / registers the right file). Wait for explicit Y/N confirmation in chat. (Per the trust contract: binary downloads always require user approval. This is the one place that approval happens.)
       - **If Y:** download the file, compute its SHA256, compare against the directory's published SHA256. If mismatch, abort and surface "SHA256 mismatch — the published checksum is `<expected>` but downloaded file hashes to `<actual>`; this is a security failure, not retrying. Report to admin." Refuse to install the file.
       - **Signing state comes from the directory binary entry's `signing` field.** If `signing` is `"trusted"`: the assets are code-signed (Windows Authenticode; macOS Developer ID + notarized) and the `sha256` pins the signed bytes — an OS block ("unverified publisher" / Smart App Control) is then a release/signing **defect** (bug `20260626-8d20ea22-2`), do not work around it, report it. If `signing` is `"unsigned-bypass"`: the binary is **intentionally unsigned** while certs are pending — an OS block is **expected**; surface the Smart App Control **Evaluation-mode** workaround from `lib/permission-helper-go/SIGNING.md` (and right-click→Open for an unsigned macOS `.app`), not a defect. Never silently ship around a `trusted`-mode block.
       - On match: write atomically to the `install_destination` path (substituting `{ext}` to `.exe` on Windows, empty otherwise). On Unix, `chmod +x`. Write the version string to the `version_file` path. **On darwin the registerable artifact is the notarized `Agent-Index Helper.app` bundle, not the bare binary** — install via the shipped macOS installer / `.app` (the directory's darwin platform entry points at it), not a loose executable.

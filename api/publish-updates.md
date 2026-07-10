@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.11.1
+version: 3.11.2
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -112,7 +112,7 @@ The principle: **Step 0 only manages files it would itself upload. If a file's p
 For each of the two infrastructure roots (`agent-index-core/`, `agent-index-marketplace/`):
 
 1. **Walk the local directory recursively.** For each file, compute the relative path from the directory root and the SHA-256 of the local file's content. Apply the skip-list above; filtered files are excluded entirely (they will not appear as `local_only`, `differs`, or `synced`).
-2. **Get the remote side in ONE process, not per-file (`bulkuploadserial`).** Pass all the walked relative paths to **`aifs_stat_batch`** (gdrive 2.9.0+ / onedrive 2.6.0+); for each it returns existence, `size`, and the backend `md5Checksum`. Use md5 (or `size`) as the change signal: a file is `differs` when its remote md5/size ≠ the local file's, `local_only` when the remote entry is absent. This performs the mandated content-based comparison in a single process instead of ~150 separate `aifs_read` spawns — the timeout that used to push agents to shortcut this walk. **Exact fast-path (preferred when publishing from git clones):** compare local git-blob SHAs (`git cat-file`) against the last-published state — cheaper still. **Fallback** (adapter predates the batch op): per-file `aifs_read` + SHA-256. Never substitute a version match for this content comparison (`pubstep0versionmatch`).
+2. **Get the remote side in ONE process, not per-file (`bulkuploadserial`).** Pass all the walked relative paths to **`aifs_stat_batch`** (gdrive 2.9.0+ / onedrive 2.6.0+); for each it returns existence, `size`, and the backend `md5Checksum`. Use md5 (or `size`) as the change signal: a file is `differs` when its remote md5/size ≠ the local file's, `local_only` when the remote entry is absent. This performs the mandated content-based comparison in a single process instead of ~150 separate `aifs_read` spawns — the timeout that used to push agents to shortcut this walk. **Exact fast-path (preferred when publishing from git clones):** compare local git-blob SHAs (`git cat-file`) against the last-published state — cheaper still. **Fallback** (adapter predates the batch op): per-file `aifs_read` + SHA-256. Never substitute a version match for this content comparison (`pubstep0versionmatch`). **Newline hygiene (`batchopsnotadvertised` secondary):** compute the LOCAL side over the SAME canonical bytes that get uploaded — LF-normalized text (Phase 1 step 6) — and compare against the remote `md5Checksum`/`size`, NOT against `aifs_read` stdout (which appends a trailing newline). Otherwise files that are byte-identical after normalization show as spurious trailing-newline `differs`, cluttering the diff and risking a real un-versioned change hiding in the noise.
 3. **Classify each local file:**
    - `local_only` — local exists, remote missing → upload
    - `differs` — local exists, remote exists, hashes differ → upload (overwrite)
@@ -537,6 +537,10 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 ---
 
+#### 6e. Member-read grant reconcile (memberorgreadblocked — self-heal for existing orgs)
+
+Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap runs degraded and skips its provisioning). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**. For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`), `aifs_get_permissions` on `id:{folder_id}`, and if `{all_members_group}` is not already a reader, apply `aifs_share(path: "id:{folder_id}", subject: "{all_members_group}", role: "reader")` — the sanctioned install-time direct path (+ `permission-change-helper` fallback), idempotent. Admin-side only (members cannot self-provision read access). Skip silently if the grants already exist. This is cheap and safe to run every publish; it's the migration that heals orgs like those created before 3.24.0.
+
 ### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
 
 **This step is mandatory on every publish that changes any distributed artifact** (a directory file, a collection version, or the backend binary). Before C.1.3, publish-updates wrote the `/shared/updates/` log but never refreshed `/shared/dist/` — so `manifest.json` (the org's version authority) went stale after an in-place update, and members reading the backend-distribution layer saw the *old* versions/SHAs. `/shared/dist/` is only as current as its last publish; this step keeps it current.
@@ -617,6 +621,4 @@ If the admin runs `publish-updates` twice in rapid succession without making any
 
 If a collection on the remote filesystem has a `collection.json` that cannot be parsed: skip that collection in the diff, surface a notice to the admin, and continue with the remaining collections. Do not block the entire publish on one unreadable collection.
 
-If the admin has made changes to the local project directory but hasn't pushed them to the remote filesystem (e.g., updated CLAUDE.md locally but not uploaded it): the diff will detect the CLAUDE.md hash change based on the local file. This is correct — the admin is responsible for ensuring the remote state is current before publishing. Surface a reminder: "The update instructions reflect your local state. Make sure all changes have been pushed to the remote filesystem before members apply updates."
-
-<!-- AIFS:FILE-END -->
+If the admin has made changes to the local project dir
