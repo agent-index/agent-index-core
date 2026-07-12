@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.10.2
+version: 3.11.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -314,6 +314,7 @@ Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exe
 - Set `auth.method` to `per-member`
 - Set `auth.credential_store` to `.agent-index/credentials/` (relative to project root — this ensures credentials persist across Cowork sessions since the project directory is mounted from the host)
 - Set `connection` to the collected config from Step 3
+- **Do NOT set `remote_filesystem.connection.org_config_id` here** (bug `groupshareapivisibility`). That field is the Drive file id of `/org-config.json` — the single seed that lets `member-bootstrap` read org-config by `id:` with no web-UI visit — but `/org-config.json` does not exist yet at Step 3c (it is written in Step 8). It is populated later, in the new "Stamp resource ids" step (Step 11.5), which runs before the bootstrap zip is assembled so the zip's `agent-index.json` carries the id. Leave the field absent (or `null`) at 3c.
 
 **3. Write `.claude/settings.json`** with the session hook (the hook loads the bootstrap script, which calls the on-demand executor):
 
@@ -557,6 +558,22 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
     "marketplace_cache_path": "/shared/marketplace-cache/",
     "bootstrap_zip_path": "/shared/bootstrap/member-bootstrap.zip"
   },
+  "resource_ids": {
+    // The id-anchored bootstrap manifest (bug `groupshareapivisibility`). These are the
+    // Drive file/folder ids that let a member reach the org tree by `id:` anchor with NO
+    // web-UI visit — the fix that makes onboarding work purely from the bootstrap seed.
+    // `shared_root` = Drive id of `/shared`; `members_registry` = Drive id of
+    // `/members-registry.json`. Written as null HERE (org-config.json is being created in
+    // this very write, and `/members-registry.json` is not written until item 3 below), then
+    // POPULATED in the new "Stamp resource ids" step (Step 11.5) once all three resources
+    // exist and their ids are stat-able. core/marketplace/collection roots do NOT need an
+    // entry — each already carries its own `folder_id` under `installed_collections[]`.
+    // NESTED items (e.g. /shared/dist) need NO id: they are reached by an id-anchored
+    // RELATIVE path, `id:{shared_root}/dist`. The `id:` prefix is REQUIRED — a bare
+    // `{folderId}/child` is treated as a literal path and fails.
+    "shared_root": null,
+    "members_registry": null
+  },
   "admins": [
     {
       "member_hash": "{member_hash}",
@@ -765,6 +782,28 @@ This is what makes member `apply-updates` / `check-updates` / `member-bootstrap`
 
 ---
 
+### Step 11.5: Stamp Resource IDs (id-anchored bootstrap — closes bug `groupshareapivisibility`)
+
+By now the three resources members must reach at bootstrap all exist on remote: the `/shared/` tree (Step 8 item 1), `/members-registry.json` (Step 8 item 3), and `/org-config.json` (Step 8 item 2). This step records their Drive ids so that onboarding is addressable **purely by `id:` anchor with no web-UI visit** — the whole point of the fix. Run it AFTER those three exist and BEFORE the bootstrap zip is assembled (Step 12), because the zip's baked-in `agent-index.json` must carry `org_config_id`.
+
+**The `id:` prefix is REQUIRED everywhere these ids are used.** A bare `{folderId}/child` is treated as a **literal path** and fails; the id-anchored form is `id:{fileId}` for a file and `id:{folderId}/rel` for something nested under a folder (e.g. `id:{shared_root}/dist`). This is why we seed ids rather than paths — a member with only the seed and no visit can still resolve the whole tree.
+
+1. **Populate `org-config.json` `resource_ids` (remote).**
+   - `aifs_stat("/shared")` → take its Drive folder id as `shared_root`.
+   - `aifs_stat("/members-registry.json")` → take its Drive file id as `members_registry`.
+   - Read-modify-write `org-config.json` via the **safe org-config rewrite rule** (Step 10's rule — unique `mktemp` staging, identity assert on `org_id` + `site_id`/`drive_id`, content assert that `resource_ids.shared_root` and `resource_ids.members_registry` are now non-null, never re-select the staged file by glob/mtime): set `resource_ids.shared_root` and `resource_ids.members_registry` to the stat'd ids. Read the write back and confirm both ids parse. (core/marketplace/collection roots need nothing added — each already carries `folder_id` under `installed_collections[]`. Nested items like `/shared/dist` need no id — they are reached by `id:{shared_root}/dist`.)
+
+2. **Stamp `org_config_id` into the LOCAL `agent-index.json` (shell-first write).**
+   - `aifs_stat("/org-config.json")` → take its Drive file id.
+   - Write it into the local `agent-index.json` at `remote_filesystem.connection.org_config_id`. This is the single seed that lets `member-bootstrap` read org-config by `id:{org_config_id}` with no visit. **Write shell-first** (compose the full JSON in memory, then write it with a single shell redirection to an executor-readable path) rather than the editor file-write path — the Cowork mount can truncate an editor-path config write (bug `20260615-8d20ea22-localcfgtrunc`). Then **read it back and `JSON.parse` it**; if it fails to parse or is missing `org_config_id`, rewrite via the shell and re-verify. Never proceed past a local config write you haven't read back and parsed.
+   - This MUST complete before Step 12 assembles the zip, because the zip bakes in this local `agent-index.json` and it must carry `org_config_id`.
+
+**Idempotent.** Re-running create-org after a partial completion re-stats and re-writes the same ids — a no-op if they already match.
+
+**On success:** Proceed to Step 12.
+
+---
+
 ### Step 12: Generate and Upload Bootstrap Zip
 
 Generate the member bootstrap zip. This is the minimal package that a new member downloads and unpacks to get started.
@@ -797,7 +836,7 @@ The executor bundle (`aifs-exec.bundle.js`, `aifs-exec.sh`, and `adapter.json`) 
 
 **Do NOT bake an arch-specific permission-helper binary into the zip (`regenzipnobinary`).** The admin cannot know each member's os/arch at zip-build time, so baking the admin's host build strands any member on a different arch (and it made regenerated zips inconsistent with first-install zips). The bootstrap zip carries **no binary** and is therefore arch-neutral and identical for every member. Instead, **member-bootstrap detects the member's host os/arch and fetches the matching build from `/shared/dist/binaries/`** (the full matrix published in Step 11), SHA-verifies it, places it at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}` (+ `version.txt`), and prompts `--register`. This is the same source members use on update — so first-install and post-update are consistent. (`regenerate-bootstrap.md` likewise carries no binary — that is now the correct end state, not the narrow omission originally filed.)
 
-The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. It does NOT include any credentials.
+The `agent-index.json` in the zip is the fully configured copy from the local filesystem (written in Step 3c, then stamped with `org_config_id` in Step 11.5) — it includes the `remote_filesystem` section with backend, connection config, and auth settings. **It MUST include `remote_filesystem.connection.org_config_id`** (the Drive id of `/org-config.json`, stamped in Step 11.5) — this is the id-anchored bootstrap seed that lets `member-bootstrap` read org-config by `id:` with no web-UI visit (bug `groupshareapivisibility`). Before creating the zip, confirm the local `agent-index.json` you are about to bake in has a non-null `org_config_id`; if it is absent, Step 11.5 did not complete — go back and run it before proceeding. It does NOT include any credentials.
 
 The `.claude/settings.json` includes only the session hook that enables the on-demand executor. It does not include server definitions — the executor is called directly via the shell wrapper.
 

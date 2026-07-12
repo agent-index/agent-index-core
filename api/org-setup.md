@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.6.0
+version: 3.7.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -72,7 +72,7 @@ The collections catalog is assembled at runtime from `org-config.installed_colle
 
 To build the catalog (revised in core 3.7.4 to close bug `20260522-8d20ea22` — the previous `aifs_list("/")` approach required Drive-level membership and broke for non-admin members):
 
-1. Read `aifs_read("/org-config.json")` and parse `installed_collections[]`.
+1. Read org-config **by id** — `aifs_read("id:{org_config_id}")`, where `org_config_id` = `remote_filesystem.connection.org_config_id` from the local `agent-index.json` (bug `groupshareapivisibility`; the explicit `id:` prefix is REQUIRED — a bare id is treated as a literal path and fails). Fall back to `aifs_read("/org-config.json")` only if `org_config_id` is absent (older zip). Parse `installed_collections[]` and `resource_ids`.
 2. For each entry where `status: "installed"`:
    - Skip `agent-index-core` and `agent-index-marketplace` — these are infrastructure, not user-installable capabilities.
    - Read the collection's manifest directly. **Resolve the read base (core 3.10.1):** if the `installed_collections[]` entry has a `folder_id`, read `aifs_read("id:{folder_id}/collection.json")`; otherwise fall back to `aifs_read("/{name}/collection.json")` (pre-3.10.1 installs not yet backfilled). Addressing by stored Drive ID makes the read deterministic for non-Drive-member members and immune to same-named-folder ambiguity (bug 20260606-…-db13). Extract `display_name`, `category`, `description`, `version`, and the `api[]` list.
@@ -98,13 +98,13 @@ Explain to the member that agent-index uses their role to suggest which skills a
 
 **Step 1: Org role layer**
 
-Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")` and check for `org_roles`. If `org_roles` is defined and non-empty:
+Read `org-config.json` by id — `aifs_read("id:{org_config_id}")` (from the local `agent-index.json`; path fallback if absent — `groupshareapivisibility`) — and check for `org_roles`. If `org_roles` is defined and non-empty:
 
 - Present org roles to the member: "Your org has defined these roles to help configure your workspace. Which best describes your function?"
 - List each role with its `display_name` and `description`
 - Allow the member to select one, or to skip ("none of these fit")
 - When the member selects an org role:
-  a. Write the selected `org_role` to the member's entry in `members-registry.json` on the remote filesystem via `aifs_read("/members-registry.json")` (read), modify in memory, then `aifs_write("/members-registry.json", ...)` (write back)
+  a. Write the selected `org_role` to the member's entry in `members-registry.json`, addressing it **by id** — `id:{members_registry_id}` (from org-config `resource_ids.members_registry`; path fallback if absent — `groupshareapivisibility`): `aifs_read("id:{members_registry_id}")` (read), modify in memory, then `aifs_write("id:{members_registry_id}", ...)` (write back)
   b. Use the role's `default_collections` to determine which collections to focus on in Phase 3
 - If the member skips: proceed without an org role (all collections treated equally in Phase 3)
 
@@ -241,7 +241,7 @@ Write onboarding completion state to `/members/{member-hash}/profile/onboarding-
 {list of external systems that need access configured, with contacts}
 ```
 
-After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` on the remote filesystem (read via `aifs_read("/members-registry.json")`, modify, write back via `aifs_write("/members-registry.json", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
+After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` **by id** — `id:{members_registry_id}` (from org-config `resource_ids.members_registry`; path fallback if absent — `groupshareapivisibility`): read via `aifs_read("id:{members_registry_id}")`, modify, write back via `aifs_write("id:{members_registry_id}", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
 
 **Phase 5b — Permission-helper registration (do-it-now, verified — added in core 3.22.0, `helpernoreg`).** Onboarding installs sharing-capable capabilities (Library docs, Projects ideas, owned-content shares), so the `agent-index://` URL handler must be registered on the host or the member's **first share will emit a link that does nothing.** This is the same do-it-now/verified treatment `member-bootstrap` applies — it MUST also run here, because "set up my workspace" routes to **this skill**, not member-bootstrap, and a closing "optional, everything else works without it" footnote (the pre-3.22.0 behavior on this path) is exactly the framing that left members with a dead first-share link.
 

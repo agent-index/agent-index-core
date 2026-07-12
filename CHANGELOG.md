@@ -1,5 +1,17 @@
 # Agent-Index Core — Changelog
 
+## [3.25.0] — 2026-07-12 — Release C.1.4.3: id-anchored bootstrap (groupshareapivisibility)
+
+Onboarding now completes with no web-UI visit by addressing bootstrap-critical resources via `id:` anchors instead of by path. From Phase A on-org validation (Agent Index Dev 1): id read / descendant-enumeration / write all work pre-visit; by-path is unreliable for a non-drive-member and is not self-healing (the `pathcachestale` finding — group-grant propagation latency, not a cache). Group membership + direct-on-folder grants unchanged; NO per-member reader shares (`catbredundant`). Pairs with gdrive 2.11.0, marketplace 2.18.0, library 1.5.0.
+
+### Fixed / Changed
+- **`member-bootstrap` (3.10.0) — id-anchored keystone.** Step 4 reads `/org-config.json` by its baked-in id (`remote_filesystem.connection.org_config_id` from `agent-index.json`) FIRST, with a single drive.google.com fallback link for that one file if the id-read fails; confirms core access by `id:{core_folder_id}/api/session-start.md`. Step 5 writes the handshake to `id:{artifacts_dir_id}/member-folder.json`; Step 6 reads/writes the registry by `id:{members_registry_id}`. The explicit `id:` prefix is required (a bare id resolves as a literal path and fails).
+- **`create-org` (3.11.0) — top-level id manifest + zip stamp.** Populates org-config `resource_ids` (`shared_root`, `members_registry`) and stamps `remote_filesystem.connection.org_config_id` into the local `agent-index.json` before the bootstrap zip is assembled.
+- **`publish-updates` (3.12.0) — re-stamp + back-fill.** Re-stamps `org_config_id` into the regenerated zip on every publish; back-fills `resource_ids` into existing orgs' org-config.
+- **`invite-member` (1.12.0) — records `artifacts_dir_id`.** Captures the member's artifacts-dir Drive id at creation and records it on the registry entry so bootstrap writes the handshake by id.
+- **`org-setup` (3.7.0) — id-anchored reads.** Reads org-config and members-registry by id.
+- **`standards.md` — Addressing convention 6.** Documents the id-anchored-bootstrap rules: explicit `id:` prefix required, top-level-id-manifest rule (root-children need ids; nested reached by id-anchored relative paths), org-config as keystone, permission model unchanged.
+
 ## [3.24.0] — 2026-07-10 — Release C.1.4.2: member-onboarding cluster + validation follow-ups
 
 From the C.1.4.0/4.1 on-org validation (fresh Agent Index Dev 1). Pairs with gdrive adapter 2.10.0 / onedrive 2.7.0, marketplace 2.17.0, library 1.4.0.

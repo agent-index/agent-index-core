@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.11.2
+version: 3.12.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -223,6 +223,8 @@ For each prerequisite in the aggregated set:
 - `<project_dir>`: the agent-index install directory.
 - `<source-trigger>`: a concise summary of the changes that triggered the regen, e.g. `"adapter bundle 2.2.1 → 2.2.2"` or `"CLAUDE.md and adapter bundle changed"`.
 - `<allow-skip>`: `true` (publish-updates is OK with a no-op regen if the content hash hasn't actually changed — this happens when files moved through Step 0 but ended up with the same byte-for-byte content as what's already in the deployed bootstrap).
+
+**Re-stamp `org_config_id` into the local `agent-index.json` BEFORE the subroutine assembles the zip (id-anchored bootstrap — bug `groupshareapivisibility`).** The bootstrap zip bakes in the local `agent-index.json`, and that copy must carry the current Drive id of `/org-config.json` at `remote_filesystem.connection.org_config_id` — the single seed that lets `member-bootstrap` read org-config by `id:{org_config_id}` with no web-UI visit. On EVERY publish that regenerates the zip: `aifs_stat("/org-config.json")` → take its Drive file id → write it into the local `agent-index.json` at `remote_filesystem.connection.org_config_id` (shell-first: compose the full JSON in memory, write with a single shell redirection to an executor-readable path, then read back and `JSON.parse` to confirm `org_config_id` is present — the Cowork-mount torn-write guard, bug `20260615-8d20ea22-localcfgtrunc`). This makes the id self-healing: even an org whose zip predates the manifest gets a correct `org_config_id` baked in on the admin's next publish. Do this before invoking `regenerate-bootstrap.md`. Note the `id:` prefix is REQUIRED wherever the id is consumed — `id:{org_config_id}`; a bare id used as a path fails.
 
 The subroutine handles assembling zip contents, LF normalization, zip creation, upload to `/shared/bootstrap/member-bootstrap.zip`, all-members re-share, and updating `published-state.json`'s `bootstrap_content_hash` field.
 
@@ -541,6 +543,18 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap runs degraded and skips its provisioning). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**. For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`), `aifs_get_permissions` on `id:{folder_id}`, and if `{all_members_group}` is not already a reader, apply `aifs_share(path: "id:{folder_id}", subject: "{all_members_group}", role: "reader")` — the sanctioned install-time direct path (+ `permission-change-helper` fallback), idempotent. Admin-side only (members cannot self-provision read access). Skip silently if the grants already exist. This is cheap and safe to run every publish; it's the migration that heals orgs like those created before 3.24.0.
 
+#### 6f. `resource_ids` back-fill reconcile (groupshareapivisibility — self-heal for existing orgs)
+
+Ensure `org-config.json` carries the id-anchored bootstrap manifest — the `resource_ids` object with `shared_root` (Drive id of `/shared`) and `members_registry` (Drive id of `/members-registry.json`). create-org (Step 11.5) stamps these at install; this standing check **back-fills orgs created before that** so every existing org gets the manifest on the admin's next publish. This is what lets `member-bootstrap` reach the org tree purely by `id:` anchor with no web-UI visit (bug `groupshareapivisibility`).
+
+Read `org-config.json` (already read in Step 6). If `resource_ids` is absent, OR `resource_ids.shared_root` is missing/null, OR `resource_ids.members_registry` is missing/null:
+
+1. `aifs_stat("/shared")` → its Drive folder id (`shared_root`).
+2. `aifs_stat("/members-registry.json")` → its Drive file id (`members_registry`).
+3. Populate `resource_ids` via the **safe org-config rewrite rule** (unique `mktemp` staging, identity assert on `org_id` + `site_id`/`drive_id`, content assert that both ids are now non-null, never re-select the staged file by glob/mtime — same rule create-org uses). This is additive to the `installed_collections[]`/`agent_index_version` writeback in Step 6; fold it into the same atomic `org-config.json` write when possible, or write it as its own safe rewrite.
+
+Idempotent: skip silently if `resource_ids` already has both ids. core/marketplace/collection roots need nothing added — each already carries `folder_id` under `installed_collections[]`; nested items like `/shared/dist` need no id (reached by `id:{shared_root}/dist`). The `id:` prefix is REQUIRED wherever these ids are consumed — a bare `{folderId}/child` is treated as a literal path and fails. Cheap and safe to run every publish.
+
 ### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
 
 **This step is mandatory on every publish that changes any distributed artifact** (a directory file, a collection version, or the backend binary). Before C.1.3, publish-updates wrote the `/shared/updates/` log but never refreshed `/shared/dist/` — so `manifest.json` (the org's version authority) went stale after an in-place update, and members reading the backend-distribution layer saw the *old* versions/SHAs. `/shared/dist/` is only as current as its last publish; this step keeps it current.
@@ -605,7 +619,8 @@ Never modify collection directories or any file outside the documented write sur
 - `/shared/updates/latest.json`
 - `/shared/updates/published-state.json`
 - `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6 — no other org-config fields are mutated)
+- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6, and the `resource_ids` back-fill documented in Step 6f — no other org-config fields are mutated)
+- the LOCAL `agent-index.json` (ONLY `remote_filesystem.connection.org_config_id`, re-stamped in Step 0c's `bootstrap_regen` before the zip is assembled — bug `groupshareapivisibility`; no other local fields are mutated)
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
 

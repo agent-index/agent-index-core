@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.11.2
+version: 1.12.0
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, delegates ACL changes to the permission-change-helper for member-confirmed application, verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
@@ -108,6 +108,7 @@ This step creates the folder if it doesn't exist. It performs **no permission wr
 - Check `aifs_exists("/shared/members/artifacts/{hash}/")`.
 - If it does not exist: materialize it via `aifs_write("/shared/members/artifacts/{hash}/.placeholder", "")`.
 - If it already exists (re-invite case): leave it untouched.
+- **Capture the directory's Drive id (bug `groupshareapivisibility`).** After materializing (or on re-invite/reuse, against the existing dir), `aifs_stat("/shared/members/artifacts/{hash}/")` and record the resolved Drive id as `artifacts_dir_id`. This id is persisted on the registry entry in Step 8 so that `member-bootstrap` can write its onboarding handshake **by id** (`aifs_write("id:{artifacts_dir_id}/member-folder.json", …)`) — a member's by-path resolution into the artifacts namespace isn't reliable before group-share propagation, but writing to its own artifacts dir by id works pre-visit.
 
 **The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private` in the member's **own personal space** — their My Drive on gdrive, their OneDrive on onedrive — created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not; on onedrive the member owns their OneDrive items outright). On onedrive this requires the member to have a OneDrive-inclusive license and to have signed into office.com once (see memberlicense; create-org now surfaces this prerequisite to the admin). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
 
@@ -250,9 +251,12 @@ Parse, append the new member entry:
   "sharing_identity": "{resolved id/UPN from aifs_resolve_identity, or = email on gdrive}",
   "org_role": "{default-role-from-org-config-or-prompt}",
   "joined_date": "{today YYYY-MM-DD}",
-  "member_folder_id": null
+  "member_folder_id": null,
+  "artifacts_dir_id": "{artifacts_dir_id captured in Step 5}"
 }
 ```
+
+`artifacts_dir_id` (bug `groupshareapivisibility`) is the Drive id of `/shared/members/artifacts/{hash}/` captured by the Step 5 `aifs_stat`. `member-bootstrap` reads it from this entry to write its onboarding handshake **by id** (`id:{artifacts_dir_id}/member-folder.json`), which succeeds for a not-yet-propagated member where a by-path write would not. On re-invite it is refreshed from the stat of the reused directory.
 
 `sharing_identity` (new in 1.8.0 — identitymap) is the backend-grantable identity resolved in Step 6: the member's objectId/UPN on onedrive, the email on gdrive. It is the canonical recipient for every later share/unshare/remove-member targeting this member — tasks read it from the registry rather than re-resolving or using the roster `email` (which often isn't grantable on M365). `member_hash` stays the canonical agent-index identity for everything else (ownership, capabilities).
 
