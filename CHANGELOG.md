@@ -1,5 +1,10 @@
 # Agent-Index Core — Changelog
 
+## [3.26.0] — 2026-07-13 — Release C.1.4.4: member-read grant surfaced on publish (memberreadgrantnotauto)
+
+### Fixed
+- **`publish-updates` (3.13.0) — member-read grant reconcile (6e) hard-surfaces a one-click helper review instead of silently skipping.** On an upgraded org missing the all-members reader grant on `/agent-index-core/` + `/agent-index-marketplace/`, id-anchored bootstrap still fails (addressing is fixed, permission is not). 6e no longer relies on a direct `aifs_share` (which the agent cannot apply in a publish context) with a silent skip; it now builds a `permission-change-helper` spec (under `<project_dir>/.agent-index/`) and surfaces the `agent-index://apply` review link + `--cli` command as a required, unmissable step ("members cannot read core/marketplace until you Accept this"), verifying after Accept. Healthy orgs (grant already present) remain a silent no-op. Minimal-slice fix; the full 6e/Migration-4 reconciliation remains deferred.
+
 ## [3.25.0] — 2026-07-12 — Release C.1.4.3: id-anchored bootstrap (groupshareapivisibility)
 
 Onboarding now completes with no web-UI visit by addressing bootstrap-critical resources via `id:` anchors instead of by path. From Phase A on-org validation (Agent Index Dev 1): id read / descendant-enumeration / write all work pre-visit; by-path is unreliable for a non-drive-member and is not self-healing (the `pathcachestale` finding — group-grant propagation latency, not a cache). Group membership + direct-on-folder grants unchanged; NO per-member reader shares (`catbredundant`). Pairs with gdrive 2.11.0, marketplace 2.18.0, library 1.5.0.

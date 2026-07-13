@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.12.0
+version: 3.13.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -541,7 +541,13 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 #### 6e. Member-read grant reconcile (memberorgreadblocked — self-heal for existing orgs)
 
-Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap runs degraded and skips its provisioning). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**. For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`), `aifs_get_permissions` on `id:{folder_id}`, and if `{all_members_group}` is not already a reader, apply `aifs_share(path: "id:{folder_id}", subject: "{all_members_group}", role: "reader")` — the sanctioned install-time direct path (+ `permission-change-helper` fallback), idempotent. Admin-side only (members cannot self-provision read access). Skip silently if the grants already exist. This is cheap and safe to run every publish; it's the migration that heals orgs like those created before 3.24.0.
+Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap can't reach core even by id-anchor: id-addressing fixes *addressing*, not *permission*). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**.
+
+For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}`. If `{all_members_group}` is already a reader, **skip silently** (idempotent — the common case on a healthy org).
+
+**If either grant is MISSING, hard-surface it via the permission-change-helper — do NOT attempt a direct `aifs_share` and do NOT defer it (`memberreadgrantnotauto`).** In a publish context the agent cannot apply a permission change directly (the agent-side safety boundary the helper exists to navigate), and the old "direct path, else silently skip" wording meant the grant was quietly dropped — leaving members unable to read core/marketplace, the exact block this heals, until an admin happened to run a separate migration. Instead: build ONE `permission-change-helper` spec containing the missing reader grant(s) — `{ resource: "id:{folder_id}", subject: "{all_members_group}", role: "reader" }` for each missing root — write it under `<project_dir>/.agent-index/` (assert the path is under `<project_dir>` — `permspecscratchpad`), and **surface it as an unmissable, required completion step**, not a footnote: emit the `agent-index://apply?spec=…` review link AND the headless `--cli <spec path>` command, and state the consequence plainly — *"members cannot read core/marketplace until you Accept this."* Do NOT report the publish as fully complete while this grant is outstanding. After the admin Accepts, re-run `aifs_get_permissions` to verify the grant landed. Admin-side only (members cannot self-provision read access).
+
+This is cheap and safe to run every publish; on a healthy org it is a silent no-op, and on an org missing the grant it produces a single one-click review rather than a deferred, easily-missed migration.
 
 #### 6f. `resource_ids` back-fill reconcile (groupshareapivisibility — self-heal for existing orgs)
 
