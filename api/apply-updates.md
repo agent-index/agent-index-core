@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.14.1
+version: 3.15.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -389,16 +389,16 @@ This phase runs **unconditionally** on every `apply-updates` invocation that rea
    - If drifted: invoke the manifest-sync subroutine for `(C, orgVersion)`.
    - If not drifted: skip.
 
-   **4.1. Filesystem-existence sub-check for collection C** (added in core 3.7.3). Verifies on-disk presence of the canonical install layout, not just the `manifest_sync` bookkeeping field. Catches two known drift classes: (a) pre-3.6.x installs whose capability files exist only at the legacy path (`members/{member_hash}/{type}/{name}/`) and were never backfilled to the canonical path (`members/{member_hash}/installed/{type}/{name}/`) because dual-write only fires on install/upgrade; (b) any flow that advances `manifest_sync` without writing local files (bookkeeping-without-files state).
+   **4.1. Filesystem-existence sub-check for collection C** (added in core 3.7.3). Verifies on-disk presence of the canonical install layout, not just the `manifest_sync` bookkeeping field. Catches two known drift classes: (a) pre-3.6.x installs whose capability files exist only at the legacy path (`members/{member_hash}/{type}/{name}/`) and were never backfilled to the canonical path (`members/{member_hash}/installed/{collection}/{type}/{name}/`, collection-qualified as of bug `instdir`) because dual-write only fires on install/upgrade; (b) any flow that advances `manifest_sync` without writing local files (bookkeeping-without-files state).
 
    1. Read `member-index.json`'s `installed.skills[]` and `installed.tasks[]`, filter to entries with `collection === C`. This gives the list of `{type, name}` pairs to check.
-   2. For each `{type, name}`: stat the canonical anchor file at `members/{member_hash}/installed/{type}/{name}/{name}.md` via `aifs_stat`. The anchor file is authoritative — other files (manifest.json, setup.md) can be re-derived from the subroutine if missing; the `.md` file is the capability definition.
+   2. For each `{type, name}`: stat the canonical anchor file at the collection-qualified `members/{member_hash}/installed/{C}/{type}/{name}/{name}.md` via `aifs_stat`. The anchor file is authoritative — other files (manifest.json, setup.md) can be re-derived from the subroutine if missing; the `.md` file is the capability definition.
    3. Issue the stats in parallel across all capabilities for this collection. Implementations that cannot parallelize fall back to sequential — the result is the same, only the latency differs. For a typical 7-collection install, parallel completes in 1–2 seconds; sequential ~10–20 seconds.
    4. `canonicalAnchorsMissing` is **true** if ANY stat returns "not found." Errors other than not-found (permission denied, network timeout) are treated as "unknown": skip the filesystem check for this collection this run, do NOT set `canonicalAnchorsMissing`, and let the other drift criteria apply. A transient failure should not cause spurious notices.
 
    **4.2. Notice format on filesystem-drift detection** (added in core 3.7.3). When `canonicalAnchorsMissing` is what triggers the drift classification, surface this line in the apply-updates progress narration immediately before invoking the subroutine:
 
-   > "Detected filesystem drift on collection `{C}`: {N} of {M} installed capabilities are missing from the canonical install layout (`installed/{type}/{name}/`). Re-syncing now."
+   > "Detected filesystem drift on collection `{C}`: {N} of {M} installed capabilities are missing from the canonical install layout (`installed/{collection}/{type}/{name}/`). Re-syncing now."
 
    Where `{N}` is the count of capabilities with missing anchor files, `{M}` is the total installed capability count for the collection. The notice is informational; the subroutine then runs and (per its current step 5) dual-writes to both legacy and canonical paths, populating the missing canonical anchors.
 
@@ -441,7 +441,7 @@ Given `(collection, targetVersion)`:
 
 4. **LF-normalize text content** (added in core 3.6.1; mechanic inlined here in core 3.7.4 — previously cross-referenced Phase 1 step 6's Node-helper-install normalization, which was removed in 3.7.4 when the Node helper was removed). Read the remote file's bytes; replace any `\r\n` sequence with `\n`; replace any standalone `\r` with `\n`; then write. Apply to all `.md` and `.json` content. When the install runs on a Windows host the file-write APIs default to applying CRLF; this normalization step makes the writes deterministic regardless of host OS (closes the data-shape side of bug `20260504-8d20ea22-7` for this code path).
 
-5. **Write each file to the member-local install path(s).** The current install layout is `members/{member_hash}/installed/{type}/{name}/`. While the legacy layout `members/{member_hash}/{type}/{name}/` still exists on a given install, write to **both** paths to keep them in sync (the migration to single-layout is tracked separately and is not in scope here). Specifically write:
+5. **Write each file to the member-local install path(s).** The canonical install layout is the collection-qualified `members/{member_hash}/installed/{collection}/{type}/{name}/` — set `{install_dir}` to this. The `{collection}` segment (added for bug `instdir`) prevents same-named capabilities from different collections from colliding on `installed/{type}/{name}/`; it is derivable here because each member-index entry records its `collection`. **Old-unqualified migration:** if a pre-`instdir` directory exists at the unqualified `members/{member_hash}/installed/{type}/{name}/`, move it to `{install_dir}` before writing (or, if `{install_dir}` already has content, archive the unqualified directory to a timestamped backup) so no stale duplicate is left behind — this piggybacks on the normal resync write and needs no separate migration script. Separately, while the pre-3.6.x legacy layout `members/{member_hash}/{type}/{name}/` still exists on a given install, continue writing to it too to keep it in sync (that single-layout migration is tracked separately and is not in scope here). Specifically write:
    - `{install_dir}/{name}.md` (from `def_md`)
    - `{install_dir}/{name}-setup.md` (from `setup_md`, if read)
    - `{install_dir}/manifest.json` (from `manifest_json`)
@@ -461,7 +461,7 @@ Given `(collection, targetVersion)`:
    - Read `/{collection}/setup/collection-setup-responses.md` once per subroutine invocation (cache for the loop over this collection's capabilities).
    - Parse the canonical file's org-mandated parameter values. The conventional format written by `org-setup` is a `## Parameters` markdown section containing one `### {param_name}` block per parameter, each with a `- **Value:** {value}` line. Some collections instead use flat top-level YAML (no `## Parameters` section) or pure prose — those formats carry no structured org-mandated parameters that this step can reconcile, and the step is a safe no-op for them. Result on the structured format: a map of `param_name → org_mandated_value`.
    - For each installed capability in this collection (the same set already iterated in steps 2–7):
-     - Read the capability's local `members/{member_hash}/installed/{type}/{name}/setup-responses.md`.
+     - Read the capability's local `members/{member_hash}/installed/{collection}/{type}/{name}/setup-responses.md`.
      - Parse its `## Org-Mandated Parameters` markdown section (the literal heading written by `org-setup` Phase 4 step 8 is typically `## Org-Mandated Parameters (from collection setup)` — match by the `## Org-Mandated Parameters` prefix, ignoring trailing parenthetical text). Same `### {param_name}` + `- **Value:** {value}` shape as the canonical. If the section is absent — e.g., a placeholder `setup-responses.md` (`"Installed with org defaults."`) produced by an `org-setup` run that couldn't read the canonical at the wrong path; the very bug this step closes — treat the local map as empty: every canonical entry then counts as a missing key (drift).
      - Compare keys + values. Differences (mismatched values OR canonical-only keys) indicate drift.
    - If drift detected: re-inject the canonical org-mandated values into the local file.
@@ -593,13 +593,4 @@ When delegating to org-setup, pass the necessary context: which collection, whic
 
 The merge algorithm in Step 3 must produce a correct net plan regardless of how many entries are pending or how they overlap. The key invariants:
 
-- For any given target (collection, infrastructure component, CLAUDE.md, adapter), only one operation should exist in the merged plan
-- The `from_version` in merged operations must reflect the member's *actual current state*, not the operation's original `from_version` (which reflected the org state at the time of that publish)
-- Install-then-remove cancels out. Install-then-update becomes install-at-latest. Update-then-remove becomes remove.
-- The cursor advances to the last entry ID regardless of which individual operations were applied, skipped, or declined — the cursor tracks what was *processed*, not what was *accepted*
-
-### Constraints
-
-Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
-
-Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already p
+- For any given target (collection, infrastructure 

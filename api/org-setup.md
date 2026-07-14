@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.7.0
+version: 3.8.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -166,7 +166,7 @@ Get confirmation before beginning any installations.
 For each skill and task in the determined installation order:
 
 1. Announce what is being installed: "Installing {display name}..."
-2. Create the directory structure in the member's LOCAL workspace
+2. Create the directory structure in the member's LOCAL workspace at the collection-qualified install path `members/{member_hash}/installed/{collection}/{type}/{name}/` (the `{collection}` segment prevents same-named capabilities from different collections from colliding — bug `instdir`; the path is derivable from the member-index entry, which records `collection`, `type`, and `name`)
 3. Read the canonical definition file from the remote collection via `aifs_read("/{collection}/api/{name}.md")` and write it to the member's local workspace
 4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context
 5. Inject role-suggested parameter defaults from `role.md` into the setup context
@@ -204,7 +204,7 @@ For each skill and task in the determined installation order:
    ```
 
    **Format rules (normative):** one `###` block per parameter; the `- **Value:**` line is REQUIRED and machine-parsed — keep the value on that single line (JSON-encode multi-line or structured values). All three `##` section headings MUST be present even when a section has no parameters — an absent `## Org-Mandated Parameters` section is treated as total drift by apply-updates Phase 4.5 step 9 and triggers re-injection. The heading may carry trailing parenthetical text; parsers match on the `## Org-Mandated Parameters` prefix. The org-level `collection-setup-responses.md` (written in Phase 2, stored at `/{collection}/setup/collection-setup-responses.md`) uses the same `### {param_name}` + `- **Value:**` shape under a single `## Org-Mandated Parameters` heading. A partial interview (member exits mid-setup) writes the same format with `completed: partial` — see Edge Cases.
-9. Write the personalized installed instance to the member workspace
+9. Write the personalized installed instance to the member workspace under the collection-qualified install path `members/{member_hash}/installed/{collection}/{type}/{name}/` (see step 2)
 10. Write `manifest.json` with version, provenance, parameter provenance map, and dependency status
 11. Write the entry to `member-index.json`:
     - **`version` field:** use the `version` value from the `.md` frontmatter parsed in step 3 — the same value written to `manifest.json` in step 10. Do NOT use the collection's `collection.json` version. Capabilities version independently of their parent collection; the member-index entry tracks the per-capability frontmatter version. (This was historically ambiguous in the spec; clarified in core 3.7.0. The Phase 4.5 manifest_sync sweep in apply-updates 3.4.0 reconciles existing installs that wrote the wrong value.)
@@ -319,7 +319,8 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
 6. Present reset parameters and new parameters to the member for input
 7. Produce the migration report: preserved / reset / requires attention
 8. **Write the new version's content to the member's local installed instance.** This is a content-replacement step, not a bookkeeping step:
-   - Write the contents read in step 2 to the corresponding local files at `members/{member_hash}/installed/{type}/{name}/` — `{name}.md`, `{name}-setup.md`, `{name}-manifest.json`. The local file content must match what's on remote at the new version.
+   - Write the contents read in step 2 to the corresponding local files at the collection-qualified path `members/{member_hash}/installed/{collection}/{type}/{name}/` — `{name}.md`, `{name}-setup.md`, `{name}-manifest.json`. The local file content must match what's on remote at the new version. (The `{collection}` segment was added for bug `instdir` so same-named capabilities from different collections no longer collide on `installed/{type}/{name}/`.)
+   - **Old-unqualified migration:** if a pre-`instdir` directory exists at the unqualified `members/{member_hash}/installed/{type}/{name}/`, move it to the qualified path before writing (or, if the qualified path already has content, archive the unqualified directory to a timestamped backup) so no stale duplicate is left behind. Upgrades already rewrite these files, so this migration piggybacks on the normal upgrade write and needs no separate migration script.
    - Write the migrated `setup-responses.md`.
 9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4 step 11's wording; same data-shape principle.)
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
@@ -331,7 +332,7 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
 When a member asks to remove a skill or task:
 1. Check `member-index.json` for any other installed tasks that list this skill in their `dependencies.skills`
 2. If dependencies exist: surface the affected tasks. Ask the member to confirm they understand those tasks will be affected. Require explicit confirmation before proceeding.
-3. If no dependencies, or after confirmation: remove the entry from `member-index.json`, archive the member's installed directory to a timestamped backup location (do not delete — the member may want to reinstall), confirm removal.
+3. If no dependencies, or after confirmation: remove the entry from `member-index.json`, archive the member's installed directory (the collection-qualified `members/{member_hash}/installed/{collection}/{type}/{name}/`) to a timestamped backup location (do not delete — the member may want to reinstall), confirm removal.
 
 ### Alias Collision Handling
 
@@ -390,14 +391,4 @@ If a role is selected that has an `extends` chain deeper than 3 levels: surface 
 
 If a setup interview for a specific skill or task fails partway through (member exits, session ends): write whatever responses were collected to `setup-responses.md` as a partial record. Mark the installation as incomplete in `manifest.json`. On the next run, detect the partial installation and offer to complete the setup from where it left off rather than starting over.
 
-If the same skill or task appears in more than one installed collection (same `name` field in different collections): surface this during capability selection. Present both versions, explain which collection each comes from, and let the member choose which to install. Do not install both without explicit confirmation.
-
-If a collection's API directory is empty (a collection is installed but has no skills or tasks in `api/`): include the collection in the catalog but note it as providing no installable capabilities. It may provide roles only, or it may be incompletely set up.
-
-If the member's role has `recommended_tasks` that depend on skills not in `recommended_skills`: add the missing skills to the recommended set automatically and explain why: "I've also added {skill} because {task} requires it."
-
-If an upgrade script references a version boundary that does not exist in the remote collection's `/upgrade/` directory (e.g., a chain step like `2-to-3.md` is implied by the version jump but the file is absent): do not guess and do not run a partial chain. Surface the inconsistency, install the capability at its current published version without running the broken upgrade chain, and direct the member to notify the org admin — the collection's upgrade chain is out of sync with its published versions and needs an author-side fix.
-
-<!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
-
-<!-- AIFS:FILE-END -->
+If the same skill or task appears in more than one installed collection (same `name` field in different collections): surface this during capability selection. Present both versions, explain which collection each comes from, and let the member choose which to install. Do not install both without explicit confirmation

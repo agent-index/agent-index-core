@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.13.0
+version: 3.14.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -143,7 +143,7 @@ On `N`: abort, no changes written. Surface "Sync cancelled. Re-run @ai:publish-u
 
 On `Y`:
 
-1. **Upload all `local_only` and `differs` files in ONE process via `aifs_write_batch`** (`bulkuploadserial`; falls back to sequential per-file `aifs_write` only if the deployed adapter predates the batch op). Use the same LF-normalization as `apply-updates` Phase 1 step 6: read the local bytes, replace `\r\n` with `\n` and standalone `\r` with `\n` for all text file types (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`, `.template.json`). Binary files are not currently in scope — they ship via the binaries registry. If a non-text non-shipped file is encountered, surface a warning and skip it.
+1. **Upload all `local_only` and `differs` files via `aifs_write_batch` in FIXED sub-batches of ~10 files per call** (one process per sub-batch, resume-safe — `pubstep0nobatch`). A single whole-diff batch still runs inside one ~45s tool window, so a release with many/large files (e.g. two ~160KB CHANGELOGs) overruns it and commits only partially (observed 26/34); fixed ~10-file sub-batches keep each call under the window, and a re-run skips files already synced. Falls back to per-file `aifs_write` issued in the same ~10-file sub-batches if the deployed adapter predates the batch op (`bulkuploadserial`) — never one unbounded sequential loop. Use the same LF-normalization as `apply-updates` Phase 1 step 6: read the local bytes, replace `\r\n` with `\n` and standalone `\r` with `\n` for all text file types (`.sh`, `.js`, `.json`, `.md`, `.html`, `.yaml`, `.yml`, `.go`, `.template.json`). Binary files are not currently in scope — they ship via the binaries registry. If a non-text non-shipped file is encountered, surface a warning and skip it.
 2. **Delete `remote_only` files** sequentially via `aifs_delete`. Each deletion is logged so the admin sees what was removed.
 3. **Surface a one-line confirmation** per file processed (`✓ upload {path}`, `✓ delete {path}`).
 4. **On any individual file failure:** surface the error, continue with the rest of the batch (best-effort). At the end, report `N succeeded, M failed`. The admin can re-run to retry only the failures.
@@ -206,7 +206,7 @@ Run prerequisites and proceed to publish? [Y/N]
 
 If no prereqs were detected and at least one CHANGELOG entry was inferred: surface only the entries section and the same Y/N prompt.
 
-If neither prereqs nor entries were detected (Step 0 had no real changes): surface "Nothing has changed since the last publish." and halt cleanly.
+If neither prereqs nor entries were detected (Step 0 had no real changes): **first run the Standing Reconciles (6d/6e/6f from Step 6) — they run on every publish, including this no-op path (`standingreconcileunreachable`), and are idempotent no-ops on a healthy org** — then surface "Nothing has changed since the last publish." and halt cleanly.
 
 On `N`: halt without running prereqs or writing CHANGELOG. Step 0's sync already happened; remote files reflect local state. Subsequent `@ai:publish-updates` re-runs will see no diff (idempotent) and report no-op.
 
@@ -341,7 +341,7 @@ For each collection in the current `installed_collections`:
 
 Compare `org_roles` arrays. If roles were added, removed, or had their `default_collections` modified: generate an `org-config-update` operation with a `changes` summary listing what shifted.
 
-If no operations were generated (nothing changed since last publish): surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
+If no operations were generated (nothing changed since last publish): **first run the Standing Reconciles (6d/6e/6f from Step 6) — unconditional on every publish, `standingreconcileunreachable`** — then surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
 
 **On success:** Proceed to Step 4.
 
@@ -522,6 +522,12 @@ On admin **confirmation:** apply the backfill values together with the per-opera
 
 On admin **decline:** skip the backfill but still apply the per-operation updates from 6a/6b for the current publish. The drift state persists; next publish-updates run will surface the same prompt.
 
+#### Standing reconciles (6d–6f) — run on EVERY publish, INCLUDING an empty-diff / no-op publish (`standingreconcileunreachable`)
+
+The three reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`) heal drift that has **no content diff** — a revoked/absent all-members reader grant on core/marketplace, a stale member-folder handshake, a missing `resource_ids` block. Because that drift produces no publishable operations, these reconciles **MUST NOT sit behind the empty-diff early-halt**. Whenever `publish-updates` would otherwise halt with "Nothing has changed" (Step 0b, Step 3, or the rapid-re-run edge case), **run 6d/6e/6f FIRST, then halt.** On a normal (has-diff) publish they run here in Step 6 in the usual order. All three are idempotent no-ops on a healthy org, so running them unconditionally on every invocation is cheap and safe.
+
+(Fixes `standingreconcileunreachable`: a no-op publish previously exited at Step 0b/Step 3 before ever reaching Step 6, so a missing member-read grant — exactly the state 6e is designed to heal — was never auto-fixed. That made the C.1.4.4 `memberreadgrantnotauto` hardening inert in its target case, since an org whose only problem is a missing grant has nothing else to publish.)
+
 #### 6d. Member-folder handshake reconcile (added in core 3.9.0)
 
 Members create their private space in their own My Drive at bootstrap and cannot write the registry; their bootstrap records the folder ID in a handshake file instead. This step copies handshakes into the registry — it runs on EVERY publish-updates invocation, even when nothing else is being published:
@@ -622,24 +628,4 @@ Never invent operations that don't correspond to actual state changes. The diff 
 Never modify collection directories or any file outside the documented write surfaces. The documented write surfaces are:
 
 - `/shared/updates/update-log.json`
-- `/shared/updates/latest.json`
-- `/shared/updates/published-state.json`
-- `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6, and the `resource_ids` back-fill documented in Step 6f — no other org-config fields are mutated)
-- the LOCAL `agent-index.json` (ONLY `remote_filesystem.connection.org_config_id`, re-stamped in Step 0c's `bootstrap_regen` before the zip is assembled — bug `groupshareapivisibility`; no other local fields are mutated)
-
-The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
-
-Never auto-publish. The admin must confirm every publish action. The `--dry-run` flag exists for admins who want to preview before committing.
-
-### Edge Cases
-
-If `published-state.json` exists but is malformed: surface the issue. Offer to rebuild from current state (treating everything as new), or halt for manual inspection. Do not silently overwrite a corrupted file without the admin's decision.
-
-If the update log has entries but `published-state.json` is missing (file was deleted but log remains): the log is still valid. Reconstruct the baseline from the last log entry's operations (best-effort) or treat everything as new. Surface this to the admin.
-
-If the admin runs `publish-updates` twice in rapid succession without making any org changes between runs: Step 3 produces no operations. Surface "Nothing has changed since the last publish" and halt. Do not create empty log entries.
-
-If a collection on the remote filesystem has a `collection.json` that cannot be parsed: skip that collection in the diff, surface a notice to the admin, and continue with the remaining collections. Do not block the entire publish on one unreadable collection.
-
-If the admin has made changes to the local project dir
+- `/shared/update

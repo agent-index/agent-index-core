@@ -1,5 +1,19 @@
 # Agent-Index Core — Changelog
 
+## [3.27.0] — 2026-07-13 — Release C.1.4.5: existing-org-upgrade cohort
+
+Fixes the backlog items validatable on an existing-org upgrade. From C.1.4.4 on-org validation, which exposed that the memberreadgrant fix was unreachable on a no-op publish.
+
+### Fixed
+- **`publish-updates` (3.14.0) — standing reconciles run unconditionally (`standingreconcileunreachable`, HIGH).** The reconciles 6d (handshake), 6e (member-read grant), 6f (resource_ids) now run on EVERY publish including an empty-diff / no-op publish, instead of sitting behind the Step 0b / Step 3 "nothing to publish" early-halt. This completes `memberreadgrantnotauto`: an org whose only problem is a missing core/marketplace member-read grant (no content diff) now gets it healed on a plain publish. All three are idempotent no-ops on a healthy org.
+- **`publish-updates` (3.14.0) — Step 0 sync uploads in fixed ~10-file sub-batches (`pubstep0nobatch`).** The source-to-remote sync no longer builds one unbounded `aifs_write_batch` over the whole changed-file set (which overran the ~45s window at 26/34 on a release with two ~160KB CHANGELOGs); it chunks into fixed ~10-file sub-batches, resume-safe. Same fix `download-collection` got in C.1.4.4.
+- **`publish-updates` — restamp-sync (`20260530-4`) confirmed fixed-by-content-diff.** Step 0's content-based md5 walk (pubstep0versionmatch, C.1.4.0) already uploads every restamped manifest (a `collection_version` bump changes the bytes), so the old "reported restamp but remote still at old version" cannot recur. No new code; verified by the content walk.
+- **`org-setup` (3.8.0) + `apply-updates` (3.15.0) — collection-qualified local install path (`instdir`).** Capabilities install to `members/{hash}/installed/{collection}/{type}/{name}/` (collection segment added), so same-named capabilities from different collections (e.g. core `view-permissions` vs client-intelligence `view-permissions`) no longer collide/clobber. The path is derivable from the member-index entry (which records `collection`); a pre-`instdir` unqualified dir is migrated (moved/archived) on next upgrade/resync.
+- **`clone-script-generator` (template) — branch-HEAD repos + ASCII `.ps1` (`clonescripttagassumption`, `ps1nonascii`).** The generated clone script now discriminates: tag `v{version}` exists → check it out; zero tags AND default-branch `collection.json` version == cataloged version → check out the default branch (branch-HEAD distribution, e.g. brand-book) and report success; has tags but not this one → fail loud (preserves `tagnofallback`, no blanket `main` fallback). Generated `.ps1` is now emitted pure-ASCII (em-dashes/smart quotes broke Windows PowerShell parsing).
+
+### Validated (no change this release)
+- **`transferdocopname`** — shipped in library 1.5.0; validate a `transfer-doc-ownership` on-org to close.
+
 ## [3.26.0] — 2026-07-13 — Release C.1.4.4: member-read grant surfaced on publish (memberreadgrantnotauto)
 
 ### Fixed
