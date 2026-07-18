@@ -144,6 +144,8 @@ The helper spec below therefore contains only the **Category A** member-director
 
 **Build the spec:**
 
+**Build this spec with the committed `build-permission-spec` CLI** (see `permission-change-helper` Step 2.5): emit the ops-array as data and run the CLI -- it enforces the op name, email/UPN recipient form, required role, and the canonical `<project_dir>/outputs/` path, and prints the `spec_path`/`link_path` to use. Do not hand-author the spec JSON.
+
 1. Read pre-state for the member's artifact directory (used as the `before` field for diff visualization, and to skip the grant if it is already held):
 
    ```

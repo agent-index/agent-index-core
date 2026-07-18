@@ -109,6 +109,17 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 3. If `org-config.json` can't be read (offline/transient), do **nothing** — never reconcile two local fields against each other (that's the `migration5wrongdir` footgun: it can't tell which is stale). Skip and retry next run.
 4. Idempotent no-op once all three agree. Never block the update on failure.
 
+**Migration 6 — `layoutdrift`: remove stale unqualified install-dir duplicates (introduced core 3.28.0, closes `layoutdrift`).**
+
+`instdir` (core 3.27.0) moved local capability installs to the collection-qualified path `members/{hash}/installed/{collection}/{type}/{name}/`, but the migration that wrote the new layout did not always remove the OLD unqualified `installed/{type}/{name}/` copy -- leaving a member with two copies of the same capability and ambiguity about which one runs. This migration removes the stale duplicate under a hard guardrail: **never delete an unqualified dir until the superseding collection-qualified copy is positively confirmed present and complete.** This is the only member-local migration that DELETES files, so the confirmation is mandatory.
+
+1. Enumerate legacy unqualified dirs: `members/{hash}/installed/{type}/{name}/` where `{type}` is `task`/`skill` and the path sits directly under `installed/` (exactly two segments below it, i.e. NOT under a `{collection}` segment). If none exist, this migration is a silent no-op.
+2. Resolve each legacy dir's owning collection from `member-index.json` (the installed-capability record carries `collection` as of `instdir`). If it cannot be resolved, **leave the dir in place** and surface one line ("could not resolve the collection for legacy install {type}/{name}; left untouched -- report to your admin"). Never guess a collection.
+3. **Positively confirm the superseding copy** before any deletion: `installed/{collection}/{type}/{name}/` MUST exist AND contain the same capability definition file(s) the legacy dir holds, each non-empty (the `{name}.md` and any `*-manifest.json` present, byte-count > 0, same file set). Only if this passes:
+4. Remove the legacy unqualified dir and **log each deletion**: "OK removed stale duplicate install {type}/{name} (superseded by {collection}/{type}/{name})". If the superseding copy is absent or incomplete, **do NOT delete** -- surface it so this same `@ai:update` re-materializes the qualified copy first; the deletion then runs safely on the next pass. Idempotent; must not block the update on failure.
+
+(org-setup writes the collection-qualified layout directly on a fresh org, so no drift originates there; this upgrade-path migration is where legacy duplicates are reconciled.)
+
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 
 ---
@@ -593,4 +604,19 @@ When delegating to org-setup, pass the necessary context: which collection, whic
 
 The merge algorithm in Step 3 must produce a correct net plan regardless of how many entries are pending or how they overlap. The key invariants:
 
-- For any given target (collection, infrastructure 
+- For any given target (collection, infrastructure component, CLAUDE.md, adapter), only one operation should exist in the merged plan
+- The `from_version` in merged operations must reflect the member's *actual current state*, not the operation's original `from_version` (which reflected the org state at the time of that publish)
+- Install-then-remove cancels out. Install-then-update becomes install-at-latest. Update-then-remove becomes remove.
+- The cursor advances to the last entry ID regardless of which individual operations were applied, skipped, or declined — the cursor tracks what was *processed*, not what was *accepted*
+
+### Constraints
+
+Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
+
+Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
+
+Never advance the cursor without completing or explicitly declining all operations in the merged plan. If the session must end mid-plan (adapter restart, interruption), write `pending-update-plan.json` with the remaining operations (Step 1's resume path) and leave the cursor unmoved — the cursor advances only when the plan is fully resolved.
+
+<!-- RECONSTRUCTED 2026-06-10: final-sentence completion of a tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); reviewed and approved by Bill. -->
+
+<!-- AIFS:FILE-END -->

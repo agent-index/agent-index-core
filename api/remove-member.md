@@ -106,7 +106,7 @@ It does NOT walk the broader ACL graph looking for orphan grants on project reso
 **Procedure:**
 
 1. **Read pre-state** for both paths via `aifs_get_permissions`. Filter to entries where the recipient subject matches the departing member's email.
-2. **Build a permission-change spec** with one `unshare` op per existing grant (zero, one, or two ops total). Same JSON shape as `invite-member`'s spec.
+2. **Build a permission-change spec** with one `unshare` op per existing grant (zero, one, or two ops total). Same JSON shape as `invite-member`'s spec. **Build this spec with the committed `build-permission-spec` CLI** (see `permission-change-helper` Step 2.5): emit the ops-array as data and run the CLI -- it enforces the op name, email/UPN recipient form, required role, and the canonical `<project_dir>/outputs/` path, and prints the `spec_path`/`link_path` to use. Do not hand-author the spec JSON.
 3. **Hand the spec to the `permission-change-helper` skill.** Surface the `agent-index://apply?spec={path}` URL in chat per the canonical pattern in `agent-index-core/standards.md` § "Permission-Modifying Operations". Admin reviews and accepts in the browser review page.
 4. **Verify post-state.** Re-read `aifs_get_permissions` for both paths and confirm the departing member is no longer present (either as explicit subject or via the removed permission_id).
 5. **On verification success:** proceed to Step 3.

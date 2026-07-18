@@ -74,6 +74,19 @@ Run schema validation. Required fields must be present. `operations` must be non
 
 For each operation in the spec, if the `before` field is missing or empty, call `aifs_get_permissions` on the resource to capture current state. Populate `before.recipients` in the spec. This is what the page renders as the "Currently:" half of its diff visualization. If `aifs_get_permissions` fails (resource not found, etc.), proceed without `before` — the page will render without the diff and just show the planned end-state.
 
+**Step 2.5 — Build the spec with the committed `build-permission-spec` CLI (mandatory; level-3).**
+
+Do NOT hand-author the spec JSON. Calling tasks emit ONLY a **data ops-list** and produce the spec with the committed CLI at `agent-index-core/lib/permission-spec/build-permission-spec.js`:
+
+```
+node "<project_dir>/agent-index-core/lib/permission-spec/build-permission-spec.js" \
+     --project-dir "<project_dir>" --task {calling_task} --ops '<json-array>'
+```
+
+where `<json-array>` is `[{ "op": "share|unshare|transfer_ownership", "resource": "<path or id:...>", "recipient": "<email/UPN>", "role": "reader|writer" (share only), "before": <optional pre-state> }, ...]`.
+
+The CLI **enforces** what used to be hand-authored and drifted: the op vocabulary (rejects `transfer` in favor of `transfer_ownership`, closing `transferdocopname`), email/UPN recipient form (rejects bare objectIds, `recipidform`), the required `role` for a `share`, and the **canonical output path `<project_dir>/outputs/permission-plan-<ISO>.json`** (closing `permspecscratchpad` and the historical `.agent-index/` vs `outputs/` drift). It prints `{ spec_path, link_path, op_count, summary }` on stdout -- **use the `spec_path`/`link_path` it returns verbatim** in Step 3 and Step 4. An `op_count` of 0 is a legitimate no-op (e.g. onedrive site-membership makes grants redundant): skip the helper link and report "no permission changes needed." (Steps 3-4 below are unchanged; the CLI simply replaces the by-hand JSON authoring and satisfies the under-`<project_dir>` write path by construction -- still assert it.)
+
 **Step 3 — Write the spec to disk.**
 
 **Resolve `<project_dir>` = the absolute directory that contains `agent-index.json`.** Write the spec to **`<project_dir>/.agent-index/permission-plan-{ISO-timestamp}.json`** — an absolute path **UNDER the mounted project directory**. Do **NOT** use the agent's session scratchpad / sandbox working directory (`permspecscratchpad`): the permission helper runs NATIVELY on the host and can only read files under the mounted project directory, so a scratchpad spec is invisible to it and the `--cli` / URL-handler run fails with `could not read spec … The system cannot find the path specified` (`validation_error`).
@@ -83,7 +96,7 @@ For each operation in the spec, if the `before` field is missing or empty, call 
 2. **ASSERT that absolute path begins with the resolved `<project_dir>`.** A scratchpad path fails this and MUST be rewritten under `<project_dir>` before continuing. *(A plain `test -f`/exists check is NOT sufficient on its own — it passes from the agent's own view of the scratchpad, which the host cannot read; that exists-only check is exactly why the C.1.4.1 fix recurred non-deterministically. The startswith-`<project_dir>` assertion is the check that catches it.)*
 3. `test -f` the file at that absolute path.
 
-Only after all three pass, surface the exact absolute path in the review link / `--cli` command. The timestamp ensures uniqueness across multiple plans in one session. **`.agent-index/` is the canonical location** (it's the member/admin workspace metadata dir, always under `<project_dir>`, and was the path the invite-member recovery used successfully); `<project_dir>/outputs/` is also acceptable — the only hard requirement is that the path is under `<project_dir>`.
+Only after all three pass, surface the exact absolute path in the review link / `--cli` command. The timestamp ensures uniqueness across multiple plans in one session. **`<project_dir>/outputs/` is the canonical location (written by the `build-permission-spec` CLI)** (it's the member/admin workspace metadata dir, always under `<project_dir>`, and was the path the invite-member recovery used successfully); `<project_dir>/outputs/` is also acceptable — the only hard requirement is that the path is under `<project_dir>`.
 
 **Step 4 — Emit the canonical URL surface in chat.** (Rewritten in core 3.7.3 to realign with `standards.md` § "Trust contract for the agent in the URL-handler invocation flow" — closes bug `20260519-8d20ea22`.)
 

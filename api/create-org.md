@@ -283,9 +283,9 @@ All required domains are reachable. This step downloads the adapter bundle, writ
 
 **The agent makes ZERO GitHub calls in this step (C.1 invariant).** All version/availability/binary facts come from `git ls-remote` and the freshly-cloned listings — never `raw.githubusercontent.com` or the REST API. Resolving versions/binary from `raw` is what installed a wrong-backend binary and stale version pins in ms-install-7 (`binwrongbackend`, `staleversionpins`). This step runs **two** host scripts with a collection-selection interview between them, because the catalog of installable collections only exists after the resource-listings clone lands, and a script cannot pause for an interview.
 
-**1a. Generate + surface the infra clone script (`clone-script-generator`, `mode: infra`):**
+**1a. Emit the infra clone manifest + surface the committed clone script (`clone-script-generator`, `mode: infra`):**
 
-Generate the admin's tag-pinned infra script via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra` and surface it for the admin to run natively. That script: discovers each repo's latest `v*` tag via `git ls-remote --tags` (no `main` fallback — a missing tag fails loudly), clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
+Emit the infra clone **manifest** via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra`, then surface the committed **`agent-index-core/lib/clone/clone-repos`** invocation (which reads that manifest) for the admin to run natively. That committed script: discovers each repo's latest `v*` tag via `git ls-remote --tags` (no `main` fallback — a missing tag fails loudly), clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
 
 Wait for the admin to confirm the infra script ran. If `agent-index-resource-listings/` or `agent-index-filesystem-<backend>/` is absent afterward, the script did not complete — re-surface it and halt.
 
@@ -293,9 +293,9 @@ Wait for the admin to confirm the infra script ran. If `agent-index-resource-lis
 
 Now that `agent-index-resource-listings/marketplace-directory.json` is local, read it and present the available collections to the admin. Ask which (if any) they want installed at org creation. Record the selected collection repos + their `git_url`s. (If the admin wants none now, they can always add later via `@ai:download-and-install-collection`.) **This is the first time the admin is asked about collections** — pre-C.1 the flow cloned before ever asking (ms-install-7 finding).
 
-**1c. Generate + surface the collections clone script (`clone-script-generator`, `mode: collections`) — only if collections were selected:**
+**1c. Emit the collections clone manifest + surface the committed clone script (`clone-script-generator`, `mode: collections`) — only if collections were selected:**
 
-If the admin selected any collections, generate a second script with `mode: collections` for the selected repos (tag-pinned via `ls-remote`, same hardening) and surface it. Wait for confirmation it ran. If none were selected, skip this sub-step.
+If the admin selected any collections, emit a second **manifest** with `mode: collections` for the selected repos and surface the same committed `clone-repos` invocation (pointing at that manifest); the committed script tag-pins/branch-HEAD-resolves each repo itself. Wait for confirmation it ran. If none were selected, skip this sub-step.
 
 **1d. Stage the adapter bundle from the local clone:**
 
@@ -1120,4 +1120,12 @@ If the admin's generated org ID collides with a collection name already present 
 
 If `agent-index.json` cannot be read at the expected local path: surface: "I couldn't find the agent-index root configuration file. Make sure you've cloned agent-index-core into this directory before running org setup." Halt.
 
-If the running admin's email ca
+If the running admin's email cannot be determined from Cowork session context, ask for it directly. The email is required for identity resolution.
+
+If the executor wrapper cannot be found or is not executable: surface the error clearly. Common causes: the bootstrap zip was not correctly unpacked, or the shell wrapper file permissions were lost. Offer guidance: "Make sure the executor bundle was correctly unpacked and that `aifs-exec.sh` has execute permissions. Check that the file exists at `mcp-servers/filesystem/aifs-exec.sh`."
+
+If a remote write fails partway through Step 8 (some files written, some not): surface which writes succeeded and which failed. The admin can retry — all writes are idempotent (they overwrite existing files).
+
+If the admin wants to use a backend not yet supported: surface: "Currently supported backends are Google Drive, Microsoft OneDrive/SharePoint, and Amazon S3. Support for additional backends is planned." Do not proceed with an unsupported backend.
+
+Emails are the canonical identity input — not an edge case.

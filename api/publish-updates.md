@@ -549,9 +549,11 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap can't reach core even by id-anchor: id-addressing fixes *addressing*, not *permission*). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**.
 
+**Extended in C.1.5.0 (`collreadgrantmissing`) to cover every installed collection code dir, not just the two infrastructure roots.** The same member-read requirement applies to each installed collection: a non-drive-member reads a collection's capabilities only if the all-members group holds reader on its code dir (`id:{folder_id}`). install-collection grants this at install, but a collection installed before that step existed (e.g. `client-intelligence`), or whose grant Accept was rejected/timed-out (install-collection does NOT roll back on that), is left structurally unreadable with no other self-heal. So 6e now reconciles the all-members reader grant on **`/agent-index-core/`, `/agent-index-marketplace/`, AND every `org-config.json` `installed_collections[].folder_id`** (skip any entry with `status: "removed"`; for an entry lacking a stored `folder_id`, `aifs_stat("/{name}")` to resolve it, same as install-collection). Collect every root whose `all@` reader grant is absent.
+
 For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}`. If `{all_members_group}` is already a reader, **skip silently** (idempotent — the common case on a healthy org).
 
-**If either grant is MISSING, hard-surface it via the permission-change-helper — do NOT attempt a direct `aifs_share` and do NOT defer it (`memberreadgrantnotauto`).** In a publish context the agent cannot apply a permission change directly (the agent-side safety boundary the helper exists to navigate), and the old "direct path, else silently skip" wording meant the grant was quietly dropped — leaving members unable to read core/marketplace, the exact block this heals, until an admin happened to run a separate migration. Instead: build ONE `permission-change-helper` spec containing the missing reader grant(s) — `{ resource: "id:{folder_id}", subject: "{all_members_group}", role: "reader" }` for each missing root — write it under `<project_dir>/.agent-index/` (assert the path is under `<project_dir>` — `permspecscratchpad`), and **surface it as an unmissable, required completion step**, not a footnote: emit the `agent-index://apply?spec=…` review link AND the headless `--cli <spec path>` command, and state the consequence plainly — *"members cannot read core/marketplace until you Accept this."* Do NOT report the publish as fully complete while this grant is outstanding. After the admin Accepts, re-run `aifs_get_permissions` to verify the grant landed. Admin-side only (members cannot self-provision read access).
+**If either grant is MISSING, hard-surface it via the permission-change-helper — do NOT attempt a direct `aifs_share` and do NOT defer it (`memberreadgrantnotauto`).** In a publish context the agent cannot apply a permission change directly (the agent-side safety boundary the helper exists to navigate), and the old "direct path, else silently skip" wording meant the grant was quietly dropped — leaving members unable to read core/marketplace, the exact block this heals, until an admin happened to run a separate migration. Instead: build ONE spec containing the missing reader grant(s) — one `share` op `{ "op": "share", "resource": "id:{folder_id}", "recipient": "{all_members_group}", "role": "reader" }` for each missing root (core, marketplace, AND any installed-collection code dir) — via the committed **`build-permission-spec`** CLI (`agent-index-core/lib/permission-spec`; it writes to the canonical `<project_dir>/outputs/` path — `permspecscratchpad` — and normalizes the op/recipient fields), and **surface it as an unmissable, required completion step**, not a footnote: emit the `agent-index://apply?spec=…` review link AND the headless `--cli <spec path>` command, and state the consequence plainly — *"members cannot read core/marketplace until you Accept this."* Do NOT report the publish as fully complete while this grant is outstanding. After the admin Accepts, re-run `aifs_get_permissions` to verify the grant landed. Admin-side only (members cannot self-provision read access).
 
 This is cheap and safe to run every publish; on a healthy org it is a silent no-op, and on an org missing the grant it produces a single one-click review rather than a deferred, easily-missed migration.
 
@@ -628,4 +630,25 @@ Never invent operations that don't correspond to actual state changes. The diff 
 Never modify collection directories or any file outside the documented write surfaces. The documented write surfaces are:
 
 - `/shared/updates/update-log.json`
-- `/shared/update
+- `/shared/updates/latest.json`
+- `/shared/updates/published-state.json`
+- `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
+- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6 — no other org-config fields are mutated)
+
+The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
+
+Never auto-publish. The admin must confirm every publish action. The `--dry-run` flag exists for admins who want to preview before committing.
+
+### Edge Cases
+
+If `published-state.json` exists but is malformed: surface the issue. Offer to rebuild from current state (treating everything as new), or halt for manual inspection. Do not silently overwrite a corrupted file without the admin's decision.
+
+If the update log has entries but `published-state.json` is missing (file was deleted but log remains): the log is still valid. Reconstruct the baseline from the last log entry's operations (best-effort) or treat everything as new. Surface this to the admin.
+
+If the admin runs `publish-updates` twice in rapid succession without making any org changes between runs: Step 3 produces no operations. Surface "Nothing has changed since the last publish" and halt. Do not create empty log entries.
+
+If a collection on the remote filesystem has a `collection.json` that cannot be parsed: skip that collection in the diff, surface a notice to the admin, and continue with the remaining collections. Do not block the entire publish on one unreadable collection.
+
+If the admin has made changes to the local project directory but hasn't pushed them to the remote filesystem (e.g., updated CLAUDE.md locally but not uploaded it): the diff will detect the CLAUDE.md hash change based on the local file. This is correct — the admin is responsible for ensuring the remote state is current before publishing. Surface a reminder: "The update instructions reflect your local state. Make sure all changes have been pushed to the remote filesystem before members apply updates."
+
+<!-- AIFS:FILE-END -->

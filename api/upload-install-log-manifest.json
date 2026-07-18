@@ -3,7 +3,7 @@
   "type": "task",
   "display_name": "Upload Install Log",
   "collection": "agent-index-core",
-  "collection_version": "3.27.0",
+  "collection_version": "3.28.0",
   "version": "3.0.0",
   "eol_date": null,
   "eol_warning_days": 60,
