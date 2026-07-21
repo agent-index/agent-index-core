@@ -7,6 +7,8 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 - `clone-repos.ps1` / `clone-repos.sh` -- driver (three-way tag/branch-HEAD/phantom discrimination; `clonescriptdirty` resilience; `singletag`/`tls12`/ASCII hardening baked in).
 - `install-helper-binary.ps1` / `install-helper-binary.sh` -- infra-mode backend-matched signed-helper install (`binwrongbackend`, `binfield`/current_version, sha256-verify-or-abort, `signing` field, per-platform registration incl. darwin bundle/`macosregister`).
 
+> **HARD PROHIBITION (C.1.5.1, `clonescripttagassumption`): NEVER author a bespoke clone script.** Do NOT write, generate, or hand-craft a `clone-<name>.ps1`/`.sh` (or anything 'modeled on the existing clone scripts'). The ONLY sanctioned path is: (1) write the data manifest, (2) surface the invocation of the COMMITTED `agent-index-core/lib/clone/clone-repos.{ps1,sh}`. If you find yourself about to emit git/clone/checkout logic into a script, STOP -- that logic already lives in the committed script; you only supply the manifest. Leftover `clone-*.ps1` files in the workspace are NOT templates to copy; ignore them (and delete them). Validation caught the agent regenerating a bespoke script even with the committed one deployed -- this prohibition closes that.
+
 **The agent now produces ONLY a data manifest and surfaces the committed-script invocation. The agent still makes ZERO GitHub calls** -- all `git ls-remote`/clone/fetch and the signed-asset download happen inside the committed scripts on the host (C.1 invariant, unchanged).
 
 ## What the subroutine does now

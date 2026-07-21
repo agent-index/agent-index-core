@@ -1,5 +1,11 @@
 ﻿# Agent-Index Core â€” Changelog
 
+## [3.28.1] — 2026-07-21 — Release C.1.5.1: build-permission-spec context fix + clone-script hard prohibition
+
+### Fixed
+- **`build-permission-spec` — emit the `context` block the helper binary requires (`buildpermspeccontext`, HIGH).** The CLI shipped in 3.28.0 omitted `context.requestor`/`context.purpose`, which `permission-helper-go` v0.6.0 hard-requires — so on-org, EVERY permission change failed spec validation until hand-patched. The CLI now takes `--requestor <member_hash>` + `--purpose "<why>"` (both required) and emits `context: {requestor, purpose}`; `permission-change-helper` Step 2.5 passes them.
+- **`clone-script-generator` — hard-prohibit authoring a bespoke clone script (`clonescripttagassumption`).** On-org validation showed the agent still generating a bespoke `clone-<name>.ps1` "modeled on existing ones" instead of emitting a manifest + invoking the committed `lib/clone/clone-repos`. Added an explicit prohibition: the committed script is the ONLY sanctioned path; leftover `clone-*.ps1` are not templates.
+
 ## [3.28.0] â€” 2026-07-18 â€” Release C.1.5.0: level-3 tooling + collreadgrantmissing + layoutdrift
 
 Commit-the-logic / emit-only-data hardening: fragile per-run agent-generated scripts become committed, version-controlled tooling; the member-read-grant self-heal extends to installed collections; a stale-install-dir migration lands.
@@ -1130,4 +1136,5 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` â€” reference schema for org-config.json
 - `standards.md` â€” open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 

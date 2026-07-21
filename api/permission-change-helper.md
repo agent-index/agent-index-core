@@ -80,8 +80,11 @@ Do NOT hand-author the spec JSON. Calling tasks emit ONLY a **data ops-list** an
 
 ```
 node "<project_dir>/agent-index-core/lib/permission-spec/build-permission-spec.js" \
-     --project-dir "<project_dir>" --task {calling_task} --ops '<json-array>'
+     --project-dir "<project_dir>" --task {calling_task} \
+     --requestor {member_hash} --purpose "<why this change>" --ops '<json-array>'
 ```
+
+**`--requestor` (the acting member`s hash) and `--purpose` are REQUIRED** -- the helper binary (v0.6.0+) rejects a spec whose `context.requestor`/`context.purpose` are empty (`buildpermspeccontext`). The CLI emits them into the spec`s `context` block.
 
 where `<json-array>` is `[{ "op": "share|unshare|transfer_ownership", "resource": "<path or id:...>", "recipient": "<email/UPN>", "role": "reader|writer" (share only), "before": <optional pre-state> }, ...]`.
 
