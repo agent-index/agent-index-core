@@ -3,7 +3,7 @@
   "type": "task",
   "display_name": "Publish Updates",
   "collection": "agent-index-core",
-  "collection_version": "3.28.1",
+  "collection_version": "3.28.2",
   "version": "3.14.0",
   "eol_date": null,
   "eol_warning_days": 60,

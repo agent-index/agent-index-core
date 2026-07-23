@@ -391,4 +391,14 @@ If a role is selected that has an `extends` chain deeper than 3 levels: surface 
 
 If a setup interview for a specific skill or task fails partway through (member exits, session ends): write whatever responses were collected to `setup-responses.md` as a partial record. Mark the installation as incomplete in `manifest.json`. On the next run, detect the partial installation and offer to complete the setup from where it left off rather than starting over.
 
-If the same skill or task appears in more than one installed collection (same `name` field in different collections): surface this during capability selection. Present both versions, explain which collection each comes from, and let the member choose which to install. Do not install both without explicit confirmation
+If the same skill or task appears in more than one installed collection (same `name` field in different collections): surface this during capability selection. Present both versions, explain which collection each comes from, and let the member choose which to install. Do not install both without explicit confirmation.
+
+If a collection's API directory is empty (a collection is installed but has no skills or tasks in `api/`): include the collection in the catalog but note it as providing no installable capabilities. It may provide roles only, or it may be incompletely set up.
+
+If the member's role has `recommended_tasks` that depend on skills not in `recommended_skills`: add the missing skills to the recommended set automatically and explain why: "I've also added {skill} because {task} requires it."
+
+If an upgrade script references a version boundary that does not exist in the remote collection's `/upgrade/` directory (e.g., a chain step like `2-to-3.md` is implied by the version jump but the file is absent): do not guess and do not run a partial chain. Surface the inconsistency, install the capability at its current published version without running the broken upgrade chain, and direct the member to notify the org admin — the collection's upgrade chain is out of sync with its published versions and needs an author-side fix.
+
+<!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
+
+<!-- AIFS:FILE-END -->

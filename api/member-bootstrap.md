@@ -371,4 +371,8 @@ If `members-registry.json` cannot be read from remote (e.g., file doesn't exist)
 
 If the remote `org-config.json` version is newer than the local `agent-index.json` version: surface as an advisory notice. The bootstrap zip may be outdated. The member can still proceed, but they should request an updated bootstrap zip from their admin.
 
-If the exec shell wrapper is not found at `mpc-servers/filesystem/aifs-exec.sh`, the exec bundle is missing from the install. Surface an error: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip." In Cowork, the plugin validates the exec bundle presence — if the plugin is installed and the bundle is missing, it will surface this error during plugin in
+If the exec shell wrapper is not found at `mpc-servers/filesystem/aifs-exec.sh`, the exec bundle is missing from the install. Surface an error: "The remote filesystem exec bundle is missing from your bootstrap zip. Contact your org admin for a new bootstrap zip." In Cowork, the plugin validates the exec bundle presence — if the plugin is installed and the bundle is missing, it will surface this error during plugin installation.
+
+If the member workspace already exists locally but member-index.json does not: this is a partial prior setup. Create member-index.json without recreating the directory structure. Proceed normally.
+
+If a network timeout occurs during any remote call: surface the timeout, explain that the remote filesystem may be temporarily unavailable, and offer to retry. For auth flows, the auth code may still be valid — try completing with the same code before regenerating.

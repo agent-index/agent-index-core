@@ -1,5 +1,10 @@
 ﻿# Agent-Index Core â€” Changelog
 
+## [3.28.2] — 2026-07-23 — Release C.1.5.2: torn-write tail restoration (tornwritefiledamage)
+
+### Fixed
+- **`org-setup.md` + `member-bootstrap.md` — restored truncated tails (`tornwritefiledamage`).** Both files had lost their trailing Edge Cases to past Cowork-mount torn-writes committed to history (org-setup at c29c808, member-bootstrap at 6dd1e67). Restored by splicing the intact tail from the last-good git donor (org-setup e74f8de — regains its `AIFS:FILE-END` sentinel; member-bootstrap fb4ded3). Content-only; no logic change. Surfaced by the C.1.5.0 preflight Check 15 mid-word heuristic.
+
 ## [3.28.1] — 2026-07-21 — Release C.1.5.1: build-permission-spec context fix + clone-script hard prohibition
 
 ### Fixed
@@ -1136,5 +1141,6 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` â€” reference schema for org-config.json
 - `standards.md` â€” open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 
 
