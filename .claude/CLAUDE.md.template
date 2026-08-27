@@ -150,8 +150,14 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 ## Key Files
 
 - **`agent-index.json`** (local): Root configuration — backend settings, paths, org metadata
-- **`org-config.json`** (remote: `/org-config.json`): Authoritative org configuration
-- **`members-registry.json`** (remote: `/members-registry.json`): Member lookup table
+- **`org-config.json`** (remote): authoritative org configuration. Read by id anchor:
+  `aifs_read("id:{org_config_id}")` using `org_config_id` from local `agent-index.json` →
+  `remote_filesystem.connection`. **A non-Drive-member cannot resolve root-level files by
+  path** — `aifs_read("/org-config.json")` returns `FILE_NOT_FOUND` even though the file
+  exists and is readable. Same for `members-registry.json`, whose id is
+  `resource_ids.members_registry` in org-config. `/shared/**` paths resolve normally.
+- **`members-registry.json`** (remote): member lookup table. Read by id anchor —
+  `resource_ids.members_registry` in `org-config.json`. Same path caveat as above.
 - **`member-index.json`** (local: `members/{hash}/member-index.json`): Member's installed capabilities
 - **`routing.json`** (local: `members/{hash}/profile/routing.json`): Member's natural language routing mappings
 - **`preferences.md`** (local: `members/{hash}/profile/preferences.md`): Member preferences
@@ -174,6 +180,11 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'
 **IMPORTANT — deprecated v2 artifacts:** If the local install contains `agent-index-core/tools/aifs-bridge/` (with `aifs-bridge.mjs` and `aifs-call.sh`), these are **obsolete v2 infrastructure** — do NOT use them. They reference `server.bundle.js` which no longer exists. The only supported invocation path is `mcp-servers/filesystem/aifs-exec.sh` as shown above.
 
 If `aifs_*` calls return `NOT_AUTHENTICATED`, the system will automatically attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback.
+
+A `FILE_NOT_FOUND` on a root-level path is an addressing artifact, not evidence of absence.
+Re-address the file by id anchor before drawing any conclusion from the failure — and never
+fall back to the org's storage backend connector to "check whether it's really there"
+(`wrongconnectorfallback`).
 
 ## Identity Resolution
 
