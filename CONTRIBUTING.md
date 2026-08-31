@@ -109,7 +109,13 @@ If your change implies a version bump, say so explicitly in the PR body and let 
 
 Run `@ai:preflight` if you have the developer collection installed. It is a hard gate at release time regardless — better it fails for you now than for the maintainer mid-release. The collection being installed for the org does not mean it is installed for you; check rather than assume, and report it if it does not resolve.
 
-The runnable CLI form of the same check ships in the `agent-index-marketplace-developer` repo, not in this one. It is not referenced here by filename because the existing references disagree with each other; see the open question on the pull request that added this file.
+There is also a mechanical CLI covering the structural subset of those checks: `lib/preflight-cli.sh`, in the **`agent-index-marketplace-developer`** repo — not in this one, and not shipped with the installed collection either, which carries only `skill/` and `task/`. Using it means cloning that repo (it is public) and invoking it against the collection under test:
+
+```
+bash ../agent-index-marketplace-developer/lib/preflight-cli.sh --collection .
+```
+
+Exit codes: `0` pass, `1` errors, `2` invocation problem. Always name the repo when citing this file. An unqualified `lib/preflight-cli.sh` reads as a path in whichever repo the reader is standing in, and it does not exist in this one — which has already cost one contributor an hour.
 
 ---
 
