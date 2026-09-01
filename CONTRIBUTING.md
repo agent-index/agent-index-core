@@ -22,10 +22,14 @@ So:
 
 | Who | Does what |
 |---|---|
-| **The agent** | Writes and edits file contents. Read-only git: `log`, `show`, `diff`, `status`. |
+| **The agent** | Writes and edits file contents. Read-only git: `log` and `show` freely; `status` and `diff` only with `--no-optional-locks`. |
 | **You, natively** | Anything that writes the index or refs: `switch`, `branch`, `add`, `commit`, `push`. And opening the pull request. |
 
 This is the same boundary the `release` and `clone-script-generator` tasks already use: the agent gets the content exactly right, the human with credentials and a clean tree runs the commands. Do not work around it. A torn commit costs far more than the minutes it saves.
+
+**"Read-only" is not lock-free, and this is the part that bites.** `git status` and `git diff` refresh the index as a side effect, and refreshing takes `.git/index.lock` — so an agent-side command that changes no file can still leave a lock behind, because over a mount it frequently cannot remove what it created (`Operation not permitted` on unlink). Observed twice in six days: a zero-byte `index.lock` left by a process that died at the end of a session blocked `git switch` four days later, and a plain agent-side `git status` planted another one that the sandbox could not clear.
+
+So prefer `git log` and `git show`, which never take the lock, and prefix the other two: `git --no-optional-locks status`. If you find a zero-byte `.git/index.lock`, or hit `Unable to create '.git/index.lock'`, delete it natively — after confirming no git process of your own is actually running.
 
 ---
 
@@ -49,6 +53,16 @@ git fetch upstream
 ```
 
 Your branches push to `origin` (your fork); pull requests are opened against `agent-index:main`.
+
+**Create the fork on GitHub before you touch any remote.** `git remote add` writes a line of local config and validates nothing — it succeeds against a URL that does not exist yet. Nothing looks wrong until `git push`, which fails with `remote: Repository not found` against a URL that reads as perfectly correct, several steps after the actual mistake.
+
+If you already cloned the canonical repo before establishing that you have no push access, you do not need a second clone. Fork on GitHub, then rename the remotes in place:
+
+```
+git remote rename origin upstream
+git remote add origin https://github.com/<your-user>/<repo>.git
+git fetch upstream
+```
 
 *Topic-branch route.* If you do have push access to the canonical repo, clone it directly and push topic branches to it. Everything below works the same; substitute `origin` for `upstream` when syncing.
 
@@ -83,7 +97,9 @@ Then open a pull request against `agent-index:main`.
 
 ### Branch names
 
-`docs/<topic>`, `fix/<topic>`, `chore/<topic>`. Short and specific: `docs/claude-md-id-anchors`, not `docs/updates`.
+`docs/<topic>`, `fix/<topic>`, `chore/<topic>`, `feat/<topic>`. Short and specific: `docs/claude-md-id-anchors`, not `docs/updates`.
+
+Most contributions here are documentation, which is why the first three cover nearly everything. Use `feat/` when the change adds behaviour rather than editing prose — a new preflight check, a new task step. The prefix is a hint to the reviewer about what kind of reading the diff needs, not a taxonomy worth arguing over.
 
 ### Scope
 
