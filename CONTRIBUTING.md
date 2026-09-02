@@ -23,13 +23,15 @@ So:
 | Who | Does what |
 |---|---|
 | **The agent** | Writes and edits file contents. Read-only git: `log` and `show` freely; `status` and `diff` only with `--no-optional-locks`. |
-| **You, natively** | Anything that writes the index or refs: `switch`, `branch`, `add`, `commit`, `push`. And opening the pull request. |
+| **You, natively** | Anything that writes the index or refs: `switch`, `branch`, `add`, `commit`, `push`. And `fetch`, which writes refs and objects. And opening the pull request. |
 
 This is the same boundary the `release` and `clone-script-generator` tasks already use: the agent gets the content exactly right, the human with credentials and a clean tree runs the commands. Do not work around it. A torn commit costs far more than the minutes it saves.
 
-**"Read-only" is not lock-free, and this is the part that bites.** `git status` and `git diff` refresh the index as a side effect, and refreshing takes `.git/index.lock` — so an agent-side command that changes no file can still leave a lock behind, because over a mount it frequently cannot remove what it created (`Operation not permitted` on unlink). Observed twice in six days: a zero-byte `index.lock` left by a process that died at the end of a session blocked `git switch` four days later, and a plain agent-side `git status` planted another one that the sandbox could not clear.
+**"Read-only" is not lock-free, and this is the part that bites.** `git status` and `git diff` refresh the index as a side effect, and refreshing takes `.git/index.lock` — so an agent-side command that changes no file can still leave a lock behind, because over a mount it frequently cannot remove what it created (`Operation not permitted` on unlink). Observed three times in six days: a zero-byte `index.lock` left by a process that died at the end of a session blocked `git switch` four days later; a plain agent-side `git status` planted another one that the sandbox could not clear; and an agent-side `git fetch` left a zero-byte `.git/objects/maintenance.lock` — see below.
 
-So prefer `git log` and `git show`, which never take the lock, and prefix the other two: `git --no-optional-locks status`. If you find a zero-byte `.git/index.lock`, or hit `Unable to create '.git/index.lock'`, delete it natively — after confirming no git process of your own is actually running.
+So prefer `git log` and `git show`, which never take the lock, and prefix the other two: `git --no-optional-locks status`. If you find a zero-byte lock file anywhere under `.git` — `index.lock`, `objects/maintenance.lock` — or hit `Unable to create '.git/index.lock'`, delete it natively — after confirming no git process of your own is actually running.
+
+**And `--no-optional-locks` does not cover everything.** The flag governs the optional index refresh that `status` and `diff` perform; it says nothing about the background maintenance that `git fetch` schedules, which takes `.git/objects/maintenance.lock`. An agent-side `git fetch upstream --tags` left one behind with the flag in effect. `fetch` is not read-only in any case — it writes refs and objects — so it belongs in the native column with the rest of them; it is called out here only because it reads like an innocent network command and the table did not name it. As a backstop for whatever else schedules maintenance, set `git config maintenance.auto false` in any clone the agent can reach.
 
 ---
 
