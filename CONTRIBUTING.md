@@ -1,16 +1,18 @@
 # Contributing to agent-index
 
-This is the canonical contribution guide for all Agent Index Inc source repositories. Other repos carry a short pointer to this file rather than their own copy, so there is one place to change.
+**This document is written for the Cowork agent assisting a contributor.** It is the canonical contribution guide for all Agent Index Inc source repositories; other repos carry a short pointer to this file rather than their own copy, so there is one place to change.
+
+If you are a person reading this: you do not need to learn git. Ask your agent to make the change and it will hand you scripts to run and text to paste. The rest of this document tells your agent how to do that properly.
 
 It assumes you are an Agent Index Inc contributor. It does not assume your access is uniform across the repos, or that a team-level grant has reached the repo you are trying to change — see **Setup**. It is not for customer orgs: nothing here describes how to use agent-index, only how to change its source.
 
 ---
 
-## The one rule that is different here
+## Operating model
 
-**Git commands that write run in your own terminal. Never in the agent.**
+Contributors here are not necessarily engineers. **The agent never asks the contributor to compose, reason about, or improvise a git command.** The agent generates a complete, runnable script; the contributor runs it natively and pastes the output back.
 
-`standards.md` § Release procedure states it directly:
+This is the same generator pattern the `release` and `clone-script-generator` tasks already use, and for the same reason. `standards.md` § Release procedure states it directly:
 
 > The agent never pushes or tags. `git push`/`git tag` run natively on the admin's host, where credentials and a clean working tree are. Agent-side git over a synced/mounted filesystem produces torn commits.
 
@@ -18,20 +20,20 @@ and
 
 > Agent-side git is read-only via `git show`. Never `git checkout`/`git switch`/`git stash`/`git add` from the sandbox: those take the index lock and write torn files back through the mount, and can collide with the user's native git session.
 
-So:
+So the division is fixed:
 
 | Who | Does what |
 |---|---|
-| **The agent** | Writes and edits file contents. Read-only git: `log` and `show` freely; `status` and `diff` only with `--no-optional-locks`. |
+| **The agent** | Writes and edits file contents. Generates scripts. Writes the commit message and PR text. Read-only git: `log` and `show` freely; `status` and `diff` only with `--no-optional-locks`. |
 | **You, natively** | Anything that writes the index or refs: `switch`, `branch`, `add`, `commit`, `push`. And `fetch`, which writes refs and objects. And opening the pull request. |
 
-This is the same boundary the `release` and `clone-script-generator` tasks already use: the agent gets the content exactly right, the human with credentials and a clean tree runs the commands. Do not work around it. A torn commit costs far more than the minutes it saves.
+The contributor's entire job is: run script, paste output, run script, paste output, click link, paste text.
 
-**"Read-only" is not lock-free, and this is the part that bites.** `git status` and `git diff` refresh the index as a side effect, and refreshing takes `.git/index.lock` — so an agent-side command that changes no file can still leave a lock behind, because over a mount it frequently cannot remove what it created (`Operation not permitted` on unlink). Observed three times in six days: a zero-byte `index.lock` left by a process that died at the end of a session blocked `git switch` four days later; a plain agent-side `git status` planted another one that the sandbox could not clear; and an agent-side `git fetch` left a zero-byte `.git/objects/maintenance.lock` — see below.
+**"Read-only" is not lock-free, and this is the part that bites.** `git status` and `git diff` refresh the index as a side effect, and refreshing takes `.git/index.lock` — so an agent-side command that changes no file can still leave a lock behind, because over a mount it frequently cannot remove what it created (`Operation not permitted` on unlink). Observed three times in six days: a zero-byte `index.lock` left by a process that died at the end of a session blocked `git switch` four days later; a plain agent-side `git status` planted another one that the sandbox could not clear; and an agent-side `git fetch` left a zero-byte `.git/objects/maintenance.lock`.
 
-So prefer `git log` and `git show`, which never take the lock, and prefix the other two: `git --no-optional-locks status`. If you find a zero-byte lock file anywhere under `.git` — `index.lock`, `objects/maintenance.lock` — or hit `Unable to create '.git/index.lock'`, delete it natively — after confirming no git process of your own is actually running.
+So prefer `git log` and `git show`, which never take the lock, and prefix the other two: `git --no-optional-locks status`. If you find a zero-byte lock file anywhere under `.git` — `index.lock`, `objects/maintenance.lock` — or hit `Unable to create '.git/index.lock'`, delete it natively, after confirming no git process of your own is actually running.
 
-**And `--no-optional-locks` does not cover everything.** The flag governs the optional index refresh that `status` and `diff` perform; it says nothing about the background maintenance that `git fetch` schedules, which takes `.git/objects/maintenance.lock`. An agent-side `git fetch upstream --tags` left one behind with the flag in effect. `fetch` is not read-only in any case — it writes refs and objects — so it belongs in the native column with the rest of them; it is called out here only because it reads like an innocent network command and the table did not name it. As a backstop for whatever else schedules maintenance, set `git config maintenance.auto false` in any clone the agent can reach.
+**And `--no-optional-locks` does not cover everything.** The flag governs the optional index refresh that `status` and `diff` perform; it says nothing about the background maintenance that `git fetch` schedules, which takes `.git/objects/maintenance.lock`. An agent-side `git fetch upstream --tags` left one behind with the flag in effect. `fetch` is not read-only in any case — it writes refs and objects — so it belongs in the native column with the rest; it is called out because it reads like an innocent network command. As a backstop for whatever else schedules maintenance, the generated prep script sets `git config maintenance.auto false` in the clone.
 
 ---
 
@@ -45,16 +47,7 @@ So prefer `git log` and `git show`, which never take the lock, and prefix the ot
 
 **Two working routes. Establish which one is yours first.**
 
-*Fork route (assume this unless you have confirmed otherwise).* If GitHub shows you no Settings tab and no "New branch" control on the repo, and refuses the web edit route with "you're not able to edit this repository directly — you need to fork it and propose your changes from there instead", you do not have push access. Fork, clone your fork, and add the canonical repo as `upstream`:
-
-```
-git clone https://github.com/<your-user>/agent-index-core.git
-cd agent-index-core
-git remote add upstream https://github.com/agent-index/agent-index-core.git
-git fetch upstream
-```
-
-Your branches push to `origin` (your fork); pull requests are opened against `agent-index:main`.
+*Fork route (assume this unless you have confirmed otherwise).* If GitHub shows you no Settings tab and no "New branch" control on the repo, and refuses the web edit route with "you're not able to edit this repository directly — you need to fork it and propose your changes from there instead", you do not have push access. Fork, clone your fork, and add the canonical repo as `upstream`. Your branches push to `origin` (your fork); pull requests are opened against `agent-index:main`.
 
 **Create the fork on GitHub before you touch any remote.** `git remote add` writes a line of local config and validates nothing — it succeeds against a URL that does not exist yet. Nothing looks wrong until `git push`, which fails with `remote: Repository not found` against a URL that reads as perfectly correct, several steps after the actual mistake.
 
@@ -76,11 +69,155 @@ Do not assume the topic-branch route because a team grant exists on paper. A tea
 
 That second point is not hypothetical. Commit `88d18e2` in `agent-index-meta-docs` normalised line endings across five files and changed **zero** content lines. Because git then reported all five as modified that day, every one of them looked newer than the live rulebook, and readers were pointed at documents two quarters out of date. A single whitespace commit caused a documentation failure that took an audit to unpick.
 
-**Check your fresh clone is clean.** `git status` should report nothing modified. If it reports the whole tree as changed, stop — that is the line-endings condition above, and every diff you produce will be wrong.
+---
+
+## The four phases
+
+### Phase 1 — Prepare (generated script)
+
+The agent generates `pr-prep-<topic>.ps1`. It clones or refreshes the target repo **and** `agent-index-marketplace-developer` (needed for the preflight CLI), verifies the tree is clean, and creates the branch.
+
+```powershell
+# pr-prep-<topic>.ps1  — safe to re-run
+$ErrorActionPreference = 'Continue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$Root     = '<CONTRIBUTOR_DEV_SOURCE>'          # e.g. C:\Users\<you>\agent-index\dev_source
+$Branch   = '<BRANCH>'                          # e.g. docs/claude-md-id-anchors
+$Upstream = '<UPSTREAM_REMOTE>'                 # 'upstream' on the fork route, 'origin' on the topic-branch route
+$Repos    = @(
+  @{ Name='agent-index-core';                  Url='<ORIGIN_URL_FOR_THIS_CONTRIBUTOR>';                                   Branch=$Branch }
+  @{ Name='agent-index-marketplace-developer'; Url='https://github.com/agent-index/agent-index-marketplace-developer.git'; Branch=$null }
+)
+
+New-Item -ItemType Directory -Force -Path $Root | Out-Null
+Write-Host "===== PR-PREP BEGIN ====="
+Write-Host ("root:     " + $Root)
+Write-Host ("git:      " + (git --version))
+Write-Host ("branch:   " + $Branch)
+Write-Host ("upstream: " + $Upstream)
+
+foreach ($r in $Repos) {
+  $Dir = Join-Path $Root $r.Name
+  Write-Host ""
+  Write-Host ("----- " + $r.Name + " -----")
+
+  if (Test-Path (Join-Path $Dir '.git')) {
+    Write-Host "exists -> fetching"
+    git -C $Dir fetch $Upstream --prune 2>&1 | Out-Host
+  } else {
+    Write-Host "cloning"
+    git clone $r.Url $Dir 2>&1 | Out-Host
+  }
+
+  # background maintenance schedules a lock the sandbox often cannot clear
+  git -C $Dir config maintenance.auto false 2>&1 | Out-Host
+
+  # clear any zero-byte locks left by an earlier agent-side command
+  foreach ($lock in @('.git\index.lock','.git\objects\maintenance.lock')) {
+    $p = Join-Path $Dir $lock
+    if ((Test-Path $p) -and ((Get-Item $p).Length -eq 0)) { Write-Host ("removing stale " + $lock); Remove-Item $p -Force }
+  }
+
+  git -C $Dir switch main 2>&1 | Out-Host
+  git -C $Dir pull $Upstream main 2>&1 | Out-Host
+
+  $dirty = git -C $Dir --no-optional-locks status --porcelain
+  if ($dirty) {
+    Write-Host "!! WORKING TREE NOT CLEAN — STOP AND REPORT THIS"
+    Write-Host $dirty
+  } else {
+    Write-Host "tree clean"
+  }
+
+  if ($r.Branch) {
+    $exists = git -C $Dir branch --list $r.Branch
+    if ($exists) { git -C $Dir switch $r.Branch 2>&1 | Out-Host }
+    else         { git -C $Dir switch -c $r.Branch 2>&1 | Out-Host }
+    Write-Host ("on branch: " + (git -C $Dir rev-parse --abbrev-ref HEAD))
+  }
+}
+Write-Host ""
+Write-Host "===== PR-PREP END ====="
+Write-Host "Copy everything between BEGIN and END and paste it back to your agent."
+```
+
+**The clean-tree check is not decoration.** If it reports the whole tree as modified, your git is rewriting line endings on checkout. Every diff produced from that clone will be wrong. Stop and fix the cause; do not proceed.
+
+### Phase 2 — Edit (agent, no script)
+
+The agent edits files in the clone directly, using file tools only. No git. The clone must be connected to Cowork for this; if it is not, say so and stop rather than improvising.
+
+### Phase 3 — Submit (generated script)
+
+The agent writes the commit message to `<Root>\.commit-msg.txt` — outside the repo, so it is never committed — then generates `pr-submit-<topic>.ps1`.
+
+```powershell
+# pr-submit-<topic>.ps1  — aborts before committing if preflight fails
+$ErrorActionPreference = 'Continue'
+
+$Root    = '<CONTRIBUTOR_DEV_SOURCE>'
+$Dir     = Join-Path $Root '<REPO>'
+$Dev     = Join-Path $Root 'agent-index-marketplace-developer'
+$Branch  = '<BRANCH>'
+$MsgFile = Join-Path $Root '.commit-msg.txt'
+$Paths   = @('<PATH1>','<PATH2>')               # explicit, never -A and never .
+
+Write-Host "===== PR-SUBMIT BEGIN ====="
+
+$cur = git -C $Dir rev-parse --abbrev-ref HEAD
+Write-Host ("branch: " + $cur)
+if ($cur -ne $Branch) { Write-Host "!! WRONG BRANCH — expected $Branch. STOPPING."; Write-Host "===== PR-SUBMIT END ====="; exit 1 }
+if ($cur -eq 'main')  { Write-Host "!! ON MAIN — STOPPING."; Write-Host "===== PR-SUBMIT END ====="; exit 1 }
+
+Write-Host ""; Write-Host "----- changes -----"
+git -C $Dir --no-optional-locks status --short 2>&1 | Out-Host
+git -C $Dir --no-optional-locks diff --stat 2>&1 | Out-Host
+
+Write-Host ""; Write-Host "----- preflight (hard gate) -----"
+bash "$Dev/lib/preflight-cli.sh" --collection "$Dir" 2>&1 | Out-Host
+$pf = $LASTEXITCODE
+Write-Host ("preflight exit: " + $pf)
+if ($pf -ne 0) { Write-Host "!! PREFLIGHT FAILED — NOTHING COMMITTED. Paste this back to your agent."; Write-Host "===== PR-SUBMIT END ====="; exit 1 }
+
+Write-Host ""; Write-Host "----- staging -----"
+foreach ($p in $Paths) { git -C $Dir add -- $p 2>&1 | Out-Host }
+git -C $Dir --no-optional-locks diff --cached --stat 2>&1 | Out-Host
+
+git -C $Dir commit -F $MsgFile 2>&1 | Out-Host
+git -C $Dir push -u origin $Branch 2>&1 | Out-Host
+
+Write-Host ""
+Write-Host "Open this link to create the pull request:"
+Write-Host ("https://github.com/agent-index/<REPO>/compare/main...<HEAD_SPEC>?expand=1")
+Write-Host "===== PR-SUBMIT END ====="
+Write-Host "Copy everything between BEGIN and END and paste it back to your agent."
+```
+
+On the fork route `<HEAD_SPEC>` is `<your-user>:<branch>`; on the topic-branch route it is just `<branch>`.
+
+The CLI covers only the **structural subset** of `@ai:preflight` — see *Before you open it* below. A clean CLI run is a floor, not a clearance.
+
+### Phase 4 — Open the pull request (agent supplies text)
+
+The script prints the compare link. The agent gives the contributor the **title** and the **complete body** to paste. The contributor should never have to compose PR text.
 
 ---
 
-## Making a change
+## Script conventions
+
+Every generated script must:
+
+- Print a `===== NAME BEGIN =====` / `===== NAME END =====` block and close by telling the contributor to paste it back. That block is how the agent learns what happened.
+- Be safe to re-run. Fetch-or-clone, switch-or-create, clear stale zero-byte locks.
+- Use explicit paths in `git add`. **Never `-A`, never `.`** — a wildcard stage is how unrelated files end up in a reviewed change.
+- Show the change before making it: `status --short`, then `diff --stat`, then `diff --cached --stat`, all with `--no-optional-locks`.
+- Abort loudly and commit nothing when a gate fails. Never continue past a failure "to be helpful".
+- Be PowerShell on Windows, bash on macOS or Linux. Detect; do not assume.
+
+Never put in a generated script: `git tag`, a push to `main`, `--force`, or any edit to a version field.
+
+**Reference sequence.** This is what the scripts encode; it is here so the agent can generate correctly and the contributor can follow along, not as something to type by hand:
 
 ```
 git switch main
@@ -89,13 +226,11 @@ git switch -c docs/<short-topic>
 
 # agent edits the files
 
-git diff                        # read it yourself before committing
+git --no-optional-locks diff    # read it before committing
 git add <specific paths>        # name the paths; never `git add -A`
 git commit
 git push -u origin docs/<short-topic>
 ```
-
-Then open a pull request against `agent-index:main`.
 
 ### Branch names
 
@@ -103,7 +238,9 @@ Then open a pull request against `agent-index:main`.
 
 Most contributions here are documentation, which is why the first three cover nearly everything. Use `feat/` when the change adds behaviour rather than editing prose — a new preflight check, a new task step. The prefix is a hint to the reviewer about what kind of reading the diff needs, not a taxonomy worth arguing over.
 
-### Scope
+---
+
+## Scope
 
 - **One concern per pull request.** There is no CI here — review is a human reading a diff, so the diff has to be holdable in one head.
 - **No drive-by fixes.** Spotted an unrelated typo? Note it in the PR body or file it. Do not include it.
@@ -135,6 +272,8 @@ bash ../agent-index-marketplace-developer/lib/preflight-cli.sh --collection .
 
 Exit codes: `0` pass, `1` errors, `2` invocation problem. Always name the repo when citing this file. An unqualified `lib/preflight-cli.sh` reads as a path in whichever repo the reader is standing in, and it does not exist in this one — which has already cost one contributor an hour.
 
+**The two are not interchangeable, whatever `standards.md` currently says.** The CLI is a strict subset: it will exit 0 on a tree where the agent task reports errors, because the checks that need agent reasoning are not in it. Treat a clean CLI run as a floor.
+
 ---
 
 ## Writing the pull request
@@ -157,7 +296,15 @@ Some changes cannot be small — a character-encoding repair touches every affec
 3. Say plainly in the body: **review the proof, not the diff.**
 4. Give an acceptance test the reviewer can run themselves.
 
+**Make the proof executable, not narrated.** A described transformation still asks the reviewer to take your arithmetic on faith. A script they can run against a clean checkout — one that re-derives the result, writes nothing, and exits non-zero on any failed assertion — is a stronger check than reading the diff could ever be, because it is total: it proves nothing *else* changed. Post it as the first comment on the pull request.
+
 A reviewer can verify a transformation in a minute. They cannot verify four hundred changed lines at all, and asking them to will produce either a rubber stamp or a bounce.
+
+---
+
+## Review feedback
+
+Feedback is another turn of the same loop: the agent edits the files, then generates `pr-amend-<topic>.ps1` — same shape as submit, with `git commit -F` and a plain `git push` (the branch already tracks). Never a force push; never a rebase the contributor has to resolve.
 
 ---
 
@@ -187,7 +334,7 @@ So a merged pull request is **staged**, not live. Do not describe merged work as
 
 ## If this document is wrong
 
-It is new, and it was written before anyone had followed it. Say so — in the pull request that trips over it, or wherever the work is tracked. A contribution process that is wrong and unreported is worse than one that is wrong and known.
+Say so — in the pull request that trips over it, or wherever the work is tracked. A contribution process that is wrong and unreported is worse than one that is wrong and known.
 
 ---
 
