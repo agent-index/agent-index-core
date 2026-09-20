@@ -1,6 +1,6 @@
 # Capability Provider Specification
 
-**Status:** Released
+**Status:** Released (V1 partial — see § Capability Bindings)
 **Version:** 1.0.0
 **Last Updated:** 2026-04-05
 
@@ -375,6 +375,8 @@ When a consumer declares a requirement with `required: false`, its skills and ta
 This replaces the current pattern where Projects hardcodes `comms_channel_enabled`, `comms_platform`, and platform-specific branching throughout its tasks. Instead, the task reads the provider registry at runtime and adapts.
 
 ### Capability Bindings
+
+> **Implementation status (core 3.28.2 — V1 partial).** Runtime resolution implements **single-provider auto-bind** only. Providers register into `org-config.json` → `capability_providers`; a consumer copies `templates/resolve-capability.md` into its own `/internal/` directory and customizes it. When exactly one provider is registered for a capability type, resolution binds to it directly. **The multi-provider binding model described in this section — `capability-bindings.json`, binding declaration in setup templates, per-binding resolution — is specified but not implemented.** No setup template in any shipped collection declares bindings, and nothing writes `capability-bindings.json`. Do not author against this section; author against the single-provider path and the `requires` → `fallback` behavior in § Consumer Declarations.
 
 Consumer collections define **capability bindings** — named use cases that connect a specific action within the collection to a specific registered provider. Bindings are the routing layer: they answer "when I need to do X, which provider should I use?"
 
