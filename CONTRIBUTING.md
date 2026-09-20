@@ -316,7 +316,27 @@ On release tags (`v*`): creation, update and deletion are restricted.
 
 Repository admins bypass both, so the maintainer's release script — which commits, pushes and tags directly — continues to work. That bypass is why the maintainer cannot test these protections themselves; a direct push always succeeds for them.
 
-**A contributor without push access cannot test them either**, and this is worth stating plainly because it looks like a passing test. On the fork route a direct push to `main` is refused for lack of permission, before any ruleset is consulted. The refusal proves nothing about the protections. Only a contributor who *has* push access and is *not* an admin can confirm they hold. Until someone in that position has tried it, treat the rulesets as configured but unverified.
+**A contributor without push access cannot test them either**, and this is worth stating plainly because it looks like a passing test. On the fork route a direct push to `main` is refused for lack of permission, before any ruleset is consulted. The refusal proves nothing about the protections. Only a contributor who *has* push access and is *not* an admin can confirm they hold — and they must prove that push access **on the repository under test** first, or the two outcomes cannot be told apart. Proving it on a sibling repository is not enough; access has been observed to differ per repository within this org.
+
+**Verified on `agent-index-core`, 2026-09-17.** Both halves hold. A direct push of an empty commit to `main` was refused:
+
+```
+remote: error: GH013: Repository rule violations found for refs/heads/main.
+remote: - Changes must be made through a pull request.
+ ! [remote rejected] main -> main (push declined due to repository rule violations)
+```
+
+and creating a `v*` tag was refused:
+
+```
+remote: error: GH013: Repository rule violations found for refs/tags/v0.0.0-protection-test.
+remote: - Cannot create ref due to creations being restricted.
+ ! [remote rejected] v0.0.0-protection-test -> v0.0.0-protection-test (push declined due to repository rule violations)
+```
+
+A rejection naming a **rule violation** is the pass. A `403`, or `Permission to … denied`, is **not** — it means the ruleset was never consulted and you have learned nothing about it. The deletion restriction does not extend to ordinary branches: pushing a throwaway branch and then deleting it both succeeded on the same repository in the same session.
+
+**Configured is not the same as in force, and the difference is invisible from the ruleset screen.** A ruleset can exist at org level with no repositories selected. It then protects nothing while reading as correctly set up. That was the state here until 2026-09-16: the rules had been written but never scoped, so `main` was unprotected on every repository in the org for the whole intervening period, and nothing on the configuration screen said so. Check the repository's own rules page — `https://github.com/agent-index/<repo>/rules?ref=refs%2Fheads%2Fmain` — rather than the org ruleset list, and re-verify after any change to scoping. The verification above is a snapshot of one day, not a standing guarantee.
 
 If you ever find a direct push to `main` succeeding for you, stop and report it immediately.
 
