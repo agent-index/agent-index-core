@@ -1,7 +1,7 @@
 # Agent-Index Core — Roadmap
 
-Current version: 3.28.2
-Last updated: 2026-08-27
+Current version: 3.28.3
+Last updated: 2026-09-20
 
 ---
 

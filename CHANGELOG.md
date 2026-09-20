@@ -1,5 +1,29 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.28.3] — 2026-09-20 — Release C.1.5.3: documentation accuracy + `pin-binary-version` conformance
+
+Doc-and-conformance release. Every item below was verified against the deployed tree before it was written here; the "Not in this release" section is deliberate and is part of the entry.
+
+### Added
+- **`CONTRIBUTING.md` — the canonical contribution guide for all Agent Index Inc repositories** (#5, #7). Establishes the convention rather than describing one: these repos had no `CONTRIBUTING.md`, no `.github/` and no pull-request history before it. Carries the agent/human git boundary from `standards.md` § Release procedure (the agent edits content and reads git; mutating git runs natively), the generator model and prep/submit script templates, PR-body expectations, and the merged-is-not-shipped rule. Amended twelve times from practice during authoring; #7 records that the `main` and `v*` protections are now verified, with both verbatim `GH013` refusals.
+- **`api/pin-binary-version-setup.md`.** Every `/api/` member requires a `-setup.md` (`standards.md` § Setup Template Requirements) and this one never had it. No member-configurable parameters; notes that existing pins in `org-config.json` → `binaries{}` are org state, not setup state, and survive upgrade.
+
+### Fixed
+- **`CLAUDE.md.template` — root-level files addressed by id anchor** (#1). § Key Files gave bare paths for `org-config.json` and `members-registry.json`; a non-Drive-member cannot resolve root-level paths, so those reads return `FILE_NOT_FOUND` on a healthy install. Now id-anchored, with the rule stated in § Two-Tier Filesystem: a `FILE_NOT_FOUND` on a root-level path is an addressing artifact, not evidence of absence — re-address by id before concluding anything, and never fall back to the storage connector (`wrongconnectorfallback`). Does **not** close `20260818-68dff8bf-184133-1509`: § "How to execute a skill or task" has the same defect and is untouched here.
+- **`CHANGELOG.md` — UTF-8-read-as-CP1252 mojibake repaired, and the `[3.7.4]` date corrected** (#3). 640 mis-decoded sequences across nine forms. Nine legitimate em dashes were left alone — a blanket conversion corrupts them, which is why the count is 640 and not 649. `[3.7.4]` was dated 2026-07-18, between `[3.7.5]` (2026-05-26) and `[3.7.3]` (2026-05-20); corrected to 2026-05-24 on the entry's own internal evidence. `[3.28.0]`'s identical 2026-07-18 was deliberately left alone. Verified by re-deriving the transformation independently: re-applying the mis-decode to the corrected file reproduces the original byte for byte, and the ASCII projection is unchanged.
+- **`ROADMAP.md` — brought current** (#2). Header was `Current version: 3.11.2` / `Last updated: 2026-04-30` — internally impossible, since 3.11.2 shipped 2026-06-12. Current State rewritten through C.1.5.x from the CHANGELOG. "Known Bugs: None currently tracked" was false (six open against core, four high) and is now a pointer to `@ai:view-bugs` rather than an inline list, since an inline list in a quarterly-updated document is how it came to read "none". Typo `bindins` → `bindings`.
+- **`capability-provider-spec.md` — implementation status qualified** (#4). Header read `Status: Released` while § Capability Bindings specifies `capability-bindings.json`, binding declaration in setup templates and per-binding resolution — none of which is implemented. Runtime V1 is single-provider auto-bind only. Status is now `Released (V1 partial)` with an inline note at the point of the claim.
+- **`api/pin-binary-version.md` — frontmatter brought into conformance** (1.0.0 → 1.0.1). Declared seven of the twelve fields `standards.md` requires for `type: task`, missing `stateful`, `produces_artifacts`, `produces_shared_artifacts`, `dependencies`, `external_dependencies`, `reads_from` and `writes_to`. Authored to a non-standard shape (`title`/`slug`/`inputs`) that no other core member uses. This was the whole of core's `@ai:preflight` error count: one file, not seven unrelated defects.
+- **Trailing newlines restored on four files** (#6): `api/edit-org.md`, `api/verify-workspace-policy.md`, `capability-types/bug-reporting.json`, `templates/agent-index.template.json`. Clears four Check 15 warnings.
+
+### Not in this release
+Stated explicitly, because a CHANGELOG entry written from intent rather than from what landed is the defect this release exists to correct (see `[3.0.5]`, which claimed fourteen items and delivered four).
+
+- `standards.md` is **unchanged**. The API Entry Format and Natural Language Triggers sections, and the spec-document currency rule, are drafted but not merged — they are blocked on two open decisions: whether the natural-language routing mechanism will be completed, and whether the document keeps a per-document `Version` field at all.
+- `collection-authoring-guide.md` is **unchanged** and remains at 1.5.3.
+- Natural-language routing is **still not wired**. `routing.json` is generated and maintained by `apply-updates`, and 331 trigger phrases are declared across the twelve installed collections, but nothing reads the file: `session-start` has no routing step, and neither `preferences-management` nor `org-setup` has routing operations, contrary to `CLAUDE.md`'s description of all three.
+- The `@ai:preflight` / `preflight-cli.sh` gate-equivalence defect is **not fixed**. The CLI is a strict subset of the agent task and is the one the push script gates on.
+
 ## [3.28.2] — 2026-07-23 — Release C.1.5.2: torn-write tail restoration (tornwritefiledamage)
 
 ### Fixed

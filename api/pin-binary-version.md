@@ -2,7 +2,7 @@
 title: Pin Binary Version
 slug: pin-binary-version
 name: pin-binary-version
-version: 1.0.0
+version: 1.0.1
 collection: agent-index-core
 type: task
 admin_only: true
@@ -26,6 +26,17 @@ inputs:
     required: false
     default: false
 description: Set or remove the org-level pin for a registered binary tool. Members converge to the org-pinned version on next apply-updates.
+stateful: false
+produces_artifacts: false
+produces_shared_artifacts: false
+dependencies:
+  skills: []
+  tasks: []
+external_dependencies:
+  - Remote filesystem exec bundle
+  - infrastructure-directory.json reachable from infrastructure_directory_url
+reads_from: null
+writes_to: "/org-config.json (binaries{} section)"
 ---
 
 ## About This Task
