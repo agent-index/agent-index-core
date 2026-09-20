@@ -1,19 +1,29 @@
 # Agent-Index Core — Roadmap
 
-Current version: 3.11.2
-Last updated: 2026-04-30
+Current version: 3.28.2
+Last updated: 2026-08-27
 
 ---
 
 ## Current State
 
-v3.0.0 is the foundation of agent-index: session initialization, member onboarding, org and capability management, and collection publishing/update distribution. The collection runs on a hybrid local/remote filesystem model where member-specific data stays local and org/shared data lives on a remote storage backend (Google Drive, OneDrive, or S3) accessed via the on-demand executor (`aifs_*` tools invoked through the exec shell wrapper).
+Core is at **3.28.2** (Release C.1.5.2, 2026-07-23). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
 
-v3.0.0 introduces the **capability provider system**, allowing collections to declare abstract capability requirements and register as providers of those capabilities. This enables loose coupling between collections: instead of hard-coding dependencies on specific collections, a consumer collection can declare "I need messaging capability" and bind to whichever provider has registered one.
+Four things have changed the shape of the system since v3.1.0:
 
-**v3.1.0 (2026-04-30) — Native Filesystem Permissions.** The Access Control project shipped: extended adapter contract (v2.0.0) adding `aifs_share`, `aifs_unshare`, `aifs_get_permissions`, `aifs_transfer_ownership`, `aifs_search`, plus `if_revision` on `aifs_write` for safe concurrent edits. Five new admin tasks (`invite-member`, `remove-member`, `view-permissions`, `view-audit`, `verify-workspace-policy`) operationalize the model. New `all_members_group` field in `org-config.json` references a Workspace-maintained Google Group for the all-members canonical recipient. The `apply-updates` flow now has a Phase 0 prerequisite that prompts admin for the group address during the 3.0.x → 3.1.0 upgrade. The gdrive adapter ships v2.0.0 contract; OneDrive and S3 adapters retain v1.0.0 contract until their own implementations land. Phase 0 of the access-control work is complete; Phase 1 (admin tasks) is complete; Phases 2-5 (consumer collection upgrades, search-replaces-manifests, path-B cutover, per-idea ACLs) are upcoming.
+**Backend-first distribution (Release C, 3.18.0, 2026-06-25).** Members never fetch from GitHub. The admin publishes to the org backend at `/shared/dist/`, SHA-gated, and members read from there. C.1 (3.19.0) completed GitHub-free install orchestration and added signed cross-platform helper builds; C.1.4.0 (3.23.0) added the full os×arch build matrix and publish-side re-render of the org's `/CLAUDE.md`.
 
-Upgrade paths from v1 to v2.0.x are deprecated; new deployments should start at v3.0.0. The remote filesystem (via the on-demand executor) is required for v2+.
+**ID-anchored addressing (3.8.0, 2026-06-03; bootstrap-critical resources in C.1.4.3, 3.25.0).** Absolute paths address enumerable locations; `id:{folderId}/...` anchors address granted-but-non-enumerable ones. Bootstrap entry points are id-anchored because a non-Drive-member cannot enumerate the Shared Drive root, which makes root-level paths unresolvable for them.
+
+**Member-owned private spaces (3.9.0, 2026-06-04).** Member spaces moved to each member's own My Drive — owner-sovereign sharing, with a pointer-index convention for discovery and soft-delete semantics in place of trashing.
+
+**Helper-gated permission model.** Permission-modifying operations (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are never called by collections directly; they route through `permission-change-helper` and apply under the member's own OAuth token after a deliberate Accept. The Go binary has been the only implementation since 3.7.4. The one sanctioned exception is `create-org`'s install-time bootstrap, which may apply directly and falls back to the helper if it does not.
+
+The **capability provider system** runtime V1 shipped in 3.10.0 (single-provider auto-bind; multi-provider bindings remain post-V1).
+
+**Access Control (v3.1.0) is partially delivered.** The extended adapter contract and the five admin tasks shipped in 3.1.0. The later work — consumer collection upgrades, search-replaces-manifests, path-B cutover, per-idea ACLs — is outstanding, though some of it has been absorbed piecemeal by later releases. The project's own action-item register is the authority on phase status.
+
+Upgrade paths from v1 to v2.0.x are deprecated; new deployments start at v3. The remote filesystem is required for v2+.
 
 ### Known Limitations
 
@@ -31,7 +41,8 @@ Upgrade paths from v1 to v2.0.x are deprecated; new deployments should start at 
 
 ### Known Bugs
 
-None currently tracked.
+Known bugs are tracked in the `bug-reports` collection, not here. Open items against
+`agent-index-core` are visible via `@ai:view-bugs` filtered on that collection.
 
 ---
 
@@ -52,7 +63,7 @@ None currently tracked.
 ### v3.0 — Structural Changes (breaking)
 
 - **Update log replay and audit trail.** Replace the current "last_applied_update" pointer model with a full replay log: members maintain an immutable record of every update they've applied, including operation results and any rollbacks. Supports member-local audit trails and enables recovery workflows.
-- **Capability provider versioning.** Support multiple versions of a capability type coexisting (e.g., `communications@1.0` vs `communications@2.0`). Consumers declare a version requirement; bindins resolve based on available versions. Enables collections to upgrade capability contracts without forcing all dependents to update simultaneously.
+- **Capability provider versioning.** Support multiple versions of a capability type coexisting (e.g., `communications@1.0` vs `communications@2.0`). Consumers declare a version requirement; bindings resolve based on available versions. Enables collections to upgrade capability contracts without forcing all dependents to update simultaneously.
 - **Org role-based capability access.** Extend org-setup's role system to support role-based capability assignment. A role can declare which capabilities it grants, and a member inherits those capabilities based on their role(s) rather than opting in during setup. Reduces onboarding friction for members with predictable role assignments.
 
 ---
