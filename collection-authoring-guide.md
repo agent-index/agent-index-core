@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.5.3
-**Last Updated:** 2026-04-09
+**Version:** 1.7.0
+**Last Updated:** 2026-09-22
 
 ---
 
@@ -260,7 +260,16 @@ python {apps_path}/gmail-labeler/label_emails.py \
     --message-id <ID> [--message-id <ID> ...]
 ```
 
-Document every variable you use. If `{apps_path}` appears in your workflow, it must be defined in the setup template as a parameter.
+Document every variable you use — with one exception. **Core-injected parameters are supplied by
+core and must not be declared in the setup template**, and `{apps_path}` is one of them: it resolves
+to your collection's materialized `apps/` directory on the member's machine without any declaration
+from you. See "Referring to your scripts: `{apps_path}`" below and `standards.md`, "Core-Injected
+Parameters."
+
+(Before core 3.29.0 this guide told authors the opposite — that `{apps_path}` had to be declared like
+any other parameter. Collections that followed that instruction declared it four different ways, none
+of which resolved to anything, because nothing materialized `apps/` at all. If you are maintaining a
+collection written against the old guidance, delete the declaration.)
 
 ---
 
@@ -623,9 +632,65 @@ If multiple tasks perform similar mechanical work (e.g., three tasks all start b
 
 For collections already built with inline mechanical logic, the Developer collection's `optimize` task can audit workflows, classify steps, estimate token savings, and generate script replacements. Run it when a collection's workflows are stable and token efficiency matters.
 
-### Script conventions
+### Where bundled scripts live
 
-Bundle scripts in an `/apps/` directory. Every bundled script should:
+Bundle scripts in an `/apps/` directory **at the collection root** — a sibling of `/api/`, `/setup/`
+and `/upgrade/`. This placement is normative (`standards.md`, "Required File Structure"), not a
+convention you can vary. Skills and tasks both live inside `/api/`, so `/apps/` is never nested
+under either, and never tucked under some other directory.
+
+Structure beneath `/apps/` is yours: `apps/gmail-labeler/label_emails.py` is fine, and
+materialization preserves the nesting.
+
+**How your scripts reach a member's machine.** As of core 3.29.0, `org-setup` copies the whole
+`/apps/` directory to `members/{member_hash}/installed/{collection}/apps/` when the member installs
+any capability from your collection, and `apply-updates` keeps it current. You do not write this
+step, and neither does your setup template. If you have been copying scripts down yourself, stop —
+core does it now, and doing both leaves two copies that disagree.
+
+Two consequences worth internalizing:
+
+- **`apps/` is replaced wholesale on every collection upgrade.** Core deletes the local directory and
+  writes the new one. Never store anything there that a member would be sad to lose — see "Where
+  member data lives" below.
+- **Core materializes files, not environments.** If your scripts import third-party packages, core
+  copies `requirements.txt` down but does not run `pip`. Document the install step in your
+  Prerequisites section, or write against the standard library.
+
+### Referring to your scripts: `{apps_path}`
+
+Use `{apps_path}` in workflow bash commands and in Pre-Setup existence gates:
+
+```
+python {apps_path}/forward-bug.py --bug-id {bug_id}
+```
+
+`apps_path` is a **core-injected parameter** (`standards.md`, "Core-Injected Parameters"). Core
+computes it and supplies it to every capability in your collection. So:
+
+- **Do not declare it** in any `-setup.md`. No `### apps_path` block, at any provenance level.
+- **Do not add it** to any manifest's `parameter_provenance`.
+- **Do not describe how it resolves** — if you write the computed path into your docs, you have
+  created a second source of truth that drifts the moment core's changes.
+- **Never make it `[member-defined]`.** That prompts the member to type a path core is about to
+  compute for them, and their answer is silently ignored.
+
+`@ai:preflight` and `@ai:validate-collection` both flag violations.
+
+### Where member data lives
+
+Member-specific data your collection writes goes under `members/{member_hash}/{collection-name}/` —
+a sibling of `installed/`, never inside it.
+
+```
+members/{hash}/{collection}/            ← yours; core never touches it
+members/{hash}/installed/{collection}/  ← core's; replaced on upgrade, archived on uninstall
+```
+
+Writing member state into `installed/{collection}/apps/` because that is where your scripts are is a
+natural mistake and a destructive one: the next collection upgrade deletes it without asking. If a
+script needs a member-owned config file, read it from `members/{member_hash}/{collection-name}/` and
+pass the member hash in as a flag.
 
 ### Script conventions
 
@@ -654,6 +719,13 @@ Creating an OAuth app requires Google Cloud Console access, billing awareness, a
 **User token (`token.json`) → each member, at member setup time.**
 The member authorizes their own account against the org's OAuth app by clicking "Allow" in a browser. The resulting `token.json` is stored in their local member workspace (e.g., `{member_workspace}/apps/gmail-credentials/`). This is a `[member-defined]` artifact.
 
+> **Not the same `apps/`.** `{member_workspace}/apps/{service}-credentials/` is credential space — a
+> per-member store for OAuth artifacts, placed by the collection's own setup template, named for the
+> external *app* it authenticates against. It has nothing to do with `installed/{collection}/apps/`,
+> which holds the collection's bundled scripts and is placed by core. The two directories share a
+> word and nothing else. Do not "unify" them: collapsing credentials into the core-managed directory
+> would put member secrets somewhere core deletes on every upgrade.
+
 **Script design for the split model:**
 Scripts should accept separate flags for the two artifacts:
 - `--credentials-file` — path to `credentials.json` (the org-provided app identity)
@@ -671,6 +743,25 @@ This pattern generalizes to any OAuth2 service where the "app" is an org-level d
 ### Dependency management
 
 Include a `requirements.txt` (Python) or equivalent in the `/apps/` directory with pinned version ranges. Don't leave dependency versions unspecified — upstream libraries break.
+
+**Core does not install them.** Materialization (core 3.29.0) copies `/apps/` to the member's
+machine, `requirements.txt` included, but it does not create a virtualenv or run `pip`. A script that
+imports a third-party package will be present and will still fail on first run unless the member has
+that package.
+
+So, in order of preference:
+
+1. **Write against the standard library.** `bug-reports` and `cx-studio` both do, and neither has an
+   install story to get wrong. Remote filesystem access goes through the `aifs-exec.sh` wrapper by
+   subprocess anyway (`standards.md`, "Reads go through aifs only"), which removes the usual reason
+   to reach for an HTTP client library.
+2. **If you genuinely need third-party packages**, say so in the capability's Prerequisites section
+   with the exact command, and have the script's dependency check (convention 2 above) print that
+   same command on ImportError. A `requirements.txt` nobody is told to install is not a dependency
+   story.
+
+If your `requirements.txt` contains only comments, say so in the file — it tells the next reader that
+the absence of an install step is deliberate rather than forgotten.
 
 ---
 

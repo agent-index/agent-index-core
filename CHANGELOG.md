@@ -1,5 +1,53 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.29.0] — 2026-09-22 — `apps/` materialization
+
+**MINOR — core now copies a collection's bundled scripts onto the member's machine and supplies the path to them. Additive: collections that ship no `apps/` directory are unaffected.**
+
+Design record: `67-solution-design-apps-materialization.md`.
+
+### The defect this closes
+
+Collections can ship an `apps/` directory of helper scripts, and their workflows invoke them as `python {apps_path}/some-script.py`. **Nothing ever put `apps/` on a member's machine.** `{apps_path}` resolved to nothing and every such invocation failed.
+
+Neither installer owned it. `install-collection` is an admin, org-level action that configures a collection on the remote filesystem and never writes to a member's machine — the word `apps` appears nowhere in the marketplace API. `org-setup` writes to the member's machine but works capability by capability, and `apps/` is a collection-level directory. It fell between them.
+
+Verified across the current install base before the fix: `find members -path '*installed*' -name apps -type d` returned nothing across all installed collections. Four collections ship `apps/` — `bug-reports`, `email-triage`, `projects` and `cx-studio`. The first three degraded quietly; CX Studio is the first collection whose workflows depend on bundled scripts end to end, and three of its fifteen capabilities fail member setup without them.
+
+### Added
+
+- **`api/org-setup.md` — Phase 4a, collection-level materialization** (3.8.0 → 3.9.0). Runs once per collection before the per-capability loop: if `/{collection}/apps` exists on the remote, copy it to `members/{member_hash}/installed/{collection}/apps/`, preserving nested structure. Remote read → native write, the same pattern the capability loop already uses. On any failure the installation **halts** rather than warning and continuing: a partially materialized `apps/` is worse than none, because setup templates commonly gate on "does this script exist" and a partial directory passes that check while the collection is still broken. Phase 4a also runs on the single-capability install path, which is frequently the first capability from its collection.
+- **`apps_path` as the first core-injected parameter.** Core computes it and injects it into every capability's setup context alongside org-mandated values. Never asked interactively. Collections MUST NOT declare it — see the new `standards.md` section. Two properties are normative and were settled during implementation rather than design: the value is **absolute** (`{project_dir}/members/{member_hash}/installed/{collection}/apps`), because it is consumed in bash commands that are not guaranteed to run with the working directory at `project_dir`; and it is **re-resolved on every setup and upgrade run** rather than carried forward from `setup-responses.md`, because `project_dir` differs across machines and Cowork mounts and a baked-in absolute path silently points at nothing after a remount.
+- **`api/apply-updates.md` — manifest-sync subroutine step 5a** (3.15.0 → 3.16.0), plus an `appsMissing` condition in the Phase 4.5 filesystem-existence sub-check (4.1) and its own drift notice. `CURRENT_SUBROUTINE_REVISION` bumped **4 → 5**, which classifies every installed collection as drifted on the first 3.29.0 `@ai:update` run. That is the intent: it is how existing members receive `apps/` without reinstalling anything. This was the gap most likely to be missed — `apply-updates` writes install files itself rather than always delegating to `org-setup`, so materializing only in `org-setup` would have left every `@ai:update` member without scripts while the health check reported the layout complete.
+- **`standards.md` — "Core-Injected Parameters"** and **"Member Data Placement"**, both normative. The first is a deliberate, documented exception to "declare every parameter with an explicit level annotation"; the second promotes a rule that has lived in `api/author-collection.md` since 3.0.0.
+- **`standards.md` — `/apps/` in Required File Structure.** Optional, but if a collection ships scripts this is the only place they may live: collection root, sibling of `/api/`, `/setup/` and `/upgrade/`. The same shape carries to the member's machine, where `apps/` is a sibling of `skill/` and `task/`. At both ends `apps/` is never inside the capability tree, so one listing at the root answers "does this collection ship scripts."
+- **`api/validate-collection.md`** (3.0.0 → 3.1.0) — `/apps/` placement check (error on a misplaced `apps/`, silent on nesting within it); `apps_path` declaration checks (error on a parameter block or a `parameter_provenance` entry, warning on prose describing the computed path); member-data placement check (error on a declared write under `members/{member_hash}/installed/`).
+- **`api/author-collection.md`** (3.0.0 → 3.1.0) — scaffolds `/apps/` at the collection root when the collection bundles scripts, with `requirements.txt`.
+- **`api/org-setup.md` Phase 5** — surfaces bundled-script dependencies at the end of install. Core materializes files, not environments (see "Not in this release").
+
+### Changed
+
+- **`collection-authoring-guide.md`** — new sections on where bundled scripts live, how to refer to them with `{apps_path}`, and where member data lives, plus an expanded dependency-management section.
+- **`collection-authoring-guide.md` — the instruction that caused this class of bug is reversed.** The guide previously said: *"If `{apps_path}` appears in your workflow, it must be defined in the setup template as a parameter."* Collections followed it and declared `apps_path` four different ways — `[member-defined]` in two collections (which prompts the member to type a path core is about to compute), `[org-mandated]` with a hardcoded and incorrect computed path in two others, and not at all in two more, where it was simply an undefined variable. None resolved to anything, because nothing materialized `apps/`. The guide now states the opposite with an explicit note for maintainers of collections written against the old text.
+- **`collection-authoring-guide.md` — the two `apps/` directories are disambiguated.** `{member_workspace}/apps/{service}-credentials/` (OAuth credential space, placed by a collection's setup template) and `installed/{collection}/apps/` (bundled scripts, placed by core) share a word and nothing else. Called out at the OAuth split pattern, because collapsing the two would put member secrets in a directory core replaces on every upgrade.
+- **Duplicate `### Script conventions` heading** in the authoring guide removed — it appeared twice in succession, once with an orphaned lead-in sentence.
+- `standards.md` (v2.3.0): `/apps/` added to Required File Structure; new normative sections "Core-Injected Parameters" and "Member Data Placement"; the Setup Template Requirements rule "declare every parameter" now carries an explicit exception for core-injected parameters, and gains a member-data placement bullet.
+- `collection-authoring-guide.md` (v1.7.0): new sections "Where bundled scripts live", "Referring to your scripts: `{apps_path}`" and "Where member data lives"; "Template variables in bash commands" reversed; dependency management expanded; the two `apps/` directories disambiguated at the OAuth split pattern.
+
+  **Both skip a version.** `standards.md` goes 2.1.0 → 2.3.0 and the guide 1.5.3 → 1.7.0, because `[3.11.0]` announced a v2.2.0 / v1.6.0 carrying the API Entry Format and Natural Language Triggers sections. `[3.28.3]` recorded that those sections were drafted but never merged and remain blocked on two open decisions. Reusing 2.2.0 / 1.6.0 for this release's content would give the CHANGELOG two different definitions of the same document version; skipping leaves them reserved for the work that claimed them.
+
+### Not in this release
+
+Stated explicitly, per the `[3.28.3]` convention.
+
+- **Core does not install script dependencies.** Materialization copies `requirements.txt` down; it does not create an environment or run `pip`. Of the four collections shipping `apps/`, `bug-reports` and `cx-studio` are standard-library only and `projects` has no requirements file; **`email-triage` needs three Google API packages and nothing installs them.** Copying files and managing Python environments are different problems and only one collection has the second one. The authoring guide now requires collections with third-party dependencies to document their own install step, and `org-setup` Phase 5 surfaces the requirement at install time. Tracked in `ROADMAP.md`.
+- **`project_dir` and `member_workspace` are not core-injected.** Both are widely used and currently declared ad hoc by individual collections — the same latent drift `apps_path` had. Unifying them is the obvious follow-on and is deliberately out of scope here to keep this release reviewable. Tracked in `ROADMAP.md`.
+- **No collection is changed by this release.** `cx-studio` 3.0.4 and `email-triage` 1.2.3 remove their `apps_path` declarations separately, after this ships, so they are written against a published convention rather than a predicted one. `bug-reports` and `projects` need no edits at all — they never declared `apps_path`, so injection simply starts working. Their behaviour changes without their code changing, which warrants a regression check rather than silence.
+
+### Verification
+
+The install path was proven before the spec was written, not after: `cx-studio`'s `apps/` was placed by hand at `members/{hash}/installed/cx-studio/apps/` and `load-research-config.py` run against it with a real `--project-dir` and `--member-hash`. It read a member override file from that directory and returned it. This matters because the path had been asserted from code reading twice in review and both assertions were against a stale checkout.
+
 ## [3.28.3] — 2026-09-20 — Release C.1.5.3: documentation accuracy + `pin-binary-version` conformance
 
 Doc-and-conformance release. Every item below was verified against the deployed tree before it was written here; the "Not in this release" section is deliberate and is part of the entry.

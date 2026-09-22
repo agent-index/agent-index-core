@@ -1,13 +1,13 @@
 # Agent-Index Core — Roadmap
 
-Current version: 3.28.3
-Last updated: 2026-09-20
+Current version: 3.29.0
+Last updated: 2026-09-22
 
 ---
 
 ## Current State
 
-Core is at **3.28.2** (Release C.1.5.2, 2026-07-23). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
+Core is at **3.29.0** (2026-09-22). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
 
 Four things have changed the shape of the system since v3.1.0:
 
@@ -20,6 +20,8 @@ Four things have changed the shape of the system since v3.1.0:
 **Helper-gated permission model.** Permission-modifying operations (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are never called by collections directly; they route through `permission-change-helper` and apply under the member's own OAuth token after a deliberate Accept. The Go binary has been the only implementation since 3.7.4. The one sanctioned exception is `create-org`'s install-time bootstrap, which may apply directly and falls back to the helper if it does not.
 
 The **capability provider system** runtime V1 shipped in 3.10.0 (single-provider auto-bind; multi-provider bindings remain post-V1).
+
+**Bundled-script materialization (3.29.0, 2026-09-22).** Collections that ship an `apps/` directory now have it copied to `members/{member_hash}/installed/{collection}/apps/` at install, kept current by `apply-updates`, and addressed through the core-injected `apps_path`. Before 3.29.0 nothing put `apps/` on a member's machine at all, so every `{apps_path}` invocation in every collection failed silently. This also introduced the **core-injected parameter** concept — values core computes and supplies that collections consume but must not declare.
 
 **Access Control (v3.1.0) is partially delivered.** The extended adapter contract and the five admin tasks shipped in 3.1.0. The later work — consumer collection upgrades, search-replaces-manifests, path-B cutover, per-idea ACLs — is outstanding, though some of it has been absorbed piecemeal by later releases. The project's own action-item register is the authority on phase status.
 
@@ -39,6 +41,8 @@ Upgrade paths from v1 to v2.0.x are deprecated; new deployments start at v3. The
 
 - **No cross-org member migration.** Members who need to switch orgs (e.g., joining a different org or moving to a different deployment) have no built-in way to do so. They must manually delete their local workspace and bootstrap into the new org.
 
+- **Bundled-script dependencies are not installed** (3.29.0). Core materializes a collection's `apps/` directory onto the member's machine, `requirements.txt` included, but does not create an environment or run `pip`. A script importing a third-party package is present and still fails on first run. Today this affects `email-triage` alone (three Google API packages); `bug-reports` and `cx-studio` are standard-library only. The authoring guide requires collections with third-party dependencies to document their own install step, and `org-setup` Phase 5 surfaces the requirement — but that is a notice, not a solution. A real answer means either a sanctioned per-collection environment or an explicit "this collection needs these packages, install them now?" step at setup. Deferred from 3.29.0 because copying files and managing environments are different problems.
+
 ### Known Bugs
 
 Known bugs are tracked in the `bug-reports` collection, not here. Open items against
@@ -53,6 +57,7 @@ Known bugs are tracked in the `bug-reports` collection, not here. Open items aga
 - **Capability provider runtime fallback.** When a consumer skill tries to invoke a capability at runtime and the bound provider is unavailable, attempt automatic fallback to an alternative registered provider (if available) or surface a clear error with recovery steps.
 - **Incremental update recovery.** Track update operation results and provide a `@ai:retry-update` command that re-runs only failed operations from the last update run, rather than re-processing the entire log.
 - **Bootstrap zip auto-update detection.** Store a version timestamp in the local workspace and check it against remote during session start. If the bootstrap zip on remote is newer, surface a notice to the member that they should re-download it.
+- **Extend core-injected parameters to `project_dir` and `member_workspace`.** 3.29.0 introduced the concept with `apps_path` as its only member. Both of these are values core knows and collections currently declare ad hoc — the same latent drift `apps_path` had, where four collections declared one value four different ways. Held out of 3.29.0 to keep that release reviewable: `apps_path` touches four collections, `project_dir` touches most of them.
 
 ### v2.3 — Deeper Integration
 

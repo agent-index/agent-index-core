@@ -1,7 +1,7 @@
 ---
 name: validate-collection
 type: task
-version: 3.0.0
+version: 3.1.0
 collection: agent-index-core
 description: Validates an existing collection against agent-index standards — checks file structure, frontmatter, cross-references, naming conventions, and marketplace eligibility.
 stateful: false
@@ -107,8 +107,19 @@ Check that all required files and directories exist:
 | `/api/` directory | Yes | Error (unless `api` array is empty) |
 | `/setup/collection-setup.md` | Yes | Error |
 | `/upgrade/` directory | Yes | Error |
+| `/apps/` directory | No | — (optional; but see placement check below) |
 
 For each missing required file, record an error.
+
+**Bundled-script placement check (core 3.29.0+).** `/apps/` is optional, but if the collection ships
+scripts at all, that is the only place they may live — at the collection root, a sibling of `/api/`,
+`/setup/` and `/upgrade/` (`standards.md`, "Required File Structure"). Record an **error** for any
+`apps/` directory found anywhere other than the collection root — `api/apps/`, `setup/apps/`,
+`api/{name}/apps/` and the like. Core materializes `/apps/` and nothing else, so a misplaced one
+never reaches a member's machine and every `{apps_path}` reference in the collection silently
+resolves to an empty directory.
+
+Nesting *inside* `/apps/` is unrestricted and must not be flagged.
 
 **On success:** Proceed to Step 4.
 
@@ -172,6 +183,27 @@ Record all findings.
 - Check for parameter level annotations (`[org-mandated]`, `[role-suggested]`, `[member-overridable]`, `[member-defined]`) → Warning if no annotations found
 - Check for `## Setup Completion` section → Warning if missing
 - Check for `## Upgrade Behavior` section → Warning if missing
+
+**Core-injected parameter checks (core 3.29.0+).** Core supplies these values; a collection that
+declares one has created a second source of truth that drifts silently. For each setup template:
+
+- A parameter block declaring `apps_path` at **any** provenance level → **Error**. The fix is
+  deletion, not re-annotation.
+- Prose describing how `apps_path` resolves (a literal path next to the word `apps_path`, e.g.
+  `<project_dir>/{collection}/apps`) → **Warning**. Documenting the computed path is how it drifts.
+- The corresponding `{name}-manifest.json` carrying an `apps_path` key in `parameter_provenance` →
+  **Error**, same reasoning.
+
+Using `{apps_path}` in a workflow or Pre-Setup gate is correct and must not be flagged. See
+`standards.md`, "Core-Injected Parameters."
+
+**Member data placement check (core 3.29.0+).** Scan each setup template's `## Setup Completion`
+section and each workflow's declared writes for local paths matching
+`members/{member_hash}/installed/` → **Error**. That subtree belongs to the installer and is replaced
+wholesale on upgrade; member data belongs at `members/{member_hash}/{collection-name}/`
+(`standards.md`, "Member Data Placement"). This check exists because the mistake is a natural one —
+a collection stores config next to the scripts that read it — and because the data loss only shows up
+at the *next* upgrade, long after the change that caused it.
 
 Record all findings.
 
