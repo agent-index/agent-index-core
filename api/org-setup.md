@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.8.0
+version: 3.9.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -163,12 +163,25 @@ Get confirmation before beginning any installations.
 
 **Phase 4 — Installation and setup**
 
-For each skill and task in the determined installation order:
+**Phase 4a — Collection-level materialization (added in core 3.29.0).** Before the per-capability loop below, run once for each distinct collection represented in the installation order:
+
+1. Check whether the collection ships bundled scripts: `aifs_exists("/{collection}/apps")`. If it does not, skip to the next collection — this is the common case and is not an error.
+2. Copy the collection's `apps/` directory to the member's LOCAL workspace at `members/{member_hash}/installed/{collection}/apps/`, preserving the directory structure beneath it (some collections nest scripts one level deep, e.g. `apps/gmail-labeler/label_emails.py`). Read each file with `aifs_read` and write it with the native file tools, the same remote-read → local-write pattern used for capability definitions in the loop below.
+3. Set the **core-injected** parameter `apps_path` for every capability in this collection to the **absolute** path `{project_dir}/members/{member_hash}/installed/{collection}/apps`, where `{project_dir}` is the directory containing `agent-index.json` (in Cowork, the mounted workspace folder). It must be absolute: `{apps_path}` is consumed in bash commands like `python {apps_path}/forward-bug.py`, which are not guaranteed to run with the working directory at `project_dir`.
+
+   **Recompute it, never trust the stored value.** Write the resolved path to `setup-responses.md` as usual, but re-resolve it at the start of every setup and upgrade run rather than carrying the stored literal forward. `project_dir` moves — a different machine, a re-mounted Cowork folder, a member who relocates their workspace — and a baked-in absolute path silently points at nothing after any of those. The stored value is a record of the last resolution, not an input to the next one.
+
+   This is a core-supplied value, not a collection-declared parameter: it is injected into the setup context in the same way as org-mandated values (step 4 of the loop) and is never asked for interactively. Collections MUST NOT declare `apps_path` in their setup templates — see `standards.md`, "Core-Injected Parameters."
+4. **On failure, halt.** If any file in `apps/` cannot be read or written, stop the installation and surface which file failed. Do not warn-and-continue: a partially materialized `apps/` is worse than none at all, because setup templates commonly gate on "does this script exist" and a partial directory can pass that check while the collection is still broken.
+
+`apps/` is collection-owned and core-managed. Nothing else may write into it — member-specific data belongs at `members/{member_hash}/{collection}/`, outside the installer's territory (`standards.md`, "Member Data Placement"). That separation is what makes the wholesale replacement in the upgrade flow below safe.
+
+**Phase 4b — Per-capability installation.** For each skill and task in the determined installation order:
 
 1. Announce what is being installed: "Installing {display name}..."
-2. Create the directory structure in the member's LOCAL workspace at the collection-qualified install path `members/{member_hash}/installed/{collection}/{type}/{name}/` (the `{collection}` segment prevents same-named capabilities from different collections from colliding — bug `instdir`; the path is derivable from the member-index entry, which records `collection`, `type`, and `name`)
+2. Create the directory structure in the member's LOCAL workspace at the collection-qualified install path `members/{member_hash}/installed/{collection}/{type}/{name}/` (the `{collection}` segment prevents same-named capabilities from different collections from colliding — bug `instdir`; the path is derivable from the member-index entry, which records `collection`, `type`, and `name`). Under `installed/{collection}/`, the collection's `apps/` directory — materialized once in Phase 4a — sits as a **sibling** of `skill/` and `task/`, never inside them.
 3. Read the canonical definition file from the remote collection via `aifs_read("/{collection}/api/{name}.md")` and write it to the member's local workspace
-4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context
+4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context, together with the core-injected `apps_path` resolved in Phase 4a (if this collection ships `apps/`). Core-injected values are supplied silently and are never presented for confirmation.
 5. Inject role-suggested parameter defaults from `role.md` into the setup context
 6. Read the setup template (`{name}-setup.md`) from the remote collection via `aifs_read("/{collection}/api/{name}-setup.md")`
 7. Conduct the setup interview for this skill or task:
@@ -221,6 +234,7 @@ Review the completed installations:
 - Confirm count of skills and tasks installed
 - List any that were flagged as `dependency_status: incomplete` with a brief explanation
 - List any external dependencies surfaced, with the system name and contact provided in the collection manifest
+- For each collection whose `apps/` was materialized in Phase 4a, confirm the directory is present at `members/{member_hash}/installed/{collection}/apps/`. Note that bundled scripts may declare third-party dependencies in a `requirements.txt` alongside them; core materializes the files but does **not** install those packages. If a collection ships one that is more than a comment, surface it: "{Display name} bundles scripts that need additional packages — see `{apps_path}/requirements.txt`."
 
 Write onboarding completion state to `/members/{member-hash}/profile/onboarding-state.md`:
 
@@ -301,8 +315,9 @@ Offer actions: install something new, upgrade something, remove an orphaned capa
 When a member asks to install a specific skill or task:
 1. Find it in the collections catalog
 2. Resolve its dependency tree — install dependencies first if needed
-3. Run the setup interview (same as Phase 4, steps 6–11 above)
-4. Confirm completion
+3. **Materialize the collection's `apps/` directory if it is not already present** (Phase 4a above), for this capability's collection and for any collection pulled in by the dependency tree. A single on-demand install is the first capability from its collection as often as not, so this cannot be assumed done.
+4. Run the setup interview (same as Phase 4b, steps 6–11 above)
+5. Confirm completion
 
 **Upgrading an Installed Capability**
 
@@ -322,7 +337,8 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
    - Write the contents read in step 2 to the corresponding local files at the collection-qualified path `members/{member_hash}/installed/{collection}/{type}/{name}/` — `{name}.md`, `{name}-setup.md`, `{name}-manifest.json`. The local file content must match what's on remote at the new version. (The `{collection}` segment was added for bug `instdir` so same-named capabilities from different collections no longer collide on `installed/{type}/{name}/`.)
    - **Old-unqualified migration:** if a pre-`instdir` directory exists at the unqualified `members/{member_hash}/installed/{type}/{name}/`, move it to the qualified path before writing (or, if the qualified path already has content, archive the unqualified directory to a timestamped backup) so no stale duplicate is left behind. Upgrades already rewrite these files, so this migration piggybacks on the normal upgrade write and needs no separate migration script.
    - Write the migrated `setup-responses.md`.
-9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4 step 11's wording; same data-shape principle.)
+   - **Re-materialize the collection's `apps/` directory (added in core 3.29.0)** if the collection ships one and this upgrade crosses a collection version boundary. `apps/` is collection-owned and core-managed, so the replacement is **wholesale**: remove `members/{member_hash}/installed/{collection}/apps/` entirely and copy the new version down from `/{collection}/apps` as in Phase 4a. There is no merge, no per-file diff, and no preservation of anything found in that directory — which is safe precisely because nothing but core writes there. A collection that has stashed member data inside `apps/` is in violation of the member-data rule and will lose it here; that is the intended failure, not an edge case to accommodate. Re-materialize once per collection per upgrade run, not once per capability. `apps_path` does not change and needs no migration.
+9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4b step 11's wording; same data-shape principle.)
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
 
 **If no upgrade script exists for this version boundary (MINOR or PATCH upgrade):** still perform steps 2 and 8 — read the new content from remote and write it to the local install path. Carry all existing setup responses forward unchanged. Update the version in `member-index.json`. The "no upgrade script" branch is *not* a bookkeeping-only operation — the actual file content must be replaced. Skipping step 8 leaves the local file stale relative to what `member-index.json` claims is installed (which is the failure mode in bug `20260502-8d20ea22-5`).
@@ -333,6 +349,7 @@ When a member asks to remove a skill or task:
 1. Check `member-index.json` for any other installed tasks that list this skill in their `dependencies.skills`
 2. If dependencies exist: surface the affected tasks. Ask the member to confirm they understand those tasks will be affected. Require explicit confirmation before proceeding.
 3. If no dependencies, or after confirmation: remove the entry from `member-index.json`, archive the member's installed directory (the collection-qualified `members/{member_hash}/installed/{collection}/{type}/{name}/`) to a timestamped backup location (do not delete — the member may want to reinstall), confirm removal.
+4. **If this was the last installed capability from its collection (added in core 3.29.0)** and `members/{member_hash}/installed/{collection}/apps/` exists, archive that directory to the same timestamped backup location alongside the capability directory. Do not delete it, and do not archive it while any capability from that collection remains installed — `apps/` is shared by every capability in the collection, so removing it early breaks the survivors.
 
 ### Alias Collision Handling
 

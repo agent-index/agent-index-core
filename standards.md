@@ -1,9 +1,9 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.1.0
+**Version:** 2.3.0
 **Maintained by:** agent-index
-**Last Updated:** 2026-04-02
+**Last Updated:** 2026-09-22
 
 ---
 
@@ -26,11 +26,27 @@ Every marketplace-eligible collection must have the following files at its root:
   CHANGELOG.md                 ← required
   ROADMAP.md                   ← recommended (known bugs, wishlist, future direction)
   /api/                        ← required (may be empty only if collection provides roles only)
+  /apps/                       ← optional; required location if the collection ships scripts
+    requirements.txt           ← required inside /apps/ if the scripts have dependencies
   /setup/
     collection-setup.md        ← required
     collection-setup-responses.md  ← written at install time, not authored
   /upgrade/                    ← required directory (may be empty at v1.0.0)
 ```
+
+**`/apps/` placement is normative (core 3.29.0).** A collection that bundles helper scripts puts them
+in `/apps/` at the collection root — a sibling of `/api/`, `/setup/` and `/upgrade/`, never nested
+inside them and never under some other directory of the author's choosing. Skills and tasks both
+live inside `/api/`; there are no `/skills/` or `/tasks/` directories at source level, so `/apps/` is
+not nested under either.
+
+The same shape carries to the member's machine. `org-setup` materializes `/apps/` to
+`members/{member_hash}/installed/{collection}/apps/`, where it sits as a sibling of `skill/` and
+`task/`. At both ends the rule is the same: **`apps/` is never inside the capability tree.** One
+listing at the root answers "does this collection ship scripts," at source and on disk alike.
+
+Nested structure *within* `/apps/` is the author's business — `apps/gmail-labeler/label_emails.py` is
+fine, and materialization preserves it.
 
 ---
 
@@ -120,9 +136,62 @@ Required frontmatter fields for tasks:
 Every skill and task in `/api/` must have a corresponding `-setup.md` file. Setup templates must:
 
 - Have valid YAML frontmatter with `name`, `type: setup`, `version`, `collection`, `description`, `target`, `target_type`, and `upgrade_compatible`
-- Declare every parameter with an explicit level annotation (`[org-mandated]`, `[role-suggested]`, `[member-overridable]`, or `[member-defined]`)
+- Declare every parameter with an explicit level annotation (`[org-mandated]`, `[role-suggested]`, `[member-overridable]`, or `[member-defined]`) — **except core-injected parameters, which must NOT be declared at all** (see below)
 - Include a `Setup Completion` section listing all writes
 - Include an `Upgrade Behavior` section with `Preserved Responses`, `Reset on Upgrade`, `Requires Member Attention`, and `Migration Notes` subsections
+- Write member-specific data only to `members/{member_hash}/{collection-name}/` — **never inside `members/{member_hash}/installed/`** (see "Member data placement" below)
+
+---
+
+## Core-Injected Parameters (core 3.29.0+)
+
+A **core-injected parameter** is a value core computes and supplies to every capability's setup
+context. Collections consume it as a `{placeholder}` in workflows and setup templates, but do not
+declare it, do not describe how it is computed, and never ask a member for it.
+
+This is a deliberate exception to "declare every parameter with an explicit level annotation" above.
+Declaring one is a defect, not a style preference: a declared copy is a second source of truth for a
+value core owns, it drifts silently the moment core's computation changes, and a `[member-defined]`
+declaration additionally prompts the member to type a path core is about to overwrite.
+
+The closed list, as of core 3.29.0:
+
+| Parameter | Value | Available when |
+|---|---|---|
+| `apps_path` | `{project_dir}/members/{member_hash}/installed/{collection}/apps` — **absolute**, re-resolved on every setup and upgrade run | The collection ships `/apps/` |
+
+`apps_path` is absolute because it is consumed in bash commands (`python {apps_path}/script.py`) that
+are not guaranteed to run with the working directory at `project_dir`. It is re-resolved rather than
+carried forward because `project_dir` moves between machines and Cowork mounts; the value recorded in
+`setup-responses.md` is a record of the last resolution, not an input to the next one.
+
+Nothing else is core-injected today. `project_dir` and `member_workspace` are widely used and
+currently declared ad hoc by individual collections; unifying them the same way is tracked in
+`ROADMAP.md` and is deliberately out of scope for 3.29.0.
+
+**For collection authors:** use `{apps_path}` freely in workflow bash commands and in Pre-Setup
+existence gates. Do not add an `### apps_path` block to any setup template, and do not add an
+`apps_path` entry to any manifest's `parameter_provenance`. `@ai:preflight` and
+`@ai:validate-collection` both flag violations.
+
+---
+
+## Member Data Placement (normative)
+
+Member-specific data written by a collection's setup or workflows goes under:
+
+```
+members/{member_hash}/{collection-name}/
+```
+
+It must **never** be written inside `members/{member_hash}/installed/`. That subtree belongs to the
+installer: `org-setup` and `apply-updates` write it, replace it on upgrade, and archive it on
+uninstall, without consulting the collection. In particular `installed/{collection}/apps/` is
+replaced **wholesale** on every collection upgrade, so anything a collection stores there is lost.
+
+This rule predates 3.29.0 — `api/author-collection.md` has stated it under "Local directory
+structure" — and is promoted here to normative status because core's wholesale replacement of
+`apps/` now depends on it.
 
 ---
 
