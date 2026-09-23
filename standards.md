@@ -1,9 +1,9 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.3.0
+**Version:** 2.4.0
 **Maintained by:** agent-index
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23
 
 ---
 
@@ -158,12 +158,28 @@ The closed list, as of core 3.29.0:
 
 | Parameter | Value | Available when |
 |---|---|---|
-| `apps_path` | `{project_dir}/members/{member_hash}/installed/{collection}/apps` — **absolute**, re-resolved on every setup and upgrade run | The collection ships `/apps/` |
+| `apps_path` | Stored as `members/{member_hash}/installed/{collection}/apps` — **relative to `project_dir`**. Resolved to an absolute path at invocation. | The collection ships `/apps/` |
 
-`apps_path` is absolute because it is consumed in bash commands (`python {apps_path}/script.py`) that
-are not guaranteed to run with the working directory at `project_dir`. It is re-resolved rather than
-carried forward because `project_dir` moves between machines and Cowork mounts; the value recorded in
-`setup-responses.md` is a record of the last resolution, not an input to the next one.
+**Stored relative, consumed absolute (corrected in core 3.29.2 — `appspathsandboxleak`).** Two
+different values are in play and conflating them is the defect this wording exists to prevent:
+
+- **The stored record** in `setup-responses.md` is the *relative* path above. It contains no machine,
+  user, drive or mount prefix, so it means the same thing on every host, in every Cowork sandbox, and
+  in every session.
+- **The consumed value** is resolved at invocation by joining the stored relative path onto whatever
+  `project_dir` the current runtime actually has. Workflows use `{apps_path}` exactly as before —
+  `python {apps_path}/forward-bug.py` still receives an absolute path and still works from any
+  working directory. Nothing changes for collection authors.
+
+3.29.0 and 3.29.1 specified the stored value as absolute, reasoning that bash commands cannot assume
+a working directory. That reasoning is sound for the *consumed* value and wrong for the *stored* one.
+In Cowork the agent's `project_dir` is a per-session sandbox mount (`/sessions/{session}/mnt/...`),
+so an absolute record pinned a path that did not exist on the member's own machine, did not exist in
+any other session, and changed on every run. Observed in production immediately after 3.29.1: all 24
+recorded values named a sandbox from an already-finished session.
+
+Re-resolve on every setup and upgrade run regardless. The stored record is a record of the last
+resolution, not an input to the next one — it exists to be inspectable, not to be trusted.
 
 Nothing else is core-injected today. `project_dir` and `member_workspace` are widely used and
 currently declared ad hoc by individual collections; unifying them the same way is tracked in
