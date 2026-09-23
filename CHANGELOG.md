@@ -1,5 +1,39 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.29.2] — 2026-09-23 — `apps_path` is stored relative, not absolute
+
+**PATCH — corrects the stored form of `apps_path`. 3.29.1 recorded it; it recorded the wrong thing.**
+
+### The defect (`appspathsandboxleak`)
+
+3.29.1 was published and verified with `@ai:update` on a live install. The mechanism worked exactly as specified: 24 setup-responses files written across precisely the three collections that ship `apps/`, legacy flat-YAML bodies preserved with a canonical section appended, correct `### apps_path` + `- **Value:**` shape, `manifest_sync_subroutine_revision` 6 everywhere, and no `apps_path` written for the seven collections without scripts.
+
+Every recorded value was wrong:
+
+```
+/sessions/awesome-eloquent-davinci/mnt/dev_install/members/.../bug-reports/apps
+```
+
+That is the **agent's per-session Cowork sandbox mount**, captured from a session that had already ended. It does not exist on the member's machine, does not exist in any other session, and changes on every run.
+
+3.29.0 specified `apps_path` as absolute, reasoning that bash commands like `python {apps_path}/forward-bug.py` cannot assume a working directory. That reasoning is correct for the value a workflow **consumes** and wrong for the value that gets **stored**. In Cowork the agent's `project_dir` is `/sessions/{session}/mnt/...`, so "absolute" pinned an ephemeral path into durable member state. The decision was called out explicitly in the 3.29.0 CHANGELOG as settled during implementation — it was settled wrongly, and only running the thing surfaced it.
+
+### Fixed
+
+- **Stored relative, consumed absolute.** `setup-responses.md` now records `members/{member_hash}/installed/{collection}/apps` — no machine, user, drive or mount prefix, so it means the same thing on every host and in every session. The value is resolved to absolute at invocation by joining onto the current runtime's `project_dir`. **Collection authors are unaffected:** `{apps_path}` still arrives absolute wherever a workflow uses it, so `python {apps_path}/forward-bug.py` is unchanged. Updated in `standards.md` ("Core-Injected Parameters", v2.3.0 → v2.4.0), `api/org-setup.md` Phase 4a (3.9.1 → 3.9.2) and `api/apply-updates.md` step 5b (3.16.1 → 3.16.2).
+- `standards.md` (v2.4.0): "Core-Injected Parameters" rewritten to separate the stored form from the consumed form, with the Cowork sandbox failure documented as the reason.
+- **`CURRENT_SUBROUTINE_REVISION` 6 → 7.** Load-bearing again: an install that applied 3.29.1 sits at revision 6 and would otherwise be classified in-sync, keeping the dead-sandbox value forever. The bump forces the re-sweep that overwrites it.
+
+### Why this keeps happening
+
+Third correction in this release line, and all three share a shape: a value whose write side and read side were specified in different places, where each specification looked right on its own. cx-studio's `research-augmentation-tools.json` (written locally, read through `aifs`). `apps_path` written on the fresh-install path and not the migration path. Now `apps_path` written in a form the writer could use and no one else could.
+
+Each was found by running the system and inspecting what landed — never by re-reading the spec. The 3.29.0 entry's closing note said to prefer running a thing over reasoning about it; that is now three for three.
+
+### Verification
+
+The regression test from 3.29.1 (`grep -rl apps_path`) passes on **presence** for all 24 files and is what has been extended here: the test is now that every recorded value, joined onto the current `project_dir`, resolves to a directory that actually contains the collection's scripts. Presence alone was satisfied by a path pointing at a machine that no longer exists.
+
 ## [3.29.1] — 2026-09-22 — `apps_path` reaches existing installs
 
 **PATCH — completes 3.29.0 on the migration path. 3.29.0 put the scripts on members' machines but not the parameter that addresses them.**
