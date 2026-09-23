@@ -1,13 +1,13 @@
 # Agent-Index Core — Roadmap
 
-Current version: 3.29.0
+Current version: 3.29.1
 Last updated: 2026-09-22
 
 ---
 
 ## Current State
 
-Core is at **3.29.0** (2026-09-22). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
+Core is at **3.29.1** (2026-09-22). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
 
 Four things have changed the shape of the system since v3.1.0:
 
@@ -21,7 +21,7 @@ Four things have changed the shape of the system since v3.1.0:
 
 The **capability provider system** runtime V1 shipped in 3.10.0 (single-provider auto-bind; multi-provider bindings remain post-V1).
 
-**Bundled-script materialization (3.29.0, 2026-09-22).** Collections that ship an `apps/` directory now have it copied to `members/{member_hash}/installed/{collection}/apps/` at install, kept current by `apply-updates`, and addressed through the core-injected `apps_path`. Before 3.29.0 nothing put `apps/` on a member's machine at all, so every `{apps_path}` invocation in every collection failed silently. This also introduced the **core-injected parameter** concept — values core computes and supplies that collections consume but must not declare.
+**Bundled-script materialization (3.29.0–3.29.1, 2026-09-22).** Collections that ship an `apps/` directory now have it copied to `members/{member_hash}/installed/{collection}/apps/` at install, kept current by `apply-updates`, and addressed through the core-injected `apps_path`. Before 3.29.0 nothing put `apps/` on a member's machine at all, so every `{apps_path}` invocation in every collection failed silently. This also introduced the **core-injected parameter** concept — values core computes and supplies that collections consume but must not declare. 3.29.1 completed the migration path: 3.29.0 materialized the scripts for existing members but did not record `apps_path` for them, so the files arrived un-addressable.
 
 **Access Control (v3.1.0) is partially delivered.** The extended adapter contract and the five admin tasks shipped in 3.1.0. The later work — consumer collection upgrades, search-replaces-manifests, path-B cutover, per-idea ACLs — is outstanding, though some of it has been absorbed piecemeal by later releases. The project's own action-item register is the authority on phase status.
 

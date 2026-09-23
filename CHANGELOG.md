@@ -1,5 +1,27 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.29.1] — 2026-09-22 — `apps_path` reaches existing installs
+
+**PATCH — completes 3.29.0 on the migration path. 3.29.0 put the scripts on members' machines but not the parameter that addresses them.**
+
+### The defect
+
+3.29.0 shipped and was verified on a real install: `apps/` materialized correctly for `bug-reports`, `email-triage` and `projects`, as a sibling of `skill/` and `task/`, nesting preserved. Then a check of the member's actual setup state found `apps_path` recorded **nowhere**.
+
+`org-setup` Phase 4a/4b resolves and writes `apps_path` for a **fresh** install. `apply-updates` step 5a — the path every *existing* member takes — materialized the directory and did not record the parameter. Step 9 of that subroutine only reconciles org-mandated values sourced from the collection's `collection-setup-responses.md`, and `apps_path` is core-injected, not collection-sourced, so it fell between the two. Net effect on every install that upgraded rather than installed fresh: the scripts are present and `{apps_path}` resolves to nothing — the same end state 3.29.0 set out to fix, reached by a different route.
+
+This is the second time in this release line that a value's write side and read side were specified in different places and never met. The first was cx-studio's `research-augmentation-tools.json` (written locally, read through `aifs`).
+
+### Fixed
+
+- **`api/apply-updates.md` step 5b** (3.16.0 → 3.16.1). After materializing `apps/`, record `apps_path` in each of the collection's capabilities' `setup-responses.md` under `## Org-Mandated Parameters`, in the canonical `### apps_path` + `- **Value:**` shape step 9 machine-parses. Handles the two file shapes in the field: canonical files get the block added or replaced; legacy flat-YAML and placeholder files (`email-triage`'s `delivery_method: chat` form, `forward-bug`'s "Installed with org defaults.") get a canonical section **appended**, with the legacy body left untouched — rewriting a member's setup state as a side effect of an unrelated resync is out of scope and risks dropping values this step does not understand. Idempotent; re-resolved every run rather than carried forward. Non-fatal on failure, unlike 5a: the files are already correct, so a failed parameter write is worth retrying, not worth failing the collection over.
+- **`CURRENT_SUBROUTINE_REVISION` 5 → 6.** Without this, an install that already applied 3.29.0 sits at revision 5, is classified as in-sync, and never re-runs the subroutine — it would keep the materialized scripts it cannot address, permanently. The bump is the delivery mechanism, not bookkeeping. On a 3.29.0 install, 5a re-copies byte-identical files (cheap no-op) and 5b does the real work; on a pre-3.29.0 install both run together in one pass.
+- **`api/org-setup.md`** (3.9.0 → 3.9.1): Phase 4a now names the same location and shape for the write, so a fresh install and an upgraded install are indistinguishable afterwards. Previously it said only "write it to `setup-responses.md` as usual", which is what let the two paths drift.
+
+### Verification
+
+Confirmed on a live install before this release was written: `find members -path '*installed*' -name apps -type d` returns all three collections, `manifest_sync_subroutine_revision` reads 5 across all ten, and `grep -rl apps_path */*/*/setup-responses.md` returns nothing. That last command is the regression test for this entry — after 3.29.1 it must return one file per capability of every collection shipping `apps/`.
+
 ## [3.29.0] — 2026-09-22 — `apps/` materialization
 
 **MINOR — core now copies a collection's bundled scripts onto the member's machine and supplies the path to them. Additive: collections that ship no `apps/` directory are unaffected.**
