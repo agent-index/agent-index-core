@@ -1,5 +1,34 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.30.0] — 2026-09-23 — Multi-marketplace: catalogs, subscriptions, provenance
+
+**MINOR — additive. An org that does not opt in notices nothing.** Pairs with **agent-index-marketplace 2.20.0** (which implements the consumer side) and **agent-index-resource-listings** (catalog identity fields). Release order: core → marketplace → resource-listings. Design record: `68-solution-design-multi-marketplace.md`.
+
+### Why
+
+An install could point at exactly one marketplace catalog, so an org could not consume the public catalog and a private one at the same time. CX Studio — a private, client-facing collection — is the first case: it cannot be listed publicly, so without this it installs invisible to `@ai:marketplace` and `@ai:check-updates`.
+
+### Added
+
+- **`standards.md` (v2.5.0) § "Marketplaces: catalogs, subscriptions, provenance"** — normative. Three layers kept separate because they have different lifetimes: catalog identity (`marketplace_id`, `display_name`, `namespace`, declared by the catalog and never assigned by a subscriber); subscriptions (`org-config.json` → `marketplaces[]`, admin-only); provenance (`installed_collections[].marketplace_id`, written at install, never recomputed, survives unsubscription, `null` = sideloaded). Catalogs are admin-only — no change to the member runtime path, the dist manifest, or `apply-updates`.
+- **Namespaces.** A private catalog reserves a hyphen prefix (`cx` → `cx-*`); no other catalog may offer a name in it and reservations may not overlap. Hyphen, not slash: collection names are kebab-case path segments. A private catalog therefore cannot shadow a public collection — there is no override mechanism by design.
+- **`edit-org` 3.3.0 — Step 5.9 Manage marketplace subscriptions** (menu option 6): subscribe (v1: `clone` sources only, added through the infra clone manifest and the committed `clone-repos` script — the agent never runs git), disable/re-enable, unsubscribe (never touches provenance), `skip_if_unavailable`, local display name. Refuses a catalog with no identity, a duplicate id, a null namespace, a namespace violation, or an overlapping reservation.
+- **`publish-updates` 3.15.0 — standing reconcile 6g.** Back-fills a pre-3.30.0 org: writes the single synthesised `agent-index-public` subscription and sets `marketplace_id: "agent-index-public"` on every `installed_collections[]` entry lacking the key (`null` + a summary notice if the name is not in the public catalog). Never edits a present `marketplace_id`. Runs on no-op publishes too (`standingreconcileunreachable`).
+- **`create-org` 3.12.0** seeds `marketplaces[]` with the public catalog and records `marketplace_id` on every collection it registers.
+
+### Decided against
+
+- **No `priority` / pinning.** APT and DNF need it because a dependency solver picks a candidate with no human present; agent-index has no solver and an admin is present at every install. Recorded in standards.md so it is not added later as a convenience.
+- **No catalog caching layer.** Catalogs have one reader per org. `/shared/marketplace-cache/` is recorded as decommissioned (no writer since marketplace 2.17.0 `mktcatalogwebfetch`); marketplace 2.20.0 removes its last reader.
+
+### Stored-path rule applied from the start
+
+`marketplaces[].source.ref` is stored **relative to the install root**, never absolute — the `appspathsandboxleak` lesson from 3.29.2 applied before it could recur.
+
+### Compatibility
+
+`marketplace_directory_url` stays in `agent-index.json` and is not removed in 3.30.x. Absent `marketplaces[]`, consumers synthesise the single public subscription and must produce output identical to 3.29.x.
+
 ## [3.29.2] — 2026-09-23 — `apps_path` is stored relative, not absolute
 
 **PATCH — corrects the stored form of `apps_path`. 3.29.1 recorded it; it recorded the wrong thing.**
@@ -1269,6 +1298,7 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` — reference schema for org-config.json
 - `standards.md` — open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 
 
 

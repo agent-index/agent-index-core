@@ -1,7 +1,7 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.4.0
+**Version:** 2.5.0
 **Maintained by:** agent-index
 **Last Updated:** 2026-09-23
 
@@ -235,6 +235,78 @@ structure" — and is promoted here to normative status because core's wholesale
 
 ### Reads go through aifs only (C.1.3 — `wrongconnectorfallback`)
 All remote agent-index content — org config, the registry, `/shared/...`, collection files, and **content shared to a member by another member** — is read through the `aifs_*` executor, never through an external file connector (a Microsoft 365 / Google Drive / Dropbox connector that happens to be connected in the session). When an `aifs_read` returns `PATH_NOT_FOUND` for an item a member can see in their own cloud portal, the correct response is to **diagnose it within the aifs model** (most often a cross-drive reference — see id-anchor addressing and the cross-drive read contract) and surface that, **not** to improvise by reaching for whatever connector is present (which silently bypasses the trust model, may target the wrong backend entirely, and gives non-reproducible results). A connector being connected is never a license to route agent-index reads around aifs.
+
+## Marketplaces: catalogs, subscriptions, provenance (normative — core 3.30.0)
+
+An org may consult **more than one marketplace catalog**. Three things are kept separate because they have different owners and different lifetimes. Design record: `68-solution-design-multi-marketplace.md`.
+
+| Layer | What it is | Where it lives | Who reads it |
+|---|---|---|---|
+| Catalog | what a marketplace offers | `marketplace-directory.json` in a catalog repo | admin |
+| Subscription | which catalogs this org consults | `org-config.json` → `marketplaces[]` | admin |
+| Provenance | which catalog each installed collection came from | `org-config.json` → `installed_collections[].marketplace_id` | admin |
+
+**Catalogs are admin-only.** Members never read a catalog; they read what the admin has published to `/shared/dist/`. Nothing in this section changes the member runtime path, the dist manifest schema, or `apply-updates`.
+
+### Catalog identity
+
+A catalog declares its own identity at the top level of `marketplace-directory.json`:
+
+| Field | Type | Rule |
+|---|---|---|
+| `marketplace_id` | string | kebab-case, globally meaningful. Declared by the catalog, **never assigned by a subscriber** (APT/DNF assign repo ids locally, which makes provenance strings incomparable across installs — do not inherit that). |
+| `display_name` | string | human label. A subscriber may override it locally; the id never changes. |
+| `namespace` | string \| null | reserved name prefix. `null` only for the public Agent Index catalog. |
+
+A catalog file with no `marketplace_id` is the legacy public catalog and is read as `marketplace_id: "agent-index-public"`, `namespace: null`. Entry schema (`collections[]`) is unchanged.
+
+### Subscriptions — `org-config.json` → `marketplaces[]`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | must equal the catalog's declared `marketplace_id` (verified at subscribe and on every read). |
+| `display_name` | string | local label; defaults to the catalog's. |
+| `enabled` | bool | `false` = stop consulting this catalog **without** deleting the subscription. Provenance referencing it stays interpretable. |
+| `source` | object | `{ "kind": "clone", "ref": "<repo dir relative to install_root>", "git_url": "…" }` or `{ "kind": "url", "ref": "<https url>" }`. |
+| `namespace` | string \| null | copied from the catalog at subscribe; re-verified on read. |
+| `skip_if_unavailable` | bool | default **`false`**: an unreadable source aborts the listing with a named error. `true` opts that one source into being skipped with a visible notice. Never silently return a partial catalog. |
+| `trust_anchor` | object | for `clone`: `{ "git_url": "…" }` — the clone's `origin` must match. Trust is scoped to a source, never global. |
+| `subscribed_date`, `subscribed_by` | string | ISO date; admin `member_hash`. |
+
+**`source.ref` for `clone` is stored relative to the install root** (e.g. `"agent-index-resource-listings"`), never absolute — same rule and same reason as `apps_path` (core 3.29.2, `appspathsandboxleak`): an absolute path captured in one session is a dead sandbox mount in every other. Consumers resolve it against the install root at read time.
+
+**Source kinds (v1):** `clone` — a catalog repo cloned into the install root by the committed `lib/clone/clone-repos` script (the current Release-C admin path; subscribing a new `clone` source adds its repo to the infra clone manifest). `url` — the legacy public-directory fetch, retained only for a not-yet-migrated org. `backend` (a catalog JSON on the org's own backend, for an org with no clones) is **reserved and not implemented in v1** — a subscription declaring it is refused.
+
+Subscriptions are org policy: editable only by an admin, via `@ai:edit-org` → Manage marketplaces.
+
+### Namespaces
+
+- A catalog with `namespace: "{ns}"` may only contain entries whose `name` starts with `{ns}-`. The separator is a **hyphen** — collection names are kebab-case and are used verbatim as path segments (`/{collection}/api/…`, `members/{hash}/collections/{name}/`), so no other separator is legal.
+- No other subscribed catalog (including the public one) may offer a name starting with a reserved `{ns}-`.
+- Two reservations may not overlap: `{a}-` must not be a prefix of `{b}-` or vice versa.
+- Violations are refused **at subscribe time** and re-checked on every catalog read (a catalog can change after subscription). A violating catalog is treated as unavailable, never partially trusted.
+- A private catalog **cannot shadow** a public collection — there is deliberately no override or precedence mechanism. To replace a public collection, fork and rename.
+
+### Provenance — `installed_collections[].marketplace_id`
+
+- **Written at download/install from the catalog the entry was selected from; never recomputed** from whatever catalogs are subscribed later.
+- **Survives unsubscription** (and `enabled: false`). A collection whose origin catalog is disabled or unsubscribed is reported as such, not as "untracked."
+- **`null` means sideloaded** — installed without a catalog entry. A first-class, permanent-capable state; retrofitting a catalog later is a one-field edit, not a reinstall.
+- Existing entries are back-filled to `"agent-index-public"` by `publish-updates` 6g; `agent-index-core` and `agent-index-marketplace` are always `"agent-index-public"`.
+
+### Collisions
+
+With namespaces enforced, two catalogs cannot legally offer the same name. If a bare-name lookup is nonetheless ambiguous (e.g. a legacy catalog without identity), **refuse and ask the admin** which catalog they mean. There is **no `priority` field and no pinning** — APT/DNF need those because a dependency solver must pick a candidate with no human present; agent-index has no solver and an admin is present at every install. Do not add one as a convenience.
+
+### Legacy orgs
+
+If `org-config.json` has no `marketplaces[]`, consumers synthesise exactly one subscription: `id: "agent-index-public"`, `enabled: true`, `namespace: null`, `skip_if_unavailable: false`, source `clone` at `agent-index-resource-listings` when that clone exists under the install root, else `url` from `agent-index.json` → `marketplace_directory_url`. Output must be identical to pre-3.30.0 behaviour. `publish-updates` 6g writes the synthesised entry for real. `marketplace_directory_url` stays in `agent-index.json` and is not removed in 3.30.x.
+
+### Decommissioned: `/shared/marketplace-cache/`
+
+The web-fetched catalog cache has had no writer on a clone-publishing org since marketplace 2.17.0 (`mktcatalogwebfetch`) and must not be read as a catalog or version source. Marketplace 2.20.0 removes its last reader (`check-updates` Step 3). Member currency is `/shared/dist/manifest.json` → `collections[]`.
+
+---
 
 ## Release procedure (admin-side)
 

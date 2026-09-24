@@ -1,9 +1,9 @@
 ---
 name: edit-org
 type: task
-version: 3.2.0
+version: 3.3.0
 collection: agent-index-core
-description: Edit org configuration — update the admin list or launch the marketplace to install or manage collections.
+description: Edit org configuration — update the admin list, manage marketplace subscriptions, or launch the marketplace to install or manage collections.
 stateful: false
 produces_artifacts: false
 produces_shared_artifacts: false
@@ -62,6 +62,7 @@ If the member invoked generally: present the management options:
 > Admins: {admin display names}
 > Org roles: {role count, or "none defined"}
 > Installed collections: {count} — say 'open marketplace' to manage
+> Marketplaces: {enabled subscription display names, or "Agent Index Marketplace (default)" if `marketplaces[]` is absent}
 >
 > What would you like to do?
 > 1. Add or remove an org admin
@@ -69,6 +70,7 @@ If the member invoked generally: present the management options:
 > 3. Update adapter bundle and regenerate bootstrap zip
 > 4. Open the marketplace
 > 5. Publish updates for members
+> 6. Manage marketplace subscriptions
 
 ---
 
@@ -204,6 +206,29 @@ If the admin asks to view, deregister, or re-order capability providers:
 3. **Re-registration** happens through `@ai:install-collection` (reconfigure) or `@ai:upgrade-collection` — do not hand-edit registry entries here beyond removal and ordering.
 
 If the member asks about registering a provider, direct them to `@ai:install-collection {collection}` — registration is install/upgrade-time, admin-confirmed.
+
+### Step 5.9: Manage Marketplace Subscriptions (added in 3.3.0 / core 3.30.0)
+
+Normative model: `standards.md` § "Marketplaces: catalogs, subscriptions, provenance". Subscriptions are org policy — admin-only, verified in Step 1.
+
+Read `org-config.json` → `marketplaces[]`. If absent, show the synthesised legacy subscription (`agent-index-public`) and note: "This will be recorded on your next publish." Present each subscription: display name, id, source kind + ref, namespace, enabled, `skip_if_unavailable`, and the count of `installed_collections[]` entries whose `marketplace_id` references it.
+
+Actions:
+
+1. **Subscribe to a catalog.**
+   - Ask for the source. v1 accepts **`clone`** only for new subscriptions: the catalog repo's git URL. (`url` exists solely for the synthesised legacy entry; `backend` is reserved — refuse with "Backend-hosted catalogs aren't supported yet.")
+   - If the repo is not already cloned under the install root, add it to the **infra clone manifest** and surface the committed `lib/clone/clone-repos` invocation per the `clone-manifest-emitter` subroutine (`templates/clone-script-generator.md`). **Never author a clone script and never run git from the sandbox** — the admin runs the committed script natively. Halt until the admin confirms it ran; then confirm the clone exists and its `origin` matches the git URL.
+   - Read the clone's `marketplace-directory.json`. **Refuse** if it lacks `marketplace_id`, if that id is already subscribed, if `namespace` is null (only the public catalog may be un-namespaced), if any entry violates its own namespace, if any *other* subscribed catalog offers a name in this namespace, or if this namespace overlaps an existing reservation. Name the offending entries.
+   - Show the admin what they are subscribing to — id, display name, namespace, entry count and names — and confirm.
+   - Write the subscription (`source.ref` **relative to the install root**, never absolute — `appspathsandboxleak`; `trust_anchor.git_url`; `enabled: true`; `skip_if_unavailable: false`; `subscribed_date`/`subscribed_by`) via the **safe org-config rewrite rule** (see `create-org` Step 10: unique `mktemp` staging, identity assert, content assert that the new id is present, no glob/mtime re-select). Read back.
+2. **Disable / re-enable** — flip `enabled`. Confirm first when disabling a catalog that installed collections reference: "{n} installed collections came from this catalog. They stay installed; update checks will report them as 'source disabled' until you re-enable it."
+3. **Unsubscribe** — remove the entry. **Never modify `installed_collections[].marketplace_id`** — provenance survives unsubscription. Confirm with the same count warning, and refuse to unsubscribe or disable `agent-index-public` — `agent-index-core` and `agent-index-marketplace` are always tracked against it.
+4. **Toggle `skip_if_unavailable`** — explain before enabling: "If this catalog can't be read, listings will continue without it and say so. Leave off unless the source is known to be flaky."
+5. **Set a local display name** — only `display_name`; the `id` is the catalog's and never changes.
+
+There is no priority or ordering setting, by design (`standards.md` § "Collisions"). If the admin asks for one, explain that namespaces make collisions impossible and point to fork-and-rename for replacing a public collection.
+
+No publish is needed after a subscription change: the write above is the record, and subscription changes produce no member update operations — members never read catalogs.
 
 ### Step 6: Marketplace Launch
 

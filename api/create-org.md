@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.11.0
+version: 3.12.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -584,13 +584,36 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
     }
   ],
   "org_roles": [],
+  "marketplaces": [
+    // Catalog subscriptions (core 3.30.0 — standards.md § "Marketplaces"). A new org
+    // subscribes to exactly the public catalog. `source.ref` is RELATIVE to the install
+    // root — never an absolute or /sessions/… path (appspathsandboxleak). The listings
+    // repo is already cloned by the infra clone in Phase 1, so kind is `clone`. Further
+    // catalogs are added later via @ai:edit-org → Manage marketplaces.
+    {
+      "id": "agent-index-public",
+      "display_name": "Agent Index Marketplace",
+      "enabled": true,
+      "source": {
+        "kind": "clone",
+        "ref": "agent-index-resource-listings",
+        "git_url": "https://github.com/agent-index/agent-index-resource-listings.git"
+      },
+      "namespace": null,
+      "skip_if_unavailable": false,
+      "trust_anchor": { "git_url": "https://github.com/agent-index/agent-index-resource-listings.git" },
+      "subscribed_date": "{today YYYY-MM-DD}",
+      "subscribed_by": "{member_hash}"
+    }
+  ],
   "installed_collections": [
     {
       "name": "agent-index-core",
       "version": "{the agent-index-core collection.json `version` actually uploaded in Step 9 — not a hardcoded default (versionmarker). Must match the remote /agent-index-core/collection.json.}",
       "installed_date": "{today YYYY-MM-DD}",
       "repo_url": "https://github.com/agent-index/agent-index-core",
-      "status": "installed"
+      "status": "installed",
+      "marketplace_id": "agent-index-public"
     }
   ]
 }
@@ -717,7 +740,7 @@ The collections the admin chose in the Phase-1 collection-selection interview (S
 For **each** selected collection `{name}`:
 
 1. **Upload** the local `{name}/` clone to `/{name}/` on remote (same `aifs_write_batch` one-process upload + binary-exclusion + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
-2. **Register** it in `org-config.json` `installed_collections` (safe org-config rewrite rule) as `status: downloaded` initially.
+2. **Register** it in `org-config.json` `installed_collections` (safe org-config rewrite rule) as `status: downloaded` initially, with `"marketplace_id": "agent-index-public"` — the Phase-1 selection interview offers only the public catalog (provenance, core 3.30.0).
 3. **Provision it — run the `install-collection` flow** (`agent-index-marketplace` task `install-collection`, Steps 4–5.7; invoke it per collection, or perform the equivalent inline). That flow:
    - **Setup interview / defaults** — read `/{name}/setup/collection-setup.md`, collect org-level params. Offer "accept defaults," but per the **setupresp guardrail** a defaults install STILL writes the responses file. Flag any default that is really a decision — notably **bug-reports `admin_roles`**, which depends on org roles: if roles were skipped (Step 14) it defaults to empty (triage is admin-status-only); the admin can define roles via `@ai:edit-org` and re-run later.
    - **Write** `/{name}/setup/collection-setup-responses.md` with `setup_status: complete`; **verify read-back** (`aifs_read` returns `setup_status: complete`) before the next collection.
@@ -750,7 +773,7 @@ If the admin says yes:
 6. Upload the entire marketplace collection to the remote filesystem (same `aifs_write_batch` one-process upload + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
 6a. **Grant members reader on `/agent-index-marketplace/` (memberorgreadblocked).** After the upload, `aifs_stat("/agent-index-marketplace")` for its Drive id, then `aifs_share(path: "id:{marketplace_folder_id}", subject: "{all_members_group}", role: "reader")` via the sanctioned install-time direct path (+ `permission-change-helper` fallback). Members read marketplace capability definitions by path; without this grant a non-drive-member can't. Idempotent; id-anchored.
 7. Update `org-config.json` on remote via `aifs_read` then `aifs_write` (follow the **safe org-config rewrite rule** below):
-   - Add entry to `installed_collections`
+   - Add entry to `installed_collections` (with `"marketplace_id": "agent-index-public"`)
    - Update `last_updated`
 
 > **Safe org-config rewrite rule (MUST follow for every `org-config.json` read-modify-write — bug `20260615-8d20ea22-ocstale`):** Never stage the rewritten config at a fixed, shared scratch path like `/tmp/oc.json` — a leftover file from another org's install can be picked up and uploaded, corrupting the canonical config (observed in two installs). (a) Build the new content **in memory** or in a **unique** path (`mktemp`), never a fixed name; (b) **before** the authoritative `aifs_write`, parse the bytes you are about to upload and **assert `org_id` matches this org and `remote_filesystem.connection.site_id`/`drive_id` match the in-session values** — abort if they don't; (c) only then write. This is the source-identity complement to `aifs_write`'s size-verify: confirm you're uploading the *right* config, not just that it landed intact. **(d) Never re-select the staged file by `ls`/newest-mtime/glob (`ocstalereselect`, C.1.4.0)** — hold the exact `mktemp` path in a variable and reference *that* directly; an ambient "newest staged config" pick can grab an older same-session copy whose `org_id` still matches (so (b) passes) and silently revert the edit you just made. **(e) Assert content, not just identity:** before the write, confirm the staged config actually contains the change (e.g. the collection you're registering appears in `installed_collections`) so a stale same-org copy is caught pre-write, not only by the read-back.

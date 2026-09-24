@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.14.0
+version: 3.15.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -206,7 +206,7 @@ Run prerequisites and proceed to publish? [Y/N]
 
 If no prereqs were detected and at least one CHANGELOG entry was inferred: surface only the entries section and the same Y/N prompt.
 
-If neither prereqs nor entries were detected (Step 0 had no real changes): **first run the Standing Reconciles (6d/6e/6f from Step 6) — they run on every publish, including this no-op path (`standingreconcileunreachable`), and are idempotent no-ops on a healthy org** — then surface "Nothing has changed since the last publish." and halt cleanly.
+If neither prereqs nor entries were detected (Step 0 had no real changes): **first run the Standing Reconciles (6d/6e/6f/6g from Step 6) — they run on every publish, including this no-op path (`standingreconcileunreachable`), and are idempotent no-ops on a healthy org** — then surface "Nothing has changed since the last publish." and halt cleanly.
 
 On `N`: halt without running prereqs or writing CHANGELOG. Step 0's sync already happened; remote files reflect local state. Subsequent `@ai:publish-updates` re-runs will see no diff (idempotent) and report no-op.
 
@@ -341,7 +341,7 @@ For each collection in the current `installed_collections`:
 
 Compare `org_roles` arrays. If roles were added, removed, or had their `default_collections` modified: generate an `org-config-update` operation with a `changes` summary listing what shifted.
 
-If no operations were generated (nothing changed since last publish): **first run the Standing Reconciles (6d/6e/6f from Step 6) — unconditional on every publish, `standingreconcileunreachable`** — then surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
+If no operations were generated (nothing changed since last publish): **first run the Standing Reconciles (6d/6e/6f/6g from Step 6) — unconditional on every publish, `standingreconcileunreachable`** — then surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
 
 **On success:** Proceed to Step 4.
 
@@ -522,9 +522,9 @@ On admin **confirmation:** apply the backfill values together with the per-opera
 
 On admin **decline:** skip the backfill but still apply the per-operation updates from 6a/6b for the current publish. The drift state persists; next publish-updates run will surface the same prompt.
 
-#### Standing reconciles (6d–6f) — run on EVERY publish, INCLUDING an empty-diff / no-op publish (`standingreconcileunreachable`)
+#### Standing reconciles (6d–6g) — run on EVERY publish, INCLUDING an empty-diff / no-op publish (`standingreconcileunreachable`)
 
-The three reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`) heal drift that has **no content diff** — a revoked/absent all-members reader grant on core/marketplace, a stale member-folder handshake, a missing `resource_ids` block. Because that drift produces no publishable operations, these reconciles **MUST NOT sit behind the empty-diff early-halt**. Whenever `publish-updates` would otherwise halt with "Nothing has changed" (Step 0b, Step 3, or the rapid-re-run edge case), **run 6d/6e/6f FIRST, then halt.** On a normal (has-diff) publish they run here in Step 6 in the usual order. All three are idempotent no-ops on a healthy org, so running them unconditionally on every invocation is cheap and safe.
+The four reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`, 6g marketplace subscriptions + provenance) heal drift that has **no content diff** — a revoked/absent all-members reader grant on core/marketplace, a stale member-folder handshake, a missing `resource_ids` block. Because that drift produces no publishable operations, these reconciles **MUST NOT sit behind the empty-diff early-halt**. Whenever `publish-updates` would otherwise halt with "Nothing has changed" (Step 0b, Step 3, or the rapid-re-run edge case), **run 6d/6e/6f/6g FIRST, then halt.** On a normal (has-diff) publish they run here in Step 6 in the usual order. All four are idempotent no-ops on a healthy org, so running them unconditionally on every invocation is cheap and safe.
 
 (Fixes `standingreconcileunreachable`: a no-op publish previously exited at Step 0b/Step 3 before ever reaching Step 6, so a missing member-read grant — exactly the state 6e is designed to heal — was never auto-fixed. That made the C.1.4.4 `memberreadgrantnotauto` hardening inert in its target case, since an org whose only problem is a missing grant has nothing else to publish.)
 
@@ -568,6 +568,16 @@ Read `org-config.json` (already read in Step 6). If `resource_ids` is absent, OR
 3. Populate `resource_ids` via the **safe org-config rewrite rule** (unique `mktemp` staging, identity assert on `org_id` + `site_id`/`drive_id`, content assert that both ids are now non-null, never re-select the staged file by glob/mtime — same rule create-org uses). This is additive to the `installed_collections[]`/`agent_index_version` writeback in Step 6; fold it into the same atomic `org-config.json` write when possible, or write it as its own safe rewrite.
 
 Idempotent: skip silently if `resource_ids` already has both ids. core/marketplace/collection roots need nothing added — each already carries `folder_id` under `installed_collections[]`; nested items like `/shared/dist` need no id (reached by `id:{shared_root}/dist`). The `id:` prefix is REQUIRED wherever these ids are consumed — a bare `{folderId}/child` is treated as a literal path and fails. Cheap and safe to run every publish.
+
+#### 6g. Marketplace subscriptions + provenance back-fill (added in core 3.30.0 — multi-marketplace)
+
+Brings a pre-3.30.0 org onto the `standards.md` § "Marketplaces" model with **no behaviour change**. Read `org-config.json` (already read in Step 6).
+
+1. **Subscriptions.** If `marketplaces[]` is absent, write exactly the synthesised legacy entry defined in `standards.md` § "Legacy orgs": `id: "agent-index-public"`, `display_name: "Agent Index Marketplace"`, `enabled: true`, `namespace: null`, `skip_if_unavailable: false`; `source` = `{ "kind": "clone", "ref": "agent-index-resource-listings", "git_url": "https://github.com/agent-index/agent-index-resource-listings.git" }` if that clone exists under the install root, else `{ "kind": "url", "ref": <agent-index.json marketplace_directory_url> }`; `trust_anchor.git_url` = the same git URL for `clone`; `subscribed_date` = today, `subscribed_by` = this admin. **`ref` is relative to the install root — never write an absolute or `/sessions/…` path** (`appspathsandboxleak`).
+2. **Provenance.** For every `installed_collections[]` entry with **no `marketplace_id` key at all**, set `"marketplace_id": "agent-index-public"`. An entry whose key is present — including an explicit `null` (sideloaded) — is **never touched**: provenance is written at install and never recomputed. Exception: if a key-less entry's `name` does not appear in the public catalog's `collections[]` (read via the synthesised subscription), set `null` instead and list it in the publish summary as "recorded as sideloaded — no public catalog entry" so the admin can correct it. **`agent-index-core` and `agent-index-marketplace` are exempt from that exception and always get `"agent-index-public"`** — they are listed in `infrastructure-directory.json`, not in the marketplace catalog, so a catalog lookup would wrongly mark them sideloaded.
+3. Write via the **safe org-config rewrite rule** (unique `mktemp` staging, identity assert on `org_id` + `site_id`/`drive_id`, **content assert** that `marketplaces[]` is present and no `installed_collections[]` entry lacks a `marketplace_id` key, never re-select the staged file by glob/mtime). Fold into the same atomic `org-config.json` write as 6a/6b/6f when possible.
+
+Idempotent: once `marketplaces[]` exists and every entry has the key, this is a silent no-op. It never edits an existing subscription and never changes a present `marketplace_id` — subscription changes are `@ai:edit-org` → Manage marketplaces.
 
 ### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
 
