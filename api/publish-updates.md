@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.15.0
+version: 3.16.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -586,7 +586,7 @@ Idempotent: once `marketplaces[]` exists and every entry has the key, this is a 
 Run the **backend-distribution publish flow** (canonical definition: `templates/backend-distribution.md` § "Publish flow") against the artifacts touched by this publish:
 
 1. **Recompute the manifest.** For each directory file (from the local `resource-listings` clone) and the backend binary (host-reported SHA from the infra clone script), compute the SHA **per the Canonical SHA-256 rule** in `backend-distribution.md` (stored/git-blob LF bytes for directories — **never `aifs_read` stdout**; host-reported SHA for the binary). Diff against the current `/shared/dist/manifest.json` and upload only changed/new artifacts; read back and verify each upload with the canonical member-side recipe (stat `size` + `head -c` truncation).
-2. **Rewrite `/shared/dist/manifest.json`** with the new `org_release_tag` (= the core version just published), the refreshed artifact SHAs, and the **`collections[]` versions reconciled to what this publish set** (so `check-updates`/`apply-updates` read the correct "latest" per collection). Verify it reads back + parses.
+2. **Rewrite `/shared/dist/manifest.json`** with the new `org_release_tag` (= the core version just published), the refreshed artifact SHAs, and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot; abort on mismatch. Verify it reads back + parses.
 3. **Round-trip self-check (manifestsha guard):** after writing the manifest, re-verify the `infrastructure-directory.json` artifact via the member-side recipe and confirm the computed SHA equals the value just written. If it does not, the publish computed a SHA members will reject — **abort and fix** (do not report success). This is the gate that would have caught the `412094b4` vs `e1d549e4` mismatch at publish time.
 4. **Re-bake the bootstrap zip** binary if the backend binary changed (Step 12 / create-org parity).
 
@@ -601,7 +601,7 @@ If this publish changed nothing distributed (e.g. a docs-only org-config edit), 
 1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — standards.md.
 2. Confirm the fetched copy advertises the versions just published (and that `directory_version` itself was bumped — a listing content change under an unchanged `directory_version` is invisible to consumers; see bug `20260607-8d20ea22-131906-d1rv`).
 3. If the fetched copy does NOT reflect the publish: **the publish report must say so as a failure**, naming the stale or unbumped file. Do not report overall success. Typical causes: the listing push was missed, or `directory_version` wasn't bumped. Direct the admin to push/bump and re-run the check.
-4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read("/shared/dist/manifest.json")` and confirm it advertises the versions/`org_release_tag` just published AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
+4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read("/shared/dist/manifest.json")` and confirm it advertises the versions/`org_release_tag` just published, that **every `collections[]` version equals `org-config.json` `installed_collections[].version`** (3.31.0), AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
 
 If no listing/collection/binary was touched, skip steps 1–3 but still run step 4 (the dist manifest must always be current for members).
 
@@ -643,7 +643,8 @@ Never modify collection directories or any file outside the documented write sur
 - `/shared/updates/latest.json`
 - `/shared/updates/published-state.json`
 - `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` (ONLY for the `installed_collections[]` and `agent_index_version` writebacks documented in Step 6 — no other org-config fields are mutated)
+- `/org-config.json` — ONLY these fields, each written by the step named: `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
+- `/shared/dist/` (Step 6.5)
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
 

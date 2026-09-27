@@ -31,6 +31,8 @@
   "collections": [ { "name": "agent-index-core", "version": "3.18.0" }, { "name": "projects", "version": "4.0.0" } ]
 }
 ```
+**`collections[]` source (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`):** one entry per `org-config.json` → `installed_collections[]` entry with `status: "installed"`, carrying **that entry's `version`** — the version the org actually has on its backend. **Never** a catalog `current_version`: the catalog says what is *available*, the manifest says what the org *runs*. Before writing, assert every `collections[]` version equals the org-config version and the published-state version; abort on any mismatch. (Publish #076 took email-triage's catalog version 1.2.3 while the org ran 1.2.2, so members were told a version whose files were not on the backend.)
+
 `manifest.json` — not GitHub HEAD — is the answer to "what version is this org on, and is my copy correct." `check-updates` compares the member's installed state against it; `apply-updates`/`member-bootstrap` fetch artifacts by `path` and verify `sha256` before use.
 
 ## Canonical SHA-256 (MANDATORY — read this before computing any manifest SHA)

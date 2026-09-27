@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.3.0
+version: 3.4.0
 collection: agent-index-core
 description: Edit org configuration — update the admin list, manage marketplace subscriptions, or launch the marketplace to install or manage collections.
 stateful: false
@@ -218,7 +218,7 @@ Actions:
 1. **Subscribe to a catalog.**
    - Ask for the source. v1 accepts **`clone`** only for new subscriptions: the catalog repo's git URL. (`url` exists solely for the synthesised legacy entry; `backend` is reserved — refuse with "Backend-hosted catalogs aren't supported yet.")
    - If the repo is not already cloned under the install root, add it to the **infra clone manifest** and surface the committed `lib/clone/clone-repos` invocation per the `clone-manifest-emitter` subroutine (`templates/clone-script-generator.md`). **Never author a clone script and never run git from the sandbox** — the admin runs the committed script natively. Halt until the admin confirms it ran; then confirm the clone exists and its `origin` matches the git URL.
-   - Read the clone's `marketplace-directory.json`. **Refuse** if it lacks `marketplace_id`, if that id is already subscribed, if `namespace` is null (only the public catalog may be un-namespaced), if any entry violates its own namespace, if any *other* subscribed catalog offers a name in this namespace, or if this namespace overlaps an existing reservation. Name the offending entries.
+   - Read the clone's `marketplace-directory.json`. **Refuse** if it lacks `marketplace_id`, if that id is already subscribed, if any of its collection names is already offered by another subscribed catalog (unique names — core 3.31.0), if any of its names falls in a prefix another subscribed catalog reserves, if any *other* subscribed catalog offers a name in the prefix this catalog reserves, or if its reservation overlaps an existing one. Name the offending entries. A catalog may declare `namespace: null` (reserve nothing), and its own entries may use any names — namespaces only reserve, they do not restrict (3.31.0).
    - Show the admin what they are subscribing to — id, display name, namespace, entry count and names — and confirm.
    - Write the subscription (`source.ref` **relative to the install root**, never absolute — `appspathsandboxleak`; `trust_anchor.git_url`; `enabled: true`; `skip_if_unavailable: false`; `subscribed_date`/`subscribed_by`) via the **safe org-config rewrite rule** (see `create-org` Step 10: unique `mktemp` staging, identity assert, content assert that the new id is present, no glob/mtime re-select). Read back.
 2. **Disable / re-enable** — flip `enabled`. Confirm first when disabling a catalog that installed collections reference: "{n} installed collections came from this catalog. They stay installed; update checks will report them as 'source disabled' until you re-enable it."
@@ -226,7 +226,7 @@ Actions:
 4. **Toggle `skip_if_unavailable`** — explain before enabling: "If this catalog can't be read, listings will continue without it and say so. Leave off unless the source is known to be flaky."
 5. **Set a local display name** — only `display_name`; the `id` is the catalog's and never changes.
 
-There is no priority or ordering setting, by design (`standards.md` § "Collisions"). If the admin asks for one, explain that namespaces make collisions impossible and point to fork-and-rename for replacing a public collection.
+There is no priority or ordering setting, by design (`standards.md` § "Collisions"). If the admin asks for one, explain that names must be unique across subscribed catalogs, so a clash is always refused rather than resolved by ordering, and point to fork-and-rename for replacing a public collection.
 
 No publish is needed after a subscription change: the write above is the record, and subscription changes produce no member update operations — members never read catalogs.
 

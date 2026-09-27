@@ -1,5 +1,18 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.31.0] — 2026-09-27 — Multi-marketplace: unique names instead of mandatory prefixes; two publish-updates fixes
+
+**MINOR — relaxes a 3.30.0 rule; every 3.30.0-valid catalog stays valid.** Pairs with **agent-index-marketplace 2.21.0**.
+
+### Changed — collision rules (`standards.md` (v2.6.0))
+- **Unique names are the rule; namespaces are optional reservations.** 3.30.0 required every entry of a namespaced catalog to start with `{ns}-`, and every non-public catalog to declare a namespace, which forced a private catalog to hold one naming family (a private `acme-reports` could not sit beside `cx-studio`). Both requirements are removed. Now: a collection name may be offered by at most one enabled subscribed catalog; a clash is a **conflict**, refused for new installs and scoped to that name only. A declared `namespace` still reserves its prefix against *other* catalogs (an intruding entry is excluded and reported), but no longer restricts the catalog's own entries. Overlapping reservations are still a configuration error.
+- **Why the prefix wasn't needed:** silent shadowing requires a precedence rule, and agent-index has none — a clash is always refused, never auto-resolved. The prefix only prevented disruption, at the cost of forcing one naming scheme per private catalog.
+- **`edit-org` 3.4.0** — subscribe checks updated to match: refuses a duplicate name, an intrusion into another catalog's reserved prefix, or an overlapping reservation; no longer refuses `namespace: null` or non-prefixed entries.
+
+### Fixed — `publish-updates` 3.16.0
+- **Dist manifest `collections[]` now comes from installed versions** (`org-config.json` `installed_collections[]`, `status: installed`), never a catalog `current_version`, with an assert against org-config and the state snapshot before writing, and a Step 7 check after. Also specified in `templates/backend-distribution.md`. Bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2 (2026-09-24T01:31Z → 2026-09-25T17:20Z).
+- **Constraints write-surface list now names every `org-config.json` field the steps write** — `installed_collections[]` (6a, incl. `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g) — plus `/shared/dist/` (6.5). The 3.30.0 list omitted 6f/6g: the same contradiction shape that suppressed the 3.7.1 writeback. Bug `20260924-8d20ea22-015604-f386`.
+
 ## [3.30.0] — 2026-09-23 — Multi-marketplace: catalogs, subscriptions, provenance
 
 **MINOR — additive. An org that does not opt in notices nothing.** Pairs with **agent-index-marketplace 2.20.0** (which implements the consumer side) and **agent-index-resource-listings** (catalog identity fields). Release order: core → marketplace → resource-listings. Design record: `68-solution-design-multi-marketplace.md`.
@@ -1298,6 +1311,7 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` — reference schema for org-config.json
 - `standards.md` — open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 
 
 

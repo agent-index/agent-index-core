@@ -1,7 +1,7 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.5.0
+**Version:** 2.6.0
 **Maintained by:** agent-index
 **Last Updated:** 2026-09-23
 
@@ -236,7 +236,7 @@ structure" — and is promoted here to normative status because core's wholesale
 ### Reads go through aifs only (C.1.3 — `wrongconnectorfallback`)
 All remote agent-index content — org config, the registry, `/shared/...`, collection files, and **content shared to a member by another member** — is read through the `aifs_*` executor, never through an external file connector (a Microsoft 365 / Google Drive / Dropbox connector that happens to be connected in the session). When an `aifs_read` returns `PATH_NOT_FOUND` for an item a member can see in their own cloud portal, the correct response is to **diagnose it within the aifs model** (most often a cross-drive reference — see id-anchor addressing and the cross-drive read contract) and surface that, **not** to improvise by reaching for whatever connector is present (which silently bypasses the trust model, may target the wrong backend entirely, and gives non-reproducible results). A connector being connected is never a license to route agent-index reads around aifs.
 
-## Marketplaces: catalogs, subscriptions, provenance (normative — core 3.30.0)
+## Marketplaces: catalogs, subscriptions, provenance (normative — core 3.30.0; collision rules revised in 3.31.0)
 
 An org may consult **more than one marketplace catalog**. Three things are kept separate because they have different owners and different lifetimes. Design record: `68-solution-design-multi-marketplace.md`.
 
@@ -256,7 +256,7 @@ A catalog declares its own identity at the top level of `marketplace-directory.j
 |---|---|---|
 | `marketplace_id` | string | kebab-case, globally meaningful. Declared by the catalog, **never assigned by a subscriber** (APT/DNF assign repo ids locally, which makes provenance strings incomparable across installs — do not inherit that). |
 | `display_name` | string | human label. A subscriber may override it locally; the id never changes. |
-| `namespace` | string \| null | reserved name prefix. `null` only for the public Agent Index catalog. |
+| `namespace` | string \| null | optional reserved name prefix (3.31.0). `null` = the catalog reserves nothing. A reservation stops *other* catalogs from offering `{ns}-*` names; it does **not** restrict the catalog's own entries. |
 
 A catalog file with no `marketplace_id` is the legacy public catalog and is read as `marketplace_id: "agent-index-public"`, `namespace: null`. Entry schema (`collections[]`) is unchanged.
 
@@ -279,13 +279,18 @@ A catalog file with no `marketplace_id` is the legacy public catalog and is read
 
 Subscriptions are org policy: editable only by an admin, via `@ai:edit-org` → Manage marketplaces.
 
-### Namespaces
+### Unique names and optional namespaces (revised in core 3.31.0)
 
-- A catalog with `namespace: "{ns}"` may only contain entries whose `name` starts with `{ns}-`. The separator is a **hyphen** — collection names are kebab-case and are used verbatim as path segments (`/{collection}/api/…`, `members/{hash}/collections/{name}/`), so no other separator is legal.
-- No other subscribed catalog (including the public one) may offer a name starting with a reserved `{ns}-`.
-- Two reservations may not overlap: `{a}-` must not be a prefix of `{b}-` or vice versa.
-- Violations are refused **at subscribe time** and re-checked on every catalog read (a catalog can change after subscription). A violating catalog is treated as unavailable, never partially trusted.
-- A private catalog **cannot shadow** a public collection — there is deliberately no override or precedence mechanism. To replace a public collection, fork and rename.
+The rule that makes multiple catalogs safe is **unique names**, not prefixes. Namespaces are an optional extra reservation on top of it.
+
+- **Unique names.** A collection `name` may be offered by **at most one** enabled subscribed catalog. Two catalogs offering the same name is a **conflict**: that name is not installable from either until the admin resolves it (rename in one catalog, drop one entry, or disable one subscription). Only the conflicting name is affected — the rest of both catalogs stays usable. Refused at subscribe time; re-checked on every catalog read.
+- **Namespaces are optional reservations.** A catalog may declare `namespace: "{ns}"`. No *other* catalog may offer a name starting with `{ns}-`; an entry that does is an **intrusion** — that entry is excluded and reported, and the reserving catalog keeps the prefix. The reserving catalog's own entries may use any names — `{ns}-*` or not.
+- **Hyphen separator.** Collection names are kebab-case and are used verbatim as path segments (`/{collection}/api/…`, `members/{hash}/collections/{name}/`), so a reservation `{ns}` covers names starting `{ns}-`; no other separator is legal.
+- **Reservations may not overlap:** `{a}-` must not be a prefix of `{b}-` or vice versa. Overlapping reservations are a configuration error — both catalogs are unavailable until one is changed.
+- **Repo names are unconstrained.** Neither rule looks at git repository names; they appear only as an entry's `repo_url`.
+- **No shadowing, by construction.** There is no precedence between catalogs, so a same-named collection in another catalog can never silently replace one: a conflict is always refused, never auto-resolved. To replace a public collection, fork and rename.
+
+(3.30.0 required every entry of a namespaced catalog to start with `{ns}-`, and required every non-public catalog to declare a namespace. That forced a private catalog to hold a single naming family. Both requirements are removed in 3.31.0: shadowing is already prevented by the absence of precedence, and unique names prevent ambiguity. A 3.30.0-valid catalog is 3.31.0-valid unchanged.)
 
 ### Provenance — `installed_collections[].marketplace_id`
 
@@ -296,7 +301,7 @@ Subscriptions are org policy: editable only by an admin, via `@ai:edit-org` → 
 
 ### Collisions
 
-With namespaces enforced, two catalogs cannot legally offer the same name. If a bare-name lookup is nonetheless ambiguous (e.g. a legacy catalog without identity), **refuse and ask the admin** which catalog they mean. There is **no `priority` field and no pinning** — APT/DNF need those because a dependency solver must pick a candidate with no human present; agent-index has no solver and an admin is present at every install. Do not add one as a convenience.
+With unique names enforced, a bare-name lookup resolves to at most one catalog. A conflicting name (offered by two catalogs) is **refused for new installs**, naming both catalogs; the admin resolves it at the catalog. Installed collections are unaffected: update checks and upgrades look in the collection's **origin catalog only** (its `marketplace_id`), so a same-named entry appearing in another catalog cannot redirect an upgrade — it is surfaced as a warning. There is **no `priority` field and no pinning** — APT/DNF need those because a dependency solver must pick a candidate with no human present; agent-index has no solver and an admin is present at every install. Do not add one as a convenience.
 
 ### Legacy orgs
 
