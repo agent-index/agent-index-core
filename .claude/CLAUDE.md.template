@@ -175,6 +175,19 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'
 
 **Available tools:** `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_stat`, `aifs_delete`, `aifs_copy`, `aifs_get_permissions`, `aifs_search`, `aifs_auth_status`, `aifs_authenticate`
 
+**`aifs_write` takes its content one of three ways — give exactly one:**
+- `content` — the payload inline in the JSON args. It travels on the command line, so it is bounded by the OS argument limit (about 128 KiB). Fine for small writes.
+- `content_file` — a path to a local file the executor reads directly. **No size limit.** Use it for anything large, such as a project's `action-items.json`. The path must be readable from where the executor runs.
+- `content_stdin: true` — the payload piped on stdin. Also no size limit.
+
+Optional: `"encoding": "base64"` — with `content_file` or `content_stdin` the payload is taken as raw bytes; use it for binary files, because without it the payload is read as UTF-8 text and binary content is corrupted. With inline `content`, the string itself must be base64. `"if_revision": "{revision from aifs_stat}"` — write only if the file has not changed since; otherwise the write fails with `REVISION_CONFLICT`.
+
+```
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_write '{"path":"/shared/…","content_file":"/path/to/local-file.json","if_revision":"…"}'
+```
+
+If more than one content source is given, `content` wins, then `content_file`, then `content_stdin`, and the others are ignored without warning. Entries in `aifs_write_batch` accept `content_file` as well.
+
 `aifs_get_permissions` (read-only) is directly callable by any task — use it to inspect ACLs and as the independent-verification step of the verified-outcome gate. The permission-MODIFYING ops (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are NOT called directly; they are applied through the `permission-change-helper` skill (owner-reviewed, applied under the user's own credentials).
 
 **IMPORTANT — deprecated v2 artifacts:** If the local install contains `agent-index-core/tools/aifs-bridge/` (with `aifs-bridge.mjs` and `aifs-call.sh`), these are **obsolete v2 infrastructure** — do NOT use them. They reference `server.bundle.js` which no longer exists. The only supported invocation path is `mcp-servers/filesystem/aifs-exec.sh` as shown above.
