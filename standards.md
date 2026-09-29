@@ -1,9 +1,8 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.6.0
 **Maintained by:** agent-index
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-29
 
 ---
 
@@ -449,6 +448,24 @@ The adapter (gdrive ≥ 2.5.0) supports two addressing modes:
 - Use the format: `## [MAJOR.MINOR.PATCH] — YYYY-MM-DD`
 - List changes under `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` headings as applicable
 - For MAJOR versions: include a migration summary and link to the upgrade script
+
+---
+
+## Spec Document Currency
+
+**Applies to** root-level specification and guide documents in a collection — for example `README.md`, `ROADMAP.md`, `*-spec.md`, `*-guide.md`, this document, and any document a collection's own `collection.json` names in a `documents` list. **Excluded:** everything under `api/`, `setup/`, `internal/` and `upgrade/`. Those carry YAML frontmatter, and their currency is governed by the frontmatter-to-manifest contract, not by a markdown header.
+
+**The currency field is a date.** A currency header declares `Last Updated: YYYY-MM-DD`; `Last updated:` is an accepted alias, and bold and unbold forms are equivalent. Documents do not declare a document-level `Version` — that field is retired (Core Improvements decision `2026-09-21-retire-doc-level-version-field`), and the collection's release version is the document's version. A ROADMAP's `Current version:` names the collection's version, not the document's, and is checked separately. **The declared basis of currency is the header — not file mtime and not git history**, neither of which survives publication to a storage backend.
+
+**Maintenance.** Any content edit to a document that declares `Last Updated` must update it in the same change, to the date of the release that ships the edit.
+
+**Inline qualification.** A document that describes behavior the collection does not implement must say so **at the point of the claim**, not only in a status header. A reader who lands mid-document via a section link never sees the header.
+
+**Archive banners.** A document that is no longer maintained must carry an archive banner at its top naming the live authority. An archived document must not assert primacy over a maintained one.
+
+Preflight checks this set: see the developer collection's `preflight` task, Check 16. The check is advisory by design — a hard release gate on document headers gets routed around.
+
+When this document is retired, this section moves with the marketplace eligibility rules to the developer collection (Core Improvements decision `2026-09-22-retire-standards-md`).
 
 ---
 
@@ -1015,6 +1032,8 @@ Collections that need a capability type declare this in the `requires` array of 
 | `fallback` | string | Behavior when no provider is registered: `"skip_with_notice"`, `"prompt_manual"`, or `"error"`. |
 
 ### Capability Bindings
+
+> **Implementation status (core 3.31.0 — V1 partial).** Only **single-provider auto-bind** is implemented: when exactly one provider is registered for a capability type in `org-config.json` → `capability_providers`, a consumer binds to it directly. **The multi-provider binding model described in this section — `capability-bindings.json`, bindings chosen in the setup interview, per-binding resolution — is specified but not implemented.** No shipped setup template declares bindings, and nothing writes `capability-bindings.json`. Do not author against this section; author against the single-provider path and the `requires` → `fallback` behavior in § Consumer Declarations. The same note appears in `capability-provider-spec.md` § Capability Bindings.
 
 Consumer collections define named capability bindings — specific use cases that map to registered providers. Bindings are stored in a dedicated `capability-bindings.json` file in the member's local workspace:
 
