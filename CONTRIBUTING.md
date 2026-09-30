@@ -284,8 +284,20 @@ With no CI, the body is the only evidence a reviewer gets. Cover:
 - **Why** — the finding, bug id, or decision it addresses.
 - **Evidence** — what you verified and how. Say what you measured rather than what you believe.
 - **What is deliberately not included** — the scope edges. This is often the most useful section, because it tells the reviewer what *not* to assume you fixed.
-- **Open questions** — anything the maintainer must decide before merge.
+- **Open questions** — anything the maintainer must decide before merge. You may restate them here, but they live on the action item — see below.
 - **Implied version bump**, if any.
+
+### Decisions belong on the action item, not the PR body
+
+Anything that needs a decision from the maintainer goes on the **action item** the work is tracked under, as one consolidated message. The PR body may restate it. The item is where the question lives and where the answer goes.
+
+This is because answers to PR-body questions arrive as merges, and nobody reads a merge as an answer. Between 2026-08-25 and 2026-09-22, six questions and three findings went only into PR bodies. The result: a note shipped orphaned against the contributor's own recommendation, a duplicate bug, four questions carried as open for four weeks after they had been answered, and a review describing merged PRs as still awaiting review.
+
+In practice:
+
+- Put all open questions for an item in one numbered message, each answerable with a yes or no or a choice between options.
+- Say in the PR body which item carries them.
+- A finding that needs no decision goes in a bug report, not the PR body.
 
 ### When a large diff is unavoidable
 
