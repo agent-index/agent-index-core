@@ -1,8 +1,7 @@
 # Capability Provider Specification
 
 **Status:** Released (V1 partial — see § Capability Bindings)
-**Version:** 1.0.0
-**Last Updated:** 2026-04-05
+**Last Updated:** 2026-09-29
 
 ---
 
