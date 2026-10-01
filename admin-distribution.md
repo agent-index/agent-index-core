@@ -351,4 +351,4 @@ Org roles are stored in the `org_roles` array in `org-config.json`:
 - Created during `create-org` (optional) or via `edit-org` at any time
 - Editable by org admins via `edit-org`
 - Removing a role does not affect existing members — their installed capabilities remain
-- Adding a collection to a role's defaults triggers a session-start notice for existing members with that role who haven't installed it
+- Adding a collection to a role's defaults triggers a session-start notice for existing members with that role who haven't installed it.
