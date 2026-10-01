@@ -694,6 +694,7 @@ helper-go 0.4.0 bare-ID specs already work on My Drive unchanged (verified live 
 ### Added
 
 - **`standards.md` § "Cache-busting directory/version fetches"** — normative rule that any task fetching a `raw.githubusercontent.com` directory/version URL must append a unique cache-buster, so future authored tasks don't reintroduce the silent-staleness footgun.
+  > **Correction (2026-10-01).** This section no longer exists. It was replaced in [3.11.0] by `standards.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback", which supersedes the cache-buster rule.
 
 ### Notes
 
