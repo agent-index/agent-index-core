@@ -117,7 +117,7 @@ Emit, in this order:
    ```
    agent-index://apply?spec=outputs/permission-plan-{timestamp}.json
    ```
-   The fenced URL still requires deliberate user action (copy → paste into browser address bar), preserving the trust boundary. This dual-emission is normative per standards.md § "The agent does" — preflight enforces it.
+   The fenced URL still requires deliberate user action (copy → paste into browser address bar), preserving the trust boundary. This dual-emission is normative per standards.md § "Trust contract for the agent in the URL-handler invocation flow" — preflight enforces it.
 
 3. A single-sentence narration:
    > "Review the proposed changes and click Accept to apply with your own credentials. If the link above doesn't open a review page, your OS URL-scheme handler may not be registered — copy the URL from the code block into your browser, or run `@ai:member-bootstrap` to verify your install."
@@ -147,7 +147,7 @@ The Go binary is what the URL-scheme handler invokes. The binary lives at `<proj
 
 **Step 5 — Wait for the user to report the outcome.**
 
-Per standards.md line 582. The agent does not poll, does not invoke the binary, does not navigate the user. It waits for the user's next message in chat. Expected reports include "done", "accepted", "applied", "rejected", "canceled", "didn't work", or any natural-language signal that the review flow has reached terminal state. The agent interprets the report and proceeds to Step 6.
+Per standards.md § "Trust contract for the agent in the URL-handler invocation flow". The agent does not poll, does not invoke the binary, does not navigate the user. It waits for the user's next message in chat. Expected reports include "done", "accepted", "applied", "rejected", "canceled", "didn't work", or any natural-language signal that the review flow has reached terminal state. The agent interprets the report and proceeds to Step 6.
 
 If the user reports something ambiguous ("hmm", "interesting"), ask one clarifying question — "Did the changes apply, or are you still reviewing?" — and wait. Don't assume.
 
@@ -211,7 +211,7 @@ If the helper fails for an infrastructural reason (binary not found, browser lau
 
 - **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` directly.** This skill exists specifically because the agent isn't permitted to. The user's click on the `agent-index://` link is what initiates the privileged call; the URL-scheme handler invokes the binary; the binary calls the apply-script using the user's OAuth token.
 - **Never invoke the binary directly from the agent.** Per standards.md § "Trust contract for the agent in the URL-handler invocation flow" and the rewrite that landed in core 3.7.3 (closes bug `20260519-8d20ea22`), the agent emits the markdown link plus the code-fenced URL; the user's click is the privileged-call entry point. Do not bash-invoke `<go-binary> <spec>` from the skill — that would re-collapse the safety boundary the URL-scheme architecture exists to maintain.
-- **Always emit the code-fenced URL alongside the markdown link.** This is normative per standards.md § "The agent does." The pair-emission supports clients that strip custom-scheme links from rendered markdown (current Cowork desktop builds). The fenced URL still requires deliberate user action (copy → paste), so the trust boundary is preserved.
+- **Always emit the code-fenced URL alongside the markdown link.** This is normative per standards.md § "Trust contract for the agent in the URL-handler invocation flow". The pair-emission supports clients that strip custom-scheme links from rendered markdown (current Cowork desktop builds). The fenced URL still requires deliberate user action (copy → paste), so the trust boundary is preserved.
 - **Never modify the spec after the user submits it.** The spec the page POSTs back to the binary is the spec the apply-script runs. Editing it post-submission would defeat the review.
 - **Never retry an operation automatically without explicit member input.** Retries are member-driven via the page's Retry button or a fresh skill invocation. Don't insert auto-retry loops in the agent.
 - **Never poll `aifs_get_permissions` during the apply phase.** The apply-script does its own per-op verification and writes the outcome file at terminal state. Polling from the agent during the wait is wasted tokens and could race with the script.
