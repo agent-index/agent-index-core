@@ -1,9 +1,9 @@
 ---
 name: permission-change-helper
 type: skill
-version: 1.3.4
+version: 1.4.0
 collection: agent-index-core
-description: Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
+description: DEPRECATED in core 3.32.0, removed in 4.0.0 — use the core permission-changes procedure (internal/permission-changes.md). Kept only so collection versions not yet moved to the procedure keep working. Orchestrates permission-modifying operations (aifs_share, aifs_unshare, aifs_transfer_ownership) by emitting a canonical agent-index:// markdown link (with code-fenced URL fallback) that the user clicks to launch the review page via OS URL-scheme handler. Reads structured outcome JSON written by the helper binary; verifies post-state via aifs_get_permissions. The canonical agent-callable surface for any task that needs to modify access controls.
 stateful: false
 always_on_eligible: false
 dependencies:
@@ -18,9 +18,11 @@ external_dependencies:
 
 ## About This Skill
 
+> **Deprecated in agent-index-core 3.32.0; removed in 4.0.0.** New and updated workflows MUST use the core permission-changes procedure, `/agent-index-core/internal/permission-changes.md` (standards.md § "Permission changes: list, confirm, apply, verify"). This skill remains installed and working through core 3.x **only** so collection versions released before their move to the procedure keep working. Do not add new callers.
+
 The Permission-Change Helper is the canonical agent-callable surface for any task or skill that needs to modify access controls on the org's remote filesystem. Tasks like `invite-member`, `remove-member`, and any future flow that calls `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` go through this skill rather than calling those ops directly.
 
-The reason for the layering is documented in `agent-index-core/standards.md` under "Permission-Modifying Operations" and in the access-control project's decision record at `/shared/projects/access-control/decisions/permission-change-via-plan-page.md`. In short: agents are prohibited from making security-changing calls on the user's behalf, even with authorization, because agents can be manipulated. The helper sidesteps this by keeping the privileged call out of the agent's call stack — the agent prepares a structured proposal and surfaces it in the member's browser; the member's deliberate Accept click triggers a script that uses the member's existing OAuth token to make the actual call. The agent is upstream of the privileged action, never inside it.
+The reason for the layering is documented in `agent-index-core/standards.md` under "Permission changes: list, confirm, apply, verify" → "Deprecated: the permission-change-helper flow" and in the access-control project's decision record at `/shared/projects/access-control/decisions/permission-change-via-plan-page.md`. In short: agents are prohibited from making security-changing calls on the user's behalf, even with authorization, because agents can be manipulated. The helper sidesteps this by keeping the privileged call out of the agent's call stack — the agent prepares a structured proposal and surfaces it in the member's browser; the member's deliberate Accept click triggers a script that uses the member's existing OAuth token to make the actual call. The agent is upstream of the privileged action, never inside it.
 
 This skill is the agent-side bookend to the pre-built `agent-index-show-plan` binary. The canonical implementation is the native Go binary at `mcp-servers/permission-helper-go/agent-index-show-plan` (extension `.exe` on Windows). It's distributed via the binaries registry and installed by `apply-updates` Phase 1 step 7. Production-quality: real Drive API integration, OAuth refresh, custom URL scheme handler (`agent-index://`), per-platform installers.
 

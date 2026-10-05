@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.16.0
+version: 3.17.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -51,6 +51,8 @@ Optionally, the admin can provide:
 ### Step 0a: Pull Upstream Updates (added in core 3.5.0; only when `--check-upstream` flag is passed)
 
 If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` flag, skip this step entirely and proceed to Step 0.
+
+**Refused on channel orgs (core 3.32.0).** If org-config `distribution_channel` is set, do not run this step. It overwrites working trees from GitHub default-branch ZIPs, which would silently revert the org to `main`. Say: *"This org runs distribution channel {name}. Refresh its clones with the committed clone script instead (the clone-manifest emitter passes the channel), then publish."* Then continue from Step 0 without pulling.
 
 When `--check-upstream` is present, fetch the latest infrastructure source from GitHub before scanning local. This closes the manual `git pull` step from the admin's mental model — they say one verb and the task pulls upstream + syncs to remote + publishes.
 
@@ -253,6 +255,8 @@ Compute the current member's hash: SHA256(lowercase email from session context),
 
 If not an admin: surface "Only org admins can publish updates. The current admins are: {admin list}. Contact one of them if updates need to be published." Halt.
 
+**Channel consistency check (core 3.32.0).** Read `.agent-index/clone-resolution.json`. If any infra repo's recorded `channel` (absent = null) differs from org-config `distribution_channel`, **refuse to publish**: *"Your local clones were last refreshed for {recorded} but the org is set to {configured}. Refresh the clones (the clone-manifest emitter passes the org's channel), then publish."* This stops a channel org publishing tag clones, and a released org publishing channel clones, by accident.
+
 Read and assemble the current org state — this is the "truth" that members should converge to:
 
 1. **Infrastructure versions:** Read `agent-index-core/collection.json` and `agent-index-marketplace/collection.json` from the remote filesystem via `aifs_read`. Extract `version` from each.
@@ -319,7 +323,29 @@ Compare the current state (from Step 1) against `previous_state` (from Step 2) t
 
 For each infrastructure component (`agent-index-core`, `agent-index-marketplace`):
 - If current version > previous version: generate a `core-update` or `marketplace-update` operation with `from_version` and `target_version`
-- If versions are equal: no operation
+- If versions are equal: no operation (but see the channel rule below)
+
+**Channel orgs and channel changes: change detection by commit (core 3.32.0, standards.md § "Distribution channels").**
+
+**When the rule applies:**
+- org-config `distribution_channel` is set; **or**
+- it differs from `previous_state.distribution_channel` (treat absent as null; a channel was set, changed or cleared since the last publish); **or**
+- any `previous_state.commits[*].ref` starts with `channel/` (the org was on a channel and its backend may still hold candidate content).
+
+**The commit is read from what is actually on the backend after this publish, never just from the clone:**
+
+| Component | Commit / identity compared | Why |
+|---|---|---|
+| `agent-index-core`, `agent-index-marketplace` | `.agent-index/clone-resolution.json` `repos[<name>].commit` | Step 0 syncs these local clones to the backend in this same publish |
+| each installed collection | org-config `installed_collections[<name>].source_commit` | written by download-/upgrade-collection when they upload that commit's content; a refreshed clone isn't on the backend until upgrade-collection runs |
+| the adapter | the deployed `mcp-servers/filesystem/adapter.json` `exec_bundle_checksum` | the bundle reaches members only via the deployed copy (edit-org Step 5) and the bootstrap zip |
+
+Compare each with `previous_state.commits[<key>]`, keyed by the clone/collection name; the adapter is keyed `adapter`:
+- **Differs** (or no previous value) → generate the same operation type as for a version change (`core-update`, `marketplace-update`, `collection-update`, `adapter-bundle-update`), **whatever the version direction**, and add `ref` and `commit` (adapter: `checksum`) to the operation. A same-version candidate iteration and a move back to a lower released version both count.
+- **Equal** → no operation.
+- **A collection whose refreshed clone commit differs from its `source_commit`** isn't published yet. Note it in the draft as "run `@ai:upgrade-collection {name}` to bring the backend to the clone", instead of emitting an operation for content the backend doesn't have.
+
+Production orgs (no channel before or now) keep the version rule above unchanged.
 
 **Collection changes:**
 
@@ -455,7 +481,10 @@ Append the new entry to `entries` array. Write the full `update-log.json` back v
 
 **Write the state snapshot:**
 
-Write the current state object (assembled in Step 1) to `/shared/updates/published-state.json` via `aifs_write("/shared/updates/published-state.json", ...)`. This becomes the baseline for the next `publish-updates` run.
+Write the current state object (assembled in Step 1) to `/shared/updates/published-state.json` via `aifs_write("/shared/updates/published-state.json", ...)`. This becomes the baseline for the next `publish-updates` run. **From core 3.32.0 the snapshot also records `distribution_channel` and a `commits` map** `{<name>: {ref, commit}}`, for every org, channel or not:
+- core and marketplace from `clone-resolution.json`;
+- collections from `installed_collections[].source_ref` / `source_commit`;
+- `adapter: {ref, checksum}` from the deployed `adapter.json`. Older snapshots without `commits` are treated as "no previous commit".
 
 **Write the latest ID file:**
 
@@ -549,13 +578,33 @@ Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...
 
 Ensure the all-members group can read the two infrastructure roots members need — `/agent-index-core/` and `/agent-index-marketplace/` — so a non-drive-member's `member-bootstrap` can read core + marketplace capability definitions (without these, member-bootstrap can't reach core even by id-anchor: id-addressing fixes *addressing*, not *permission*). create-org (3.24.0+) grants these at install; this standing check **back-fills orgs created before that**.
 
-**Extended in C.1.5.0 (`collreadgrantmissing`) to cover every installed collection code dir, not just the two infrastructure roots.** The same member-read requirement applies to each installed collection: a non-drive-member reads a collection's capabilities only if the all-members group holds reader on its code dir (`id:{folder_id}`). install-collection grants this at install, but a collection installed before that step existed (e.g. `client-intelligence`), or whose grant Accept was rejected/timed-out (install-collection does NOT roll back on that), is left structurally unreadable with no other self-heal. So 6e now reconciles the all-members reader grant on **`/agent-index-core/`, `/agent-index-marketplace/`, AND every `org-config.json` `installed_collections[].folder_id`** (skip any entry with `status: "removed"`; for an entry lacking a stored `folder_id`, `aifs_stat("/{name}")` to resolve it, same as install-collection). Collect every root whose `all@` reader grant is absent.
+**Extended in C.1.5.0 (`collreadgrantmissing`) to cover every installed collection code dir, not just the two infrastructure roots.** The same member-read requirement applies to each installed collection: a non-drive-member reads a collection's capabilities only if the all-members group holds reader on its code dir (`id:{folder_id}`). install-collection grants this at install, but a collection installed before that step existed (e.g. `client-intelligence`), or whose grant was declined or failed at install (install-collection does NOT roll back on that; it records `member_read_grant: "pending"`), is left structurally unreadable with no other self-heal. So 6e now reconciles the all-members reader grant on **`/agent-index-core/`, `/agent-index-marketplace/`, AND every `org-config.json` `installed_collections[].folder_id`** (skip any entry with `status: "removed"`; for an entry lacking a stored `folder_id`, `aifs_stat("/{name}")` to resolve it, same as install-collection). Collect every root whose `all@` reader grant is absent.
 
-For each of `/agent-index-core/` and `/agent-index-marketplace/`: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}`. If `{all_members_group}` is already a reader, **skip silently** (idempotent — the common case on a healthy org).
+For each root collected above: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}` (include inherited). If `{all_members_group}` is already a reader: don't add a change, and **skip it silently** (idempotent — the common case on a healthy org). In that case, if the root is an installed collection whose `member_read_grant` is `"pending"` (e.g. the grant was later applied by hand), set it to `"granted"`. If the reader grant is missing, the root goes into the table below.
 
-**If either grant is MISSING, hard-surface it via the permission-change-helper — do NOT attempt a direct `aifs_share` and do NOT defer it (`memberreadgrantnotauto`).** In a publish context the agent cannot apply a permission change directly (the agent-side safety boundary the helper exists to navigate), and the old "direct path, else silently skip" wording meant the grant was quietly dropped — leaving members unable to read core/marketplace, the exact block this heals, until an admin happened to run a separate migration. Instead: build ONE spec containing the missing reader grant(s) — one `share` op `{ "op": "share", "resource": "id:{folder_id}", "recipient": "{all_members_group}", "role": "reader" }` for each missing root (core, marketplace, AND any installed-collection code dir) — via the committed **`build-permission-spec`** CLI (`agent-index-core/lib/permission-spec`; it writes to the canonical `<project_dir>/outputs/` path — `permspecscratchpad` — and normalizes the op/recipient fields), and **surface it as an unmissable, required completion step**, not a footnote: emit the `agent-index://apply?spec=…` review link AND the headless `--cli <spec path>` command, and state the consequence plainly — *"members cannot read core/marketplace until you Accept this."* Do NOT report the publish as fully complete while this grant is outstanding. After the admin Accepts, re-run `aifs_get_permissions` to verify the grant landed. Admin-side only (members cannot self-provision read access).
+**If any grant is MISSING, apply it through the core permission-changes procedure, and do NOT defer it (`memberreadgrantnotauto`).** The old "direct path, else silently skip" wording meant the grant was quietly dropped. Members then stayed unable to read core/marketplace (the exact block this heals) until an admin happened to run a separate migration. Instead, follow `/agent-index-core/internal/permission-changes.md` with one table holding every missing grant:
 
-This is cheap and safe to run every publish; on a healthy org it is a silent no-op, and on an org missing the grant it produces a single one-click review rather than a deferred, easily-missed migration.
+```json
+{
+  "calling_task": "publish-updates",
+  "purpose": "Let all members read the org's core, marketplace and installed collection files",
+  "confirmer": "admin",
+  "changes": [
+    { "op": "share", "resource": "id:{folder_id}", "resource_label": "{root name} code folder", "is_folder": true,
+      "recipient": "{all_members_group}", "role": "reader", "reason": "Members need read to load capability definitions", "source": "org_config" }
+  ]
+}
+```
+
+That is one `share` row per missing root: core, marketplace, and any installed-collection code dir.
+
+- State the consequence plainly with the table: *"members cannot read {roots} until these are applied."*
+- **Do NOT report the publish as fully complete** unless the procedure returns `complete`.
+- For each installed collection whose row ends `applied` or `skipped_noop`, set its org-config `member_read_grant` to `"granted"` (revision-aware write). Leave any other row's collection at `"pending"`, and list it as the outstanding completion step.
+
+Admin-side only (members cannot self-provision read access).
+
+This is cheap and safe to run every publish; on a healthy org it is a silent no-op, and on an org missing the grant it produces a single confirm-and-apply table rather than a deferred, easily-missed migration.
 
 #### 6f. `resource_ids` back-fill reconcile (groupshareapivisibility — self-heal for existing orgs)
 
@@ -586,7 +635,7 @@ Idempotent: once `marketplaces[]` exists and every entry has the key, this is a 
 Run the **backend-distribution publish flow** (canonical definition: `templates/backend-distribution.md` § "Publish flow") against the artifacts touched by this publish:
 
 1. **Recompute the manifest.** For each directory file (from the local `resource-listings` clone) and the backend binary (host-reported SHA from the infra clone script), compute the SHA **per the Canonical SHA-256 rule** in `backend-distribution.md` (stored/git-blob LF bytes for directories — **never `aifs_read` stdout**; host-reported SHA for the binary). Diff against the current `/shared/dist/manifest.json` and upload only changed/new artifacts; read back and verify each upload with the canonical member-side recipe (stat `size` + `head -c` truncation).
-2. **Rewrite `/shared/dist/manifest.json`** with the new `org_release_tag` (= the core version just published), the refreshed artifact SHAs, and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot; abort on mismatch. Verify it reads back + parses.
+2. **Rewrite `/shared/dist/manifest.json`** (`dist-manifest/2`) with the new `org_release_tag` (= the core version just published), `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json`, the refreshed artifact SHAs, and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot; abort on mismatch. Verify it reads back + parses.
 3. **Round-trip self-check (manifestsha guard):** after writing the manifest, re-verify the `infrastructure-directory.json` artifact via the member-side recipe and confirm the computed SHA equals the value just written. If it does not, the publish computed a SHA members will reject — **abort and fix** (do not report success). This is the gate that would have caught the `412094b4` vs `e1d549e4` mismatch at publish time.
 4. **Re-bake the bootstrap zip** binary if the backend binary changed (Step 12 / create-org parity).
 
@@ -598,7 +647,7 @@ If this publish changed nothing distributed (e.g. a docs-only org-config edit), 
 
 **Propagation check (added in core 3.11.0 — closes the "pushed ≠ visible" class structurally).** If this publish involved any upstream listing change (directory files in `agent-index-resource-listings`: infrastructure, marketplace, adapter, or binary directories — whether pushed in this session or assumed pushed beforehand), verify the org-visible state BEFORE reporting success:
 
-1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — standards.md.
+1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — standards.md. **On a channel org,** don't fetch the GitHub default branch (it never advertises channel versions). Read the local catalog clone at its resolved ref (`git show <ref>:<file>`, read-only) and apply steps 2–3 to that.
 2. Confirm the fetched copy advertises the versions just published (and that `directory_version` itself was bumped — a listing content change under an unchanged `directory_version` is invisible to consumers; see bug `20260607-8d20ea22-131906-d1rv`).
 3. If the fetched copy does NOT reflect the publish: **the publish report must say so as a failure**, naming the stale or unbumped file. Do not report overall success. Typical causes: the listing push was missed, or `directory_version` wasn't bumped. Direct the admin to push/bump and re-run the check.
 4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read("/shared/dist/manifest.json")` and confirm it advertises the versions/`org_release_tag` just published, that **every `collections[]` version equals `org-config.json` `installed_collections[].version`** (3.31.0), AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
@@ -608,6 +657,8 @@ If no listing/collection/binary was touched, skip steps 1–3 but still run step
 After Step 5, Step 6, and the propagation check succeed, surface confirmation:
 
 > "Update instructions published (entry #{id}). Members will see these on their next session start and can apply them with '@ai:update'."
+>
+> {channel org: "This org runs distribution channel **{name}** (unreleased code): {n} repo(s) from channel/{name}, the rest from release tags."}
 >
 > **What members will experience:**
 > - On next session start: a notice that updates are available
@@ -643,7 +694,7 @@ Never modify collection directories or any file outside the documented write sur
 - `/shared/updates/latest.json`
 - `/shared/updates/published-state.json`
 - `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` — ONLY these fields, each written by the step named: `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
+- `/org-config.json` — ONLY these fields, each written by the step named: `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent), `installed_collections[].member_read_grant` (6e, 3.32.0). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
 - `/shared/dist/` (Step 6.5)
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.

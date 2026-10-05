@@ -17,8 +17,11 @@
 ## manifest.json schema
 ```json
 {
-  "schema": "dist-manifest/1",
+  "schema": "dist-manifest/2",
   "org_release_tag": "v3.18.0",            // headline (core version); per-repo versions in artifacts[]
+  "channel": null,                         // core 3.32.0: null = released code; else the org's distribution channel
+  "channel_head": null,                    // channel orgs: "channel/dev-1@<short core commit>"
+  "sources": { "agent-index-core": { "ref_type": "tag", "ref": "v3.18.0", "commit": "…", "version": "3.18.0" } },  // from .agent-index/clone-resolution.json
   "generated_at": "<ISO>",
   "generated_by": "<admin member_hash>",
   "artifacts": [
@@ -31,6 +34,8 @@
   "collections": [ { "name": "agent-index-core", "version": "3.18.0" }, { "name": "projects", "version": "4.0.0" } ]
 }
 ```
+**`dist-manifest/2` (core 3.32.0, distribution channels):** adds `channel`, `channel_head` and `sources{}` (one entry per published repo, copied from the admin's `.agent-index/clone-resolution.json`: `ref_type`, `ref`, `commit`, `version`). Readers MUST accept `/1` (no channel fields = released code). Members' session-start banner reads `channel` (via the local mirror). `sources` serves audit and the live-test runbook's build check.
+
 **`collections[]` source (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`):** one entry per `org-config.json` → `installed_collections[]` entry with `status: "installed"`, carrying **that entry's `version`** — the version the org actually has on its backend. **Never** a catalog `current_version`: the catalog says what is *available*, the manifest says what the org *runs*. Before writing, assert every `collections[]` version equals the org-config version and the published-state version; abort on any mismatch. (Publish #076 took email-triage's catalog version 1.2.3 while the org ran 1.2.2, so members were told a version whose files were not on the backend.)
 
 `manifest.json` — not GitHub HEAD — is the answer to "what version is this org on, and is my copy correct." `check-updates` compares the member's installed state against it; `apply-updates`/`member-bootstrap` fetch artifacts by `path` and verify `sha256` before use.
@@ -48,10 +53,10 @@ Concrete, deterministic recipe (no trailing-newline ambiguity):
 Both sides MUST follow this. A publish that computed the SHA any other way will be rejected by a correct member verifier.
 
 ## Publish flow (admin side — create-org Phase 2, publish-updates)
-Precondition (process-enforced): the admin's local clones are present and at the expected release tag. **Refuse to publish if any clone is behind its tag** (don't silently push a stale version to members).
+Precondition (process-enforced): the admin's local clones are present and at the refs `.agent-index/clone-resolution.json` records (release tags; on a channel org, `channel/<name>` heads where the branch exists, release tags elsewhere, which is legitimate fallback). **Refuse to publish when the record's channel differs from org-config `distribution_channel`** (publish-updates Step 1's channel consistency check), and when a clone is missing. Don't silently push a stale or mixed set to members.
 1. For each directory file (from the local `resource-listings` clone) and the backend binary (from the admin's host, staged by the clone script): compute SHA-256 **per the Canonical SHA-256 rule above** (stored/git-blob LF bytes for directories; host-reported SHA for the binary). Never hash `aifs_read` stdout.
 2. **Diff against the current backend `manifest.json`** — upload only artifacts whose SHA changed (or are new). For each upload, **read back and verify the stored SHA** using the canonical member-side recipe (stat `size` + `head -c` truncation) so the value written to the manifest is provably what a member will compute (catches the mount-truncation/torn-write class on large binaries AND the trailing-newline class — `shell-first` + verify + retry).
-3. Rewrite `manifest.json` with the new `org_release_tag`, artifact SHAs, and collection versions; verify it reads back + parses. **Round-trip self-check:** after writing, re-verify at least the `infrastructure-directory.json` entry via the member-side recipe and confirm it matches the value just written — if it doesn't, the publish computed the SHA wrong; abort and fix rather than shipping a manifest members will reject.
+3. Rewrite `manifest.json` with the new `org_release_tag`, `channel`/`channel_head`/`sources` (from the resolution record), artifact SHAs, and collection versions; verify it reads back + parses. **Round-trip self-check:** after writing, re-verify at least the `infrastructure-directory.json` entry via the member-side recipe and confirm it matches the value just written — if it doesn't, the publish computed the SHA wrong; abort and fix rather than shipping a manifest members will reject.
 4. **Publish the FULL binary matrix, and do NOT bake any binary into the bootstrap zip (`regenzipnobinary`).** Upload **every supported os×arch build** of the pinned binary version for this backend to `binaries/` — one file + one `binaries[]` manifest entry (`os`/`arch`/`sha256`) per build — so a member on any supported platform can fetch a runnable binary, not just members who share the admin's arch. This applies at create-org AND on every binary-version change (`pin-binary-version`/`publish-updates`). The bootstrap zip carries **no** arch-specific binary (the admin can't know each member's arch at build time); members fetch their-arch build from `binaries/` at bootstrap and on update. Source the all-platform builds from the signed release (`build-all.sh`), verifying each against its published per-platform SHA.
 Idempotent: an unchanged artifact is a no-op; safe to re-run after a partial failure.
 

@@ -15,9 +15,10 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 1. Detect `host_os`, `host_arch`, `install_root`, and (infra) `backend`. Assemble the `repos[]` set for the mode:
    - **infra:** `agent-index-core`, `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`.
    - **collections:** the selected collection repo(s), each `{ name, git_url }` (+ optional `version` from `marketplace-directory.json` `current_version`, used only to disambiguate a zero-tag branch-HEAD repo from a phantom).
+   - **`channel` (core 3.32.0, REQUIRED field, may be null):** the org's distribution channel. Read org-config `distribution_channel`; before org-config exists (create-org Phase 1), read the admin's `agent-index.json` `distribution_channel`. **Always pass it.** A manifest without it makes a channel org silently fall back to released code, the revert the channels design exists to prevent. `null` = released code.
 2. Write the **manifest** to `<install_root>/.agent-index/clone-manifest.json` (torn-write discipline: read it back and confirm before surfacing). Shape:
    ```json
-   { "mode": "infra|collections", "host_os": "...", "host_arch": "amd64|arm64",
+   { "mode": "infra|collections", "channel": null, "host_os": "...", "host_arch": "amd64|arm64",
      "install_root": "<abs>", "backend": "gdrive|onedrive",
      "repos": [ { "name": "...", "git_url": "https://.../x.git", "version": "3.28.0" } ] }
    ```
@@ -29,16 +30,17 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 The two-mode split (infra vs collections) is unchanged and is expressed by the manifest `mode`. The two-script split at create-org still exists because collection selection is interactive and the catalog only appears after the infra clone lands.
 
 ## Invariants preserved (now enforced in `lib/clone/`, not re-derived per run)
-- Infra repos tag-pinned to the highest `v*` (array-context `singletag` guard); collections default-branch HEAD-pinned (`colltags`).
+- **Ref decision lives in `lib/clone/resolve-refs.js` (core 3.32.0), shared by both drivers.** A repo with branch `channel/<channel>` comes from that branch head. Otherwise infra repos are tag-pinned to the highest `v*` (numeric semver; this fixes the bash first-field sort bug) and collections are default-branch HEAD-pinned (`colltags`).
+- Every run writes `<install_root>/.agent-index/clone-resolution.json` (`clone-resolution/1`: channel; per repo ref_type, ref, commit, version). Publishing, update detection and displays read it.
 - Three-way discrimination: tag exists -> checkout; zero tags AND cloned `collection.json`/`adapter.json` version == cataloged -> branch-HEAD SUCCESS; has tags but not this one (or zero tags + version mismatch) -> fail loud, no `main` fallback (`tagnofallback`).
 - `clonescriptdirty`: clear `index.lock`, `reset --hard`, continue-past-failure with a per-repo summary.
 - Binary: backend-matched entry (`binwrongbackend`), version from `current_version` (`binfield`), TLS 1.2 (`tls12`), sha256-verify-or-abort, `signing` handling, darwin bundle registration (`macosregister`).
 - Scripts are committed ASCII, apostrophe-free (`ps1nonascii`, `clonescriptps1`) -- verified once at authoring, not re-risked each run.
 
 ## After the admin runs it (caller responsibility -- unchanged)
-- Confirm clones present at expected tags (refuse to proceed on a missing/behind clone).
+- Confirm clones are present at the refs `clone-resolution.json` records (refuse to proceed on a missing clone or a FAILED line). On a channel org, expect `channel/<name>@…` lines for repos that have the branch and `(release tag)` for the rest.
 - Infra mode: read the now-local `marketplace-directory.json` to drive collection selection; trust the host-reported binary SHA for the dist publish (`binmountstale`).
-- Diff the local clone against the backend and republish only what changed; compute the adapter bundle checksum on git-blob LF bytes (`git show HEAD:dist/aifs-exec.bundle.js`), not the working tree.
+- Diff the local clone against the backend and republish only what changed; compute the adapter bundle checksum on git-blob LF bytes (`git show HEAD:dist/aifs-exec.bundle.js`), not the working tree. (HEAD is the resolved ref: a tag or a channel head.)
 
 ## Notes
 - If `lib/clone/` scripts are ever changed, that is a normal versioned code change (bump core, changelog, preflight) -- NOT an agent edit at run time. This is the whole point of level-3: the logic is reviewed and tested once.

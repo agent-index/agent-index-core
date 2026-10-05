@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.10.0
+version: 3.10.1
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -292,6 +292,8 @@ status: connected
 ```
 
 **Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
+
+> **Deprecated in core 3.32.0 — now optional.** Core tasks and every collection moved in the 3.32.0 wave make permission changes through the core permission-changes procedure, which needs no binary and no URL handler. The helper is only used by collection versions not yet moved, and is removed in core 4.0.0. **Treat everything in this step as optional:** install/register it only if the org still runs such a collection version; offer the command once; never block onboarding on it; never re-surface it; never tell the member sharing won't work without it.
 
 **Release C + `regenzipnobinary` — the bootstrap zip carries NO binary; fetch the member's-arch build from `/shared/dist/binaries/` as an onboarding step (never from GitHub).** The zip is arch-neutral because the admin cannot know each member's os/arch at build time. So member-bootstrap MUST install the binary here — do **not** defer it to the member's first share (the `regenzipnobinary` miss was onboarding completing without a binary, leaving the member to hit `binary_not_found` at first share). Steps: **detect the host `os`/`arch`; select the matching build** from the manifest's per-backend×os×arch `binaries[]`; **`aifs_read` that specific build** from `/shared/dist/binaries/`; **SHA-verify** it against its own manifest entry; place it (shell-first + read-back) at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`; write `version.txt`; then prompt `--register` (below). This is the same arch-select-and-fetch as `apply-updates` Step 1.6. **If no build is published for the member's `<os>/<arch>`, FAIL LOUD** — "no permission-helper build published for your platform (`<os>/<arch>`) — ask your admin to publish it via `@ai:pin-binary-version` / `@ai:update`" — and do **not** report onboarding complete with a missing/mismatched binary. **Never fetch it from GitHub.**
 

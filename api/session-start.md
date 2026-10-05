@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.0.0
+version: 3.1.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -179,6 +179,8 @@ Queue notices for Step 8 based on fallback results (only if the update instructi
 - If capability upgrades are available (member's version behind collection version):
   > "{N} of your installed capabilities can be upgraded. Say '@ai:setup' to upgrade, or '@ai:check-updates' for details."
 
+**Distribution channel banner (core 3.32.0):** read the local `agent-index.json` `distribution_channel` (falling back to `/shared/dist/manifest.json` `channel` if the local field is absent and Step 2 confirmed connectivity). If set, queue an **advisory** notice, shown on every session in every verbosity except `silent`: *"This org runs distribution channel **{name}** (unreleased code for testing)."* On a channel org, skip the adapter bundle check below. It compares against the public released directory, which a channel org intentionally doesn't follow. Use `@ai:check-updates` instead.
+
 **Adapter bundle check:** If `aifs_*` tools are available, read the local `adapter.json` from `mcp-servers/filesystem/adapter.json` in the project directory. Compare `bundle_built_at` against the remote adapter directory entry's `current_version` by reading the remote adapter's `adapter.json` from the adapter directory (fetched via the `filesystem_adapter_directory_url` in `agent-index.json`, or from a cached copy). If the local adapter version is behind the directory version, or if `bundle_built_at` is more than 30 days old and cannot be compared: queue a notice for admins only (check whether the current member is in the `admins` list from org-config):
 
 > "A newer version of the filesystem adapter is available. The current bundle was built on {bundle_built_at date}. Say '@ai:edit-org' and choose 'Update adapter bundle' to download the latest version and regenerate the bootstrap zip for your members."
@@ -251,7 +253,7 @@ Collect all queued notices from Steps 2–7. Surface them to the member in this 
 Then confirm session readiness at the member's configured `session_summary_verbosity` level:
 
 **`brief` (default):**
-> "Ready. {N} skills and tasks loaded. {Any notices.}"
+> "Ready. {N} skills and tasks loaded. {Any notices.}" (On a channel org the channel banner is one of the notices.)
 
 **`detailed`:**
 > "Session ready for {member display name} — {role display name}.

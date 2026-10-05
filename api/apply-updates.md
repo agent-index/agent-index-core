@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 3.16.2
+version: 3.17.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -95,9 +95,9 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 1. If the local member is NOT in `org-config.json` `admins[]`: skip Migration 4 entirely (silent).
 2. Read `org-config.json` → `installed_collections[]` (status `installed`). For each collection `C`:
    - **folder_id capture:** if `C.folder_id` is absent/empty, `aifs_stat("/{C.name}")` to resolve its Drive ID. If resolved, stage `C.folder_id = <id>` for a single revision-aware `org-config.json` write at the end. If `/{C.name}` can't be stat'd (not yet on remote / ambiguous), note and skip that collection's capture.
-   - **reader-grant check:** `aifs_get_permissions("/{C.name}")`. If `all@{domain}` lacks `reader` (and isn't already covered by a broader grant), add a `share` op (recipient `all@{members_group}`, role `reader`, resource `id:{C.folder_id}` if captured this run, else `/{C.name}`) to a single batched permission-change-helper spec.
-3. **Apply:** if any folder_id was staged, write `org-config.json` once (revision-aware, `if_revision`). If any reader grants are needed, invoke `permission-change-helper` ONCE with the batched spec — the admin reviews and Accepts all missing grants in one page (verified-outcome HARD GATE; idempotent — skip if the grant already exists). Do not write a pointer/scope; these are infrastructure grants.
-4. Surface a one-line summary: "✓ Backfilled collection access: {n} folder_id(s) captured, {m} read grant(s) provisioned." Idempotent: on a fully-backfilled org this migration is a no-op (every collection has folder_id and the grant).
+   - **reader-grant check:** `aifs_get_permissions` on `id:{C.folder_id}` when a folder_id is known (stored or captured this run), else `/{C.name}`. If `{all_members_group}` already holds `reader` (directly or inherited) and `C.member_read_grant` is `"pending"`, stage `member_read_grant: "granted"`. If it lacks `reader`, add a change `{op:"share", resource: "id:{C.folder_id}" (whenever a folder_id is known, else "/{C.name}"), recipient: "{all_members_group}", role: "reader", reason: "Members need read to load {C.name} capabilities", source: "org_config"}` to one list.
+3. **Apply:** if any reader grants are needed, follow `/agent-index-core/internal/permission-changes.md` ONCE with that list (`calling_task: "apply-updates"`, `confirmer: "admin"`, purpose "Let all members read installed collections"). The admin sees and confirms every missing grant in one table. For each collection whose row ends `applied` or `skipped_noop`, stage `member_read_grant: "granted"`; leave the others `"pending"` (verified-outcome gate). Then, if any folder_id or `member_read_grant` was staged, write `org-config.json` once (revision-aware, `if_revision`). Do not write a pointer/scope; these are infrastructure grants.
+4. Surface a one-line summary: "✓ Backfilled collection access: {n} folder_id(s) captured, {m} read grant(s) provisioned{, k pending}." Idempotent: on a fully-backfilled org this migration is a no-op (every collection has folder_id and the grant).
 5. Never block the update on a backfill failure — surface what couldn't be done and continue; the next admin update retries.
 
 **Migration 5 — `agent_index_version` field sync (introduced core 3.22.1; direction corrected in 3.22.3, `migration5wrongdir`):**
@@ -108,6 +108,7 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 2. If `org-config.agent_index_version` is present and **either** local field differs from it, set **both** `agent-index.json.version` AND `member-index.json.agent_index_version` to the org-config value (verify-after-write each). Surface one line: "✓ Synced local version fields to org core version {version}." Otherwise silent.
 3. If `org-config.json` can't be read (offline/transient), do **nothing** — never reconcile two local fields against each other (that's the `migration5wrongdir` footgun: it can't tell which is stale). Skip and retry next run.
 4. Idempotent no-op once all three agree. Never block the update on failure.
+5. **Channel mirror (core 3.32.0).** Also copy org-config `distribution_channel` (null if absent) into local `agent-index.json` `distribution_channel` when they differ. It's display-only for members (session-start's banner; members never clone). Surface "✓ This org runs distribution channel {name}" only when it changes.
 
 **Migration 6 — `layoutdrift`: remove stale unqualified install-dir duplicates (introduced core 3.28.0, closes `layoutdrift`).**
 
@@ -172,6 +173,8 @@ The merge algorithm collapses all pending update entries into a single set of op
 - `collection_installs` — map of collection name → single operation
 - `collection_removes` — map of collection name → single operation
 - `org_config_updates` — array of change descriptions (accumulated, not deduplicated — org config changes don't supersede each other cleanly)
+
+**Commit-carrying operations (core 3.32.0, distribution channels).** An operation that carries `ref`/`commit` (published by a channel org, or on a channel switch) is a real change **even when its `target_version` equals the member's installed version**, or is lower (a move back to released code). Never drop it as "already at that version". Apply it like any update of its type, and record the applied commit in `member-index.json` `applied_commits[<repo>]`. Latest-supersedes merging works as usual: the latest entry's commit wins.
 
 **Walk each pending entry chronologically** and apply its operations to the merged plan:
 
@@ -635,6 +638,7 @@ The merge algorithm in Step 3 must produce a correct net plan regardless of how 
 - For any given target (collection, infrastructure component, CLAUDE.md, adapter), only one operation should exist in the merged plan
 - The `from_version` in merged operations must reflect the member's *actual current state*, not the operation's original `from_version` (which reflected the org state at the time of that publish)
 - Install-then-remove cancels out. Install-then-update becomes install-at-latest. Update-then-remove becomes remove.
+- An operation carrying a `commit` is never skipped for having the same (or a lower) version than installed (channel candidates and channel→release moves).
 - The cursor advances to the last entry ID regardless of which individual operations were applied, skipped, or declined — the cursor tracks what was *processed*, not what was *accepted*
 
 ### Constraints

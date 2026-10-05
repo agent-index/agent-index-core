@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.12.0
+version: 3.13.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -39,7 +39,7 @@ Written to the remote filesystem via the on-demand executor:
 - `CLAUDE.md` at the remote root — Claude context for the system
 - `/shared/` directory structure initialized with all required subdirectories
 - `/shared/dist/` — the distribution layer (Release C): `manifest.json` (authoritative org version record with per-artifact sha256), `/directories/` (adapter, marketplace, resource-listings, installed collections), and `/binaries/` (the SHA-verified permission-helper). Members read from here, never from github.com (see Step 11 and the `backend-distribution` subroutine).
-- `/shared/bootstrap/member-bootstrap.zip` — the downloadable bootstrap package for members, with the permission-helper binary baked in (Step 12)
+- `/shared/bootstrap/member-bootstrap.zip` — the downloadable bootstrap package for members (Step 12; it carries the executor bundle, not an arch-specific helper binary — members fetch their binary from `/shared/dist/binaries/`)
 
 Written locally:
 - `agent-index.json` updated with the configured remote filesystem section
@@ -84,7 +84,7 @@ If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-
 
    Check what was completed in the previous session by inspecting `completed_steps`:
 
-   - If `completed_steps` includes `"3c"` (config files and bundle already written): restore the collected state (`org_name`, `org_id`, `backend`, `connection` config) from the install state file and skip directly to **Step 4** (authentication).
+   - If `completed_steps` includes `"3c"` (config files and bundle already written): restore the collected state (`org_name`, `org_id`, `distribution_channel`, `backend`, `connection` config) from the install state file and skip directly to **Step 4** (authentication).
 
    - If `completed_steps` only goes through `"3b"` or earlier (domains were blocked before bundle download): restore the collected state and resume at **Step 3c** (download bundle and write config files).
 
@@ -227,6 +227,7 @@ For documentation purposes, the canonical file currently enumerates the followin
   "collected": {
     "org_name": "{org_name}",
     "org_id": "{org_id}",
+    "distribution_channel": "{from Step 3c 1-pre; null until asked / for released code}",
     "connection": {
       // All connection config collected in Step 3
     }
@@ -283,9 +284,19 @@ All required domains are reachable. This step downloads the adapter bundle, writ
 
 **The agent makes ZERO GitHub calls in this step (C.1 invariant).** All version/availability/binary facts come from `git ls-remote` and the freshly-cloned listings — never `raw.githubusercontent.com` or the REST API. Resolving versions/binary from `raw` is what installed a wrong-backend binary and stale version pins in ms-install-7 (`binwrongbackend`, `staleversionpins`). This step runs **two** host scripts with a collection-selection interview between them, because the catalog of installable collections only exists after the resource-listings clone lands, and a script cannot pause for an interview.
 
+**1-pre. Distribution channel (core 3.32.0).** Before emitting any manifest, ask:
+
+> "Should this org run released code (recommended), or a **distribution channel** of unreleased code for testing (e.g. `dev-1`)? Default: released code."
+
+- **Default / no answer:** `distribution_channel: null`.
+- **A channel name:** validate it against `^[a-z0-9][a-z0-9-]{0,39}$` and re-ask if invalid.
+- **Write the answer** to the local `agent-index.json` `distribution_channel` now (org-config gets it in Step 8).
+- **Tell the admin plainly** that every repo with a `channel/<name>` branch will come from it, that members get the same, and that `@ai:edit-org` → *Distribution channel* switches it later.
+- **If the local `agent-index-core` clone predates channel support** (no `lib/clone/resolve-refs.js`), the channel can't take effect. Tell the admin to re-clone core from the channel first: `git clone -b channel/<name> <core repo url>` into the install root, replacing the existing clone. Then continue.
+
 **1a. Emit the infra clone manifest + surface the committed clone script (`clone-script-generator`, `mode: infra`):**
 
-Emit the infra clone **manifest** via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra`, then surface the committed **`agent-index-core/lib/clone/clone-repos`** invocation (which reads that manifest) for the admin to run natively. That committed script: discovers each repo's latest `v*` tag via `git ls-remote --tags` (no `main` fallback — a missing tag fails loudly), clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
+Emit the infra clone **manifest** via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra`, then surface the committed **`agent-index-core/lib/clone/clone-repos`** invocation (which reads that manifest) for the admin to run natively. **Pass `channel`** (from 1-pre; also record it in install-state `collected.distribution_channel` so a session restart can't lose it). That committed script (core 3.32.0+; it "pins" by resolving) resolves every repo's ref via `lib/clone/resolve-refs.js` (a `channel/<name>` head when the org has a channel and the repo has the branch; otherwise the latest `v*` tag; no `main` fallback — a missing tag fails loudly), records its decisions in `.agent-index/clone-resolution.json`, clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
 
 Wait for the admin to confirm the infra script ran. If `agent-index-resource-listings/` or `agent-index-filesystem-<backend>/` is absent afterward, the script did not complete — re-surface it and halt.
 
@@ -295,7 +306,7 @@ Now that `agent-index-resource-listings/marketplace-directory.json` is local, re
 
 **1c. Emit the collections clone manifest + surface the committed clone script (`clone-script-generator`, `mode: collections`) — only if collections were selected:**
 
-If the admin selected any collections, emit a second **manifest** with `mode: collections` for the selected repos and surface the same committed `clone-repos` invocation (pointing at that manifest); the committed script tag-pins/branch-HEAD-resolves each repo itself. Wait for confirmation it ran. If none were selected, skip this sub-step.
+If the admin selected any collections, emit a second **manifest** with `mode: collections` for the selected repos and surface the same committed `clone-repos` invocation (pointing at that manifest); **pass the same `channel`**; the committed script resolves each repo itself (channel head, else default-branch head). Wait for confirmation it ran. If none were selected, skip this sub-step.
 
 **1d. Stage the adapter bundle from the local clone:**
 
@@ -303,7 +314,7 @@ Stage `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from t
 
 Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exec.sh` (shell wrapper), `adapter.json` (adapter metadata).
 
-**2. Write `agent-index.json`** with the `remote_filesystem` section:
+**2. Write `agent-index.json`** with the `remote_filesystem` section (**preserve** `distribution_channel` from 1-pre / install-state `collected`; never drop it when rewriting the file):
 
 - **Set the top-level `version` to the ACTUAL installed core version (`createorgversionstale`, ms_install_10).** Read it from the cloned core's `collection.json` (`agent-index-core/collection.json` → `version`, e.g. `3.22.2`) and write that into `agent-index.json` `version`. Do **NOT** leave the template's hardcoded value (the template ships `"version": "3.1.1"`, which is stale — it does not track core releases). Every fresh org was being born with `version: 3.1.1` because this step never overwrote it, and apply-updates' core-update step (the only other corrector) never fires on a brand-new org (it's already latest), so the field sat wrong forever, skewing `check-updates` and tripping the version-sync migration. Set it here, at write time, from the installed core version.
 - Set `backend` to the chosen backend identifier (`gdrive`, `onedrive`, or `s3`)
@@ -352,6 +363,7 @@ Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exe
   "collected": {
     "org_name": "{org_name}",
     "org_id": "{org_id}",
+    "distribution_channel": "{from Step 3c 1-pre; null until asked / for released code}",
     "connection": {
       // All connection config collected in Step 3
     }
@@ -533,6 +545,7 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
   "org_name": "{org_name}",
   "org_id": "{org_id}",
   "agent_index_version": "{the ACTUAL agent-index-core version being installed — read it from the downloaded agent-index-core/collection.json `version`. Do NOT hardcode a default like 2.0.0: that is the `versionmarker` drift that made ms-install-5's check-updates report nonsense (org-config said 2.0.0 while collection.json said 3.15.0). The installed collection.json is the source of truth for the installed version.}",
+  "distribution_channel": {the value chosen in Step 3c 1-pre — read it from install-state `collected.distribution_channel` / local `agent-index.json`; null for released code},
   "created": "{today YYYY-MM-DD}",
   "last_updated": "{today YYYY-MM-DD}",
   "remote_filesystem": {
@@ -662,38 +675,40 @@ If the template file is missing for any reason, fall back to generating the file
 
 > **(Pre-2.1.0 onedrive installs only)** If you encounter an onedrive adapter older than 2.1.0 (`share` still in `supported_operations_pending`), fall back to the interim instruction: members get read access by being **members of the SharePoint site** (`{site_web_url}`) — add them in SharePoint admin center → the site → Members — until the adapter is upgraded. The site owner (admin) is unaffected.
 
-After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.) **Members ALSO need reader on `/agent-index-core/` and `/agent-index-marketplace/` (bug `memberorgreadblocked`):** members read core + marketplace capability definitions by path (`apply-updates`, `preferences-management`, `session-start`, `member-bootstrap`, `browse`/`find`, etc.), so without these two grants a non-drive-member's `member-bootstrap` runs blind and skips its provisioning. Those two roots are uploaded later (Steps 9 and 10), so their group-reader grants are applied **right after each upload** (id-anchored on the folder's Drive id) using the same sanctioned install-time direct `aifs_share` + helper fallback. Never assume a member is a Drive member — a non-drive-member sees only what is explicitly shared.
+After the three files above (`/CLAUDE.md`, `/org-config.json`, `/members-registry.json`) have been written to remote in items 1-4, grant the org's all-members group reader access on each — and on the `/shared/` root folder. These grants enable every non-admin member to read the canonical org configuration, registry, and instructions, and to read + enumerate the `/shared/` tree — required for `session-start`, `org-setup` Phase 3 catalog assembly, identity resolution, and member access to shared org content. (Each collection root gets its own direct group-reader grant when the collection is installed — `install-collection` cr01 — so a single `/shared/` grant here plus the per-collection grants cover what the removed per-member "Category B" reader shares used to.) **Members ALSO need reader on `/agent-index-core/` and `/agent-index-marketplace/` (bug `memberorgreadblocked`):** members read core + marketplace capability definitions by path (`apply-updates`, `preferences-management`, `session-start`, `member-bootstrap`, `browse`/`find`, etc.), so without these two grants a non-drive-member's `member-bootstrap` runs blind and skips its provisioning. Those two roots are uploaded later (Steps 9 and 10), so their group-reader grants are applied **right after each upload** (id-anchored on the folder's Drive id) through the same permission-changes procedure. Never assume a member is a Drive member — a non-drive-member sees only what is explicitly shared.
 
-**Install-time bootstrap context** (per `agent-index-core/standards.md` § "Permission-Modifying Operations"): these ACL writes are part of the install bootstrap and may be applied directly via `aifs_share` — the admin running `create-org` is the org-creator with organizer authority on the new drive/site; the operations are deterministic, one-time setup of resources the admin already fully owns. This is the one sanctioned exception to the helper-gated model. Helper-mediated review would add friction without adding safety here.
+**Apply through the core permission-changes procedure (core 3.32.0+; replaces the former install-time direct-apply exception and its helper fallback).** Follow `/agent-index-core/internal/permission-changes.md` with one table for these four root grants:
 
-**Fallback when the direct call is refused or unavailable (helperfallback — required, do NOT halt).** Calling `aifs_share` directly is the *preferred* path, but it is **not guaranteed**: a given agent instance may decline to make a permission-modifying call (the standing agent-safety rule), or the op may be unavailable. If, for any reason, you do not apply a grant directly, **do not halt the install** — fall back to the **`permission-change-helper`** skill for the remaining grants: build the grant spec (all four root grants here as one spec, the collaborative-folder grants in Step 10 as another), surface the helper review page, and the admin Accepts — the helper applies them under the **admin's own OAuth token** (the same token already authenticated this session). End state is identical. The helper binary was installed + registered in Phase 1, so it is available now. (If the helper is unsigned-bypass and the host blocks it, route the admin through the SAC Evaluation-mode workaround, SIGNING.md — same as any helper use in the interim.) Only after BOTH the direct attempt and the helper fallback fail do you surface the failure-handling block below.
-
-For each path in `["/shared/", "/CLAUDE.md", "/org-config.json", "/members-registry.json"]`, call:
-
+```json
+{
+  "calling_task": "create-org",
+  "purpose": "Let all members read the org's shared folder and its three root files",
+  "confirmer": "admin",
+  "changes": [
+    { "op": "share", "resource": "/shared/", "resource_label": "/shared/ (the org's shared folder)", "is_folder": true, "recipient": "{all_members_group}", "role": "reader", "reason": "Members read and list shared org content", "source": "task_spec" },
+    { "op": "share", "resource": "/CLAUDE.md", "resource_label": "/CLAUDE.md", "recipient": "{all_members_group}", "role": "reader", "reason": "Members' sessions read the org instructions", "source": "task_spec" },
+    { "op": "share", "resource": "/org-config.json", "resource_label": "/org-config.json", "recipient": "{all_members_group}", "role": "reader", "reason": "Members read the org configuration", "source": "task_spec" },
+    { "op": "share", "resource": "/members-registry.json", "resource_label": "/members-registry.json", "recipient": "{all_members_group}", "role": "reader", "reason": "Members resolve each other's identities", "source": "task_spec" }
+  ]
+}
 ```
-aifs_share(
-  path: "<path>",
-  subject: "{all_members_group}",
-  role: "reader"
-)
-```
 
-**Argument names (sharedocbug, ms-install-8):** the adapter's `aifs_share` op takes **`path`**, **`subject`**, and **`role`** — NOT `resource`/`recipient`. Earlier revisions of this doc showed `resource`/`recipient`, which fail against adapter 2.2.x. Use `path`/`subject`/`role` for every `aifs_share` call in this task (root grants here AND the collaborative-folder grants in Step 10).
+The admin running `create-org` is the person confirming, and the grants run under their own credentials. These root files exist by now (items 1–4), so the procedure can read the org identities it needs (org-config `admins[]`, `all_members_group`, the members registry).
 
 Where `{all_members_group}` is the org's all-members group, persisted in `org-config.json` at `remote_filesystem.connection.all_members_group`. On **gdrive** this is a Google Group address (typically `all@{org_domain}`) collected in Step 7. On **onedrive** this is the tenant **Microsoft 365 group** (email or objectId) connected to the SharePoint site — create-org captures it during the M365 connection step or derives it from the site's owners/members group; `aifs_share` passes it to a Graph `invite` (additive). Same grant, same role vocabulary, on both backends.
 
-**Idempotency:** if a grant already exists (e.g., the admin is re-running `create-org` after a partial completion), `aifs_share` for the same recipient + role on the same resource is a no-op. The step is safe to re-run.
+**Idempotency:** if a grant already exists (e.g., the admin is re-running `create-org` after a partial completion), the procedure shows it as already in effect and skips it. The step is safe to re-run.
 
-**Failure handling:** if any `aifs_share` fails — typically because the all-members Google Group hasn't been created yet at the Workspace level, or because the admin's OAuth scope doesn't include permission management on this drive — surface the failure and halt with admin-actionable instructions:
+**Failure handling:** if the procedure doesn't return `complete` because a grant `failed` — typically because the all-members Google Group hasn't been created yet at the Workspace level, or because the admin's OAuth scope doesn't include permission management on this drive — surface the failure and halt with admin-actionable instructions:
 
 > "Could not grant `{all_members_group}` reader access on `{path}`: {error_summary}.
 >
 > **gdrive:** this usually means the all-members Google Group hasn't been created at the Workspace level yet. Create it via admin.google.com → Apps → Google Workspace → Groups for Business → new group `{all_members_group}`, configured so domain members can view content shared with it.
 > **onedrive:** this usually means the M365 group `{all_members_group}` doesn't exist or isn't resolvable, or the tenant's SharePoint/OneDrive policy blocks internal sharing. Confirm the group exists in the Microsoft 365 admin center and that internal sharing is permitted for the site.
 >
-> Once the group exists, re-run `@ai:create-org` to resume from where this step left off, or run `@ai:repair-org-acls` (future) to apply only the missing grants."
+> Once the group exists, re-run `@ai:create-org` to resume from where this step left off, or re-run this step (the procedure skips grants already in place)."
 
-After all three grants are confirmed (either applied successfully or already in place), proceed to item 5.
+If the admin declines a grant (on a backend that supports `share`), explain that members can't use the org without it and offer to re-run this table; don't proceed until it is `complete`. After all four grants are `applied` or already in effect, proceed to item 5.
 
 5. Verify `.claude/settings.json` is present locally (already written in Step 3c). If missing or corrupted, rewrite it.
 
@@ -727,7 +742,7 @@ Walk the local `agent-index-core/` directory and upload it, preserving the direc
 
 Surface progress: "Uploading agent-index-core to remote filesystem... {N} files uploaded."
 
-**Grant members reader on `/agent-index-core/` (memberorgreadblocked).** Immediately after the upload, `aifs_stat("/agent-index-core")` for its Drive id and grant the all-members group reader on it — `aifs_share(path: "id:{core_folder_id}", subject: "{all_members_group}", role: "reader")` — via the same sanctioned install-time direct path (+ `permission-change-helper` fallback) as the Step 8 root grants. Without this, non-drive-members cannot read core capability definitions and `member-bootstrap` runs degraded (skips provisioning). Idempotent; id-anchored so it's unambiguous.
+**Grant members reader on `/agent-index-core/` (memberorgreadblocked).** Immediately after the upload, `aifs_stat("/agent-index-core")` for its Drive id and grant the all-members group reader on it through the permission-changes procedure (one row: `share`, `id:{core_folder_id}`, `{all_members_group}`, `reader`, `source: "task_spec"`), confirmed by the admin like the Step 8 root grants. Without this, non-drive-members cannot read core capability definitions and `member-bootstrap` runs degraded (skips provisioning). Idempotent; id-anchored so it's unambiguous. If the result isn't `complete`, continue the install but tell the admin plainly that members can't read core yet; `@ai:publish-updates` 6e offers the grant again.
 
 **On success:** Proceed to Step 9.5.
 
@@ -745,7 +760,7 @@ For **each** selected collection `{name}`:
    - **Setup interview / defaults** — read `/{name}/setup/collection-setup.md`, collect org-level params. Offer "accept defaults," but per the **setupresp guardrail** a defaults install STILL writes the responses file. Flag any default that is really a decision — notably **bug-reports `admin_roles`**, which depends on org roles: if roles were skipped (Step 14) it defaults to empty (triage is admin-status-only); the admin can define roles via `@ai:edit-org` and re-run later.
    - **Write** `/{name}/setup/collection-setup-responses.md` with `setup_status: complete`; **verify read-back** (`aifs_read` returns `setup_status: complete`) before the next collection.
    - **Seed** files the setup's Setup Completion section declares (e.g. bug-reports manifest + log key; library taxonomy/doc-types; the `/shared/{name}-index/` directory; projects commons/index).
-   - **Provision grants** — the collection's `collaborative-acls.json` writer grants PLUS the unconditional collection code-dir reader grant (`all_members_group` reader on `/{name}/`, id-anchored). **Apply via create-org's sanctioned install-time direct path (+ helper fallback)** — same bootstrap authority as the Step 8 root grants (the admin owns the whole tenant at creation; this also avoids launching the helper, which matters in the unsigned-bypass interim). Idempotent no-op filter; resolve `{all_members_group}` / `{param}` placeholders, skip + flag if unresolvable.
+   - **Provision grants** — the collection's `collaborative-acls.json` writer grants PLUS the unconditional collection code-dir reader grant (`all_members_group` reader on `/{name}/`, id-anchored). **Apply through the permission-changes procedure, exactly as `install-collection` Step 5.5 does**: one table per collection, the admin confirms, and `member_read_grant` follows the code-dir row. The procedure's no-op filter makes it idempotent. Resolve `{all_members_group}` / `{param}` placeholders; skip + flag if unresolvable.
    - **Register capability providers** if the collection declares `provides[]`.
    - **Set** `status: installed` + `installed_date` in `org-config.json`.
 
@@ -765,13 +780,13 @@ If the admin says no: confirm and skip to Step 12. Note they can come back to th
 
 If the admin says yes:
 
-1. Check for git availability by running `git --version` silently.
-2. If git is available: ask "I can clone this as a Git repository or download it as a ZIP. Cloning lets you pull updates directly. Which would you prefer?" Default to ZIP if no preference.
-3. If git is not available: proceed with ZIP silently.
-4. Download `agent-index-marketplace` locally from the `marketplace_repo_url` in `agent-index.json`.
-5. Verify the download by confirming `collection.json` is readable.
+1. **Use the infra clone** from Step 3c: `agent-index-marketplace/` is already cloned at its resolved ref (a release tag, or the channel head on a channel org; see `.agent-index/clone-resolution.json`). Never download a ZIP or re-clone from `marketplace_repo_url`. (Before core 3.32.0 this step downloaded the default-branch ZIP, which ignored the release tag and would have reverted a channel org.)
+2. If `agent-index-marketplace/` is missing, re-surface the Step 3c infra clone invocation and halt until it has run.
+3. *(removed)*
+4. *(removed)*
+5. Verify the clone by confirming `collection.json` is readable.
 6. Upload the entire marketplace collection to the remote filesystem (same `aifs_write_batch` one-process upload + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
-6a. **Grant members reader on `/agent-index-marketplace/` (memberorgreadblocked).** After the upload, `aifs_stat("/agent-index-marketplace")` for its Drive id, then `aifs_share(path: "id:{marketplace_folder_id}", subject: "{all_members_group}", role: "reader")` via the sanctioned install-time direct path (+ `permission-change-helper` fallback). Members read marketplace capability definitions by path; without this grant a non-drive-member can't. Idempotent; id-anchored.
+6a. **Grant members reader on `/agent-index-marketplace/` (memberorgreadblocked).** After the upload, `aifs_stat("/agent-index-marketplace")` for its Drive id, then grant `{all_members_group}` reader on `id:{marketplace_folder_id}` through the permission-changes procedure (`source: "task_spec"`, admin confirms). Members read marketplace capability definitions by path; without this grant a non-drive-member can't. Idempotent; id-anchored. If not `complete`, continue but tell the admin; `@ai:publish-updates` 6e offers it again.
 7. Update `org-config.json` on remote via `aifs_read` then `aifs_write` (follow the **safe org-config rewrite rule** below):
    - Add entry to `installed_collections` (with `"marketplace_id": "agent-index-public"`)
    - Update `last_updated`
@@ -797,7 +812,7 @@ If reachable: invoke `run agent-index-marketplace task list-marketplace-collecti
 Now that the collections are on the remote, publish the **distribution layer** members read from instead of GitHub, per the **`backend-distribution`** subroutine (`templates/backend-distribution.md`):
 - Copy the three directory files (`infrastructure-directory.json`, `filesystem-adapter-directory.json`, `marketplace-directory.json`) **from the local `agent-index-resource-listings` clone** to `/shared/dist/directories/`.
 - **Publish the FULL build matrix of the backend-matched signed permission-helper (`regenzipnobinary`).** Upload **every supported os×arch build** of the pinned binary version for this org's backend to `/shared/dist/binaries/` — one file per build (`agent-index-show-plan-<backend>-<version>-<os>-<arch>[.exe]`) and one `manifest.json` `binaries[]` entry per build carrying `os`/`arch`/`sha256`. **Do NOT publish only the admin's host build** — a member on a different OS/arch than the admin must be able to fetch a runnable binary, and a single-arch publish is exactly the defect this fixes. **Source of the builds:** the signed release ships all-platform assets (`build-all.sh` in `lib/permission-helper-go`); obtain and upload all of them, not just the one the infra clone script fetched for the admin's host. Each build's expected SHA is the **published per-platform SHA** for that os/arch (from `infrastructure-directory.json` → the binary's `platforms[]` row); verify each build against its own SHA, and **do NOT verify by re-reading a large binary through the sandbox mount** (stale/torn bytes for large files — `binmountstale`) — trust the published per-platform SHA and use the host-named-copy technique if a sandbox read disagrees. (The admin's own host build was already installed+registered by the infra clone script; this step populates the dist matrix for *all* members.)
-- Write `/shared/dist/manifest.json` — the `org_release_tag`, per-artifact SHA-256s (the binary's = the host SHA), and the installed collection versions (the org's version authority).
+- Write `/shared/dist/manifest.json` (`dist-manifest/2`) — the `org_release_tag`, `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json` (core 3.32.0), per-artifact SHA-256s (the binary's = the host SHA), and the installed collection versions (the org's version authority).
 - Use the publish flow's **diff + hash-verify** (upload only changed; for the three small directory files, read back + verify SHA; for the large binary, gate on the host SHA as above, shell-first + retry). On a fresh create-org everything is new, so all artifacts publish.
 - **Do not publish or bake a binary whose version is not the backend-matched directory `current_version`.** (In ms-install-7 a stale `0.3.0` gdrive binary reached dist + the bootstrap zip before being corrected at Step 13b; with 1a now resolving the backend-matched signed binary up front, dist/zip and the pin are consistent from the start.)
 
@@ -952,13 +967,13 @@ If the admin declines or wants to do this later: accept that, note they can say 
 
 ### Step 13b: Provision the Permission-Helper Binary (closes bug 20260617-8d20ea22-nohelperpin)
 
-The permission-change-helper binary is **required** for member onboarding (`invite-member`'s per-member grants), member-driven selective sharing, and `remove-member` revocation — anything that goes through the interactive `permission-change-helper`. A fresh org has it **neither pinned nor installed** (the binary install path is `apply-updates` Phase 1 step 7, which only installs *pinned* binaries), so without this step the admin's first `invite-member` fails with `binary_not_found`. create-org's own bootstrap grants don't need it (they apply directly with admin creds), which is why the gap is otherwise invisible until the first invite.
+**Deprecated in core 3.32.0; removed in 4.0.0.** Core tasks no longer use the permission-change-helper binary (they use the permission-changes procedure). It is still provisioned through core 3.x **only** so that collection versions which haven't yet moved to the procedure keep working. A fresh org has it **neither pinned nor installed** (the binary install path is `apply-updates` Phase 1 step 7, which only installs *pinned* binaries), so this step pins and installs it.
 
 Do this now, before completion:
 
 1. **Pin the backend-matched helper** in `org-config.json` → `binaries{}` so it installs for the admin AND propagates to every member's `apply-updates`. The name matches the org's `remote_filesystem.backend`: `permission-helper-go` (gdrive) or `permission-helper-go-onedrive` (onedrive). Set `{ "policy": "min", "version": "<current_version from infrastructure-directory binaries[]>" }`. Use the **safe org-config rewrite rule** (unique temp + identity verify) for this write.
-2. **Install it for the admin now** via the `apply-updates` Phase 1 step 7 binary-reconcile (download → SHA-verify against the published checksum → install to `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`). This requires the normal binary-download **user approval prompt** (per the trust contract). On decline, note that `invite-member`/sharing won't work until `@ai:update` installs it, and continue.
-3. **Register the `agent-index://` handler — host-side, manual in Cowork (bug 20260617-8d20ea22-hostregister).** The `--register` post-install command CANNOT run from a Cowork session: the agent is in a Linux sandbox and the helper is a host-native binary. Do NOT claim it auto-registers or "registers on first use" (false for a URL-scheme handler — the OS won't launch it from an `agent-index://` link until it's registered). Instead, surface the exact host command as a required one-time step: Windows → `mcp-servers\permission-helper-go\agent-index-show-plan.exe --register` (run in the workspace folder); macOS/Linux host → `./mcp-servers/permission-helper-go/agent-index-show-plan --register`. (If the agent is running natively on the host, it may run `--register` directly.) Re-surface until the helper setup check confirms the handler is registered.
+2. **Install it for the admin now** via the `apply-updates` Phase 1 step 7 binary-reconcile (download → SHA-verify against the published checksum → install to `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`). This requires the normal binary-download **user approval prompt** (per the trust contract). On decline, note that only collections not yet moved to the permission-changes procedure need it (core tasks don't), and continue.
+3. **Register the `agent-index://` handler (deprecated; optional).** Only collections not yet moved to the permission-changes procedure use it, and it is removed in core 4.0.0. Mention the host command once (Windows → `mcp-servers\permission-helper-go\agent-index-show-plan.exe --register`; macOS → the bundled installer; Linux → `agent-index-show-plan --register`). It cannot run from a Cowork sandbox. Don't block on it and don't re-surface it.
 
 **On success (or deferral):** Proceed to Step 14.
 

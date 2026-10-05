@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.9.2
+version: 3.9.3
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -262,7 +262,9 @@ Write onboarding completion state to `/members/{member-hash}/profile/onboarding-
 
 After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` **by id** — `id:{members_registry_id}` (from org-config `resource_ids.members_registry`; path fallback if absent — `groupshareapivisibility`): read via `aifs_read("id:{members_registry_id}")`, modify, write back via `aifs_write("id:{members_registry_id}", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
 
-**Phase 5b — Permission-helper registration (do-it-now, verified — added in core 3.22.0, `helpernoreg`).** Onboarding installs sharing-capable capabilities (Library docs, Projects ideas, owned-content shares), so the `agent-index://` URL handler must be registered on the host or the member's **first share will emit a link that does nothing.** This is the same do-it-now/verified treatment `member-bootstrap` applies — it MUST also run here, because "set up my workspace" routes to **this skill**, not member-bootstrap, and a closing "optional, everything else works without it" footnote (the pre-3.22.0 behavior on this path) is exactly the framing that left members with a dead first-share link.
+> **Deprecated in core 3.32.0 — now optional.** Core tasks and every collection moved in the 3.32.0 wave make permission changes through the core permission-changes procedure, which needs no binary and no URL handler. The helper is only used by collection versions not yet moved, and is removed in core 4.0.0. **Treat everything in this step as optional:** install/register it only if the org still runs such a collection version; offer the command once; never block onboarding on it; never re-surface it; never tell the member sharing won't work without it.
+
+**Phase 5b — Permission-helper registration (added in core 3.22.0, `helpernoreg`; optional since 3.32.0 — see note).** Onboarding installs sharing-capable capabilities (Library docs, Projects ideas, owned-content shares), so the `agent-index://` URL handler must be registered on the host or the member's **first share will emit a link that does nothing.** This is the same do-it-now/verified treatment `member-bootstrap` applies — it MUST also run here, because "set up my workspace" routes to **this skill**, not member-bootstrap, and a closing "optional, everything else works without it" footnote (the pre-3.22.0 behavior on this path) is exactly the framing that left members with a dead first-share link.
 
 1. **Check whether the helper is registered.** If a registration-state probe is available for the platform (Windows HKCU `agent-index` scheme key; macOS `lsregister -dump | grep agent-index:`; Linux `xdg-mime query default x-scheme-handler/agent-index`), use it. In a Cowork/Linux sandbox you cannot register a host-native Windows/Mac binary and a sandbox registration does not count — so do not claim it auto-registers.
 2. **If not confirmed registered, present it as a required action the member runs now** (not a footnote), per platform:
