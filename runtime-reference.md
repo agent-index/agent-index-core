@@ -247,3 +247,32 @@ The two-tier model — local files through native tools, remote files through `a
 **Adapter contract v2.0 (added 2026-04-30):** The `aifs_*` family is extended with five additional ops — `aifs_share`, `aifs_unshare`, `aifs_get_permissions`, `aifs_transfer_ownership` (optional per backend), and `aifs_search` — plus an optional `if_revision` parameter on `aifs_write` for safe concurrent edits to shared state files. All ops execute under the calling member's OAuth identity; adapters never elevate privilege. The full operation specifications, including parameter schemas and backend-specific notes, live in `agent-index-filesystem/SPEC.md` v2.0. Consumer collections call these ops directly alongside the existing family — no capability-resolution layer is involved.
 
 **The operation semantics are an external, versioned contract.** Parameter schemas, return shapes and error formats for every `aifs_*` operation are specified in `agent-index-filesystem/SPEC.md`, the specification adapter packages implement against. They are not restated here (Core Improvements CI-013 decision). The agent-facing summary of tools and arguments is the executor's own `aifs-exec.sh --help`.
+
+---
+
+## Default Natural-Language Mappings
+
+**Fallback only.** Use this table when the member's `routing.json` is absent or unreadable. When the file is present, its mappings take precedence. Moved here from CLAUDE.md (CI-013). The `daily-view` row is corrected: the capability is in `capture`, not `projects`.
+
+The table is not exhaustive. Use judgment to match new phrasings to the closest installed capability by checking `member-index.json`.
+
+| What the member says (examples) | Capability | Collection |
+|---|---|---|
+| "project pulse", "status of project X", "how's X going", "project update report" | project-pulse | projects |
+| "update project X", "I finished the API work", "log my progress" | update-project | projects |
+| "create a project", "start a new project", "new project called X" | create-project | projects |
+| "edit project X", "change the milestones", "add a member to X" | edit-project | projects |
+| "what are my action items", "what's assigned to me", "open tasks", "what's on my plate" | manage-action-items | projects |
+| "I have an idea", "new idea for project X", "idea for improving Y" | create-idea | projects |
+| "what decisions have we made", "decision log for X" | project-decide | projects |
+| "read the channel", "what happened in Slack for project X" | channel-digest | projects |
+| "archive project X", "close project X" | archive-project | projects |
+| "daily view", "what's on my plate today", "morning overview" | daily-view | capture |
+| "what bugs do we have", "show bugs", "open bugs for X" | view-bugs | bug-reports |
+| "report a bug", "found a bug", "log a bug" | report-bug | bug-reports |
+| "triage my email", "check my inbox", "what's important in my email" | email-triage | email-triage |
+| "triage my Slack", "what's important in Slack", "Slack summary" | slack-triage | slack-triage |
+| "capture this", "remember this", "note this down", "save this for later" | capture | capture |
+| "create a strategy", "strategy for X", "strategic plan for Y" | create-strategy | strategy |
+| "edit strategy", "update the strategy for X" | edit-strategy | strategy |
+| "run my briefing", "morning briefing", "daily briefing" | run-briefing | strategy |
