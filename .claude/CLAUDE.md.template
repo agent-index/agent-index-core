@@ -24,6 +24,12 @@ When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTST
   - **Admin creating a brand-new org** — no `remote_filesystem` backend configured yet (a fresh `agent-index-core` clone). Only then does this map to `@ai:setup` (org-setup → create-org).
 - **`ready`**: Everything is configured. Proceed normally.
 
+**If no `AGENT_INDEX_BOOTSTRAP` signal reached the session** (in Cowork the hook's output often doesn't arrive — `sessionstartnorun`, 3.32.0 live test), don't skip session start. Before handling the member's first request, decide the state yourself:
+- `members/{member_hash}/member-index.json` exists locally → run session-start (`/agent-index-core/api/session-start.md`), then handle the request.
+- It doesn't exist → treat it as `needs_setup` and route as above.
+
+Compute `member_hash` from the member's email (see Identity Resolution). Do this once per session.
+
 ## Handling Member Requests
 
 Members use natural language to interact with agent-index. They say "what's on my plate" or "give me a pulse on the API project" — not `@ai:daily-view` or `@ai:project-pulse`. The `@ai:` aliases exist as an explicit fallback for disambiguation, not as the primary interface.

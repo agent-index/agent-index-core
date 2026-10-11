@@ -86,9 +86,11 @@ Confirm the hash to the admin: "I'll provision org access for `{email}` (hash `{
 
 ### Step 4: Re-invite detection
 
-Check whether the email was previously a member: look for a `members-registry.json` entry with this `member_hash`, and check `aifs_exists("/shared/members/artifacts/{hash}/")`.
+Check whether the email was previously a member: **a `members-registry.json` entry with this `member_hash` (or a registry record of their removal)** is what makes someone a previous member. Then check `aifs_exists("/shared/members/artifacts/{hash}/")`.
 
-If previously a member:
+**An artifacts folder with no registry entry is not a previous membership** (`invitestalefolder`, 3.32.0 live test): it's left over from an invite that never finished. Don't ask the re-invite question. Reuse the folder in Step 5 and tell the admin in one line: *"An empty artifacts folder from an earlier unfinished invite exists; I'll reuse it."*
+
+If previously a member (registry entry found):
 
 > This email was previously a member. Their shared-artifacts directory (`/shared/members/artifacts/{hash}/`) still exists, and their private member space (if any) is in their own My Drive — outside org control, untouched by removal or re-invite.
 >
@@ -168,6 +170,8 @@ The access grants go through the core permission-changes procedure as one table.
   - A grant didn't verify (`verify_mismatch`).
 
   Offer to re-run Step 6. A re-run re-reads current access, so anything already applied shows as already in effect.
+
+  **Cleanup when nothing was applied:** if Step 5 created the artifacts folder in this run and the procedure applied no row (declined, cancelled, or every row failed), delete the folder's `.placeholder` and the folder (`aifs_delete`), so a cancelled invite leaves nothing behind. Never delete a folder that existed before this run or contains anything besides `.placeholder`.
 
 ### Step 7: Verify the all-members group includes the new member
 

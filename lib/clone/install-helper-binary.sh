@@ -34,12 +34,20 @@ case "$SANE" in
   BADPLAT)    die "no platform row for $OS/$ARCH";;
 esac
 
-DESTDIR="$ROOT/$DEST"; mkdir -p "$DESTDIR"; OUT="$DESTDIR/$FILENAME"
+# install_destination is either a FILE path template ending in "{ext}" (current listings:
+# ".../agent-index-show-plan{ext}" -- expand {ext}; helperext, 3.32.0 live test: it was used as a
+# folder name, leaving the binary in ".../agent-index-show-plan{ext}/") or, in older listings, a folder.
+case "$DEST" in
+  *"{ext}"*) OUT="$ROOT/${DEST//\{ext\}/}"; DESTDIR="$(dirname "$OUT")";;
+  *)         DESTDIR="$ROOT/$DEST"; OUT="$DESTDIR/$FILENAME";;
+esac
+mkdir -p "$DESTDIR"
 echo "Downloading helper $FILENAME ($VERSION) for backend $BACKEND ..."
 curl -fsSL "$URLT" -o "$OUT" || die "download failed: $URLT"
 
 GOT=$(shasum -a 256 "$OUT" 2>/dev/null | awk '{print $1}'); [ -z "$GOT" ] && GOT=$(sha256sum "$OUT" 2>/dev/null | awk '{print $1}')
 if [ -n "$SHA256" ] && [ "$GOT" != "$SHA256" ]; then rm -f "$OUT"; die "sha256 mismatch (want $SHA256 got $GOT) -- deleted, no install"; fi
+echo "sha256 $GOT  (host-verified; record this as the helper SHA)"
 echo "$VERSION" > "$DESTDIR/version.txt"
 chmod +x "$OUT" 2>/dev/null
 

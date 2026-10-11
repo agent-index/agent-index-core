@@ -189,6 +189,7 @@ Get confirmation before beginning any installations.
 4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context, together with the core-injected `apps_path` resolved in Phase 4a (if this collection ships `apps/`). Core-injected values are supplied silently and are never presented for confirmation.
 5. Inject role-suggested parameter defaults from `role.md` into the setup context
 6. Read the setup template (`{name}-setup.md`) from the remote collection via `aifs_read("/{collection}/api/{name}-setup.md")`
+   **Pre-Setup Checks are advisory for installation** (`presetupblocks`, 3.32.0 live test). A template's `## Pre-Setup Checks` describe what the capability needs before it is *useful* (e.g. "at least one project exists"). Except for "collection setup completed" (`collection-setup-responses.md` exists — that one blocks), a failed check never blocks installing: install the capability, record the unmet check in its `manifest.json` (`presetup_unmet: [...]`), and tell the member in one line, e.g. *"Installed manage-action-items — it'll be useful once you have a project."* A new member normally has no projects or strategies yet.
 7. Conduct the setup interview for this skill or task:
    - Skip questions for `[org-mandated]` parameters — inject the value silently
    - Pre-fill `[role-suggested]` parameters with role defaults — present to member for confirmation

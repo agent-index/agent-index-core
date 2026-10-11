@@ -33,10 +33,19 @@ $sha256   = "$($plat.sha256)"
 $urlTmpl  = "$($bin.release_url_template)" -replace '\{version\}', $version
 $url      = $urlTmpl -replace '\{filename\}', $filename
 
-$dest = Join-Path $InstallRoot ("$($bin.install_destination)")
-if (-not $dest) { $dest = Join-Path $InstallRoot "mcp-servers/permission-helper-go" }
+# install_destination is either a FILE path template ending in "{ext}" (current listings:
+# ".../agent-index-show-plan{ext}" -> expand {ext} to ".exe"; helperext, 3.32.0 live test: it was used as a
+# folder name, leaving the binary in ".../agent-index-show-plan{ext}\") or, in older listings, a folder.
+$destSpec = "$($bin.install_destination)"
+if (-not $destSpec) { $destSpec = "mcp-servers/permission-helper-go" }
+if ($destSpec -like "*{ext}*") {
+  $out = Join-Path $InstallRoot ($destSpec -replace '\{ext\}', '.exe')
+  $dest = Split-Path -Parent $out
+} else {
+  $dest = Join-Path $InstallRoot $destSpec
+  $out = Join-Path $dest $filename
+}
 if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Force -Path $dest | Out-Null }
-$out = Join-Path $dest $filename
 
 Write-Host "Downloading helper $filename ($version) for backend $Backend ..."
 try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing } catch { Die "download failed: $url -- $($_.Exception.Message)" }
@@ -45,6 +54,7 @@ try { Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing } catch { Die "
 $got = (Get-FileHash -Algorithm SHA256 -Path $out).Hash.ToLower()
 if ($sha256 -and ($got -ne $sha256.ToLower())) { Remove-Item -Force $out -ErrorAction SilentlyContinue; Die "sha256 mismatch (want $sha256 got $got) -- deleted, no install" }
 
+Write-Host "sha256 $got  (host-verified; record this as the helper SHA)"
 # 6. version.txt
 Set-Content -Path (Join-Path $dest "version.txt") -Value $version -Encoding ascii
 

@@ -166,7 +166,7 @@ Also check for a pending update plan at `.agent-index/install-state/pending-upda
 
 **Collection check:** If the marketplace cache is fresh (not expired per `marketplace_cache_ttl_hours`), compare installed collection versions from `org-config.json` (read via `aifs_read("/org-config.json")` if remote is available) against the cached marketplace directory. If the cache is expired, do not trigger a refresh — session-start should not make remote requests that could delay startup. Use the existing cache regardless of staleness. If remote connectivity failed in Step 2, skip this check entirely.
 
-**Capability check:** Compare the member's installed capability versions from their local `member-index.json` against the collection versions on the remote filesystem (via `aifs_read("/{collection}/collection.json")` for each collection the member has capabilities from). If remote connectivity is unavailable, skip this check — it requires remote access to compare against current collection versions.
+**Capability check: none.** Capabilities have their own version numbers, independent of their collection's version (core 3.7.0), so comparing a capability's version with its collection's `collection.json` version reports almost every capability as upgradable (`capversionfallback`, 3.32.0 live test: "62 of 68" on a minutes-old install). Capability upgrades reach members through org updates (`@ai:update`) and `@ai:setup`; don't queue a capability-upgrade notice from a version comparison.
 
 Queue notices for Step 8 based on fallback results (only if the update instruction check did not already produce a notice):
 
@@ -176,8 +176,6 @@ Queue notices for Step 8 based on fallback results (only if the update instructi
 - If collection updates are available (from marketplace cache comparison):
   > "{N} installed collection(s) have updates available. Say '@ai:check-updates' for details."
 
-- If capability upgrades are available (member's version behind collection version):
-  > "{N} of your installed capabilities can be upgraded. Say '@ai:setup' to upgrade, or '@ai:check-updates' for details."
 
 **Distribution channel banner (core 3.32.0):** read the local `agent-index.json` `distribution_channel` (falling back to `/shared/dist/manifest.json` `channel` if the local field is absent and Step 2 confirmed connectivity). If set, queue an **advisory** notice, shown on every session in every verbosity except `silent`: *"This org runs distribution channel **{name}** (unreleased code for testing)."* On a channel org, skip the adapter bundle check below. It compares against the public released directory, which a channel org intentionally doesn't follow. Use `@ai:check-updates` instead.
 

@@ -304,7 +304,7 @@ All required domains are reachable. This step downloads the adapter bundle, writ
 
 **1a. Emit the infra clone manifest + surface the committed clone script (`clone-script-generator`, `mode: infra`):**
 
-Emit the infra clone **manifest** via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra`, then surface the committed **`agent-index-core/lib/clone/clone-repos`** invocation (which reads that manifest) for the admin to run natively. **Pass `channel`** (from 1-pre; also record it in install-state `collected.distribution_channel` so a session restart can't lose it). That committed script (core 3.32.0+; it "pins" by resolving) resolves every repo's ref via `lib/clone/resolve-refs.js` (a `channel/<name>` head when the org has a channel and the repo has the branch; otherwise the latest `v*` tag; no `main` fallback — a missing tag fails loudly), records its decisions in `.agent-index/clone-resolution.json`, clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
+Emit the infra clone **manifest** via the **`clone-script-generator`** subroutine (`templates/clone-script-generator.md`) with `mode: infra`, then surface the committed **`agent-index-core/lib/clone/clone-repos`** invocation (which reads that manifest) for the admin to run natively. **Pass `channel`** (from 1-pre; also record it in install-state `collected.distribution_channel` so a session restart can't lose it — create `install-state.json` with just that field now if it doesn't exist yet; item 4 below fills in the rest). That committed script (core 3.32.0+; it "pins" by resolving) resolves every repo's ref via `lib/clone/resolve-refs.js` (a `channel/<name>` head when the org has a channel and the repo has the branch; otherwise the latest `v*` tag; no `main` fallback — a missing tag fails loudly), records its decisions in `.agent-index/clone-resolution.json`, clones `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings` (and pins the already-present `agent-index-core` to its tag), then reads the **freshly-cloned** `infrastructure-directory.json`, selects the **backend-matched** signed helper binary (`permission-helper-go` for gdrive, `permission-helper-go-onedrive` for onedrive), downloads + SHA-verifies the **signed** asset, places it, and registers it per platform (Windows registry / Linux `.desktop` / macOS `.app` installer — never `--register` on a bare darwin file). Surface the run instruction with execution-policy bypass on Windows (`powershell -ExecutionPolicy Bypass -File "…"`). Do NOT fetch the adapter or anything else from GitHub yourself — once the script runs, it is all in local clones. (Retires the old SHA-pinned-directory + `zip_url` path; survives only as the deprecated fallback, standards.md § "Distribution: backend-first".)
 
 Wait for the admin to confirm the infra script ran. If `agent-index-resource-listings/` or `agent-index-filesystem-<backend>/` is absent afterward, the script did not complete — re-surface it and halt.
 
@@ -760,17 +760,19 @@ Surface progress: "Uploading agent-index-core to remote filesystem... {N} files 
 
 The collections the admin chose in the Phase-1 collection-selection interview (Step 3c-1b) were cloned locally (Step 3c-1c) but are **not yet on remote and not yet set up**. For each, do **both — upload AND provision** — in this step. Uploading without provisioning is the `collsetupgap` bug: the collection is present but `org-setup` **hard-blocks every member (including the admin) from installing any of its capabilities** until `collection-setup-responses.md` exists (bug `20260615-8d20ea22-setupresp`). In ms-install-9 this surfaced as "capabilities can't be installed" and required a manual recovery; it must be a planned step.
 
-For **each** selected collection `{name}`:
+For **each** selected collection: `{name}` is the collection's **name from its `collection.json`** (e.g. `projects`), **not** the local clone directory (e.g. `agent-index-marketplace-projects`). Clones are named after their repositories; the remote folder and every runtime path (`/{collection}/api/{task}.md`) use the collection name (`createorgrepopath`, 3.32.0 live test — uploading under the repo name made every capability read `FILE_NOT_FOUND`).
 
-1. **Upload** the local `{name}/` clone to `/{name}/` on remote (same `aifs_write_batch` one-process upload + binary-exclusion + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
+1. **Upload** the local clone (`{clone_dir}/`, the repo-named directory) to `/{name}/` on remote (same `aifs_write_batch` one-process upload + binary-exclusion + per-file read-back verify as Step 9; per-file fallback only if the adapter predates the batch op).
 2. **Register** it in `org-config.json` `installed_collections` (safe org-config rewrite rule) as `status: downloaded` initially, with `"marketplace_id": "agent-index-public"` — the Phase-1 selection interview offers only the public catalog (provenance, core 3.30.0).
 3. **Provision it — run the `install-collection` flow** (`agent-index-marketplace` task `install-collection`, Steps 4–5.7; invoke it per collection, or perform the equivalent inline). That flow:
    - **Setup interview / defaults** — read `/{name}/setup/collection-setup.md`, collect org-level params. Offer "accept defaults," but per the **setupresp guardrail** a defaults install STILL writes the responses file. Flag any default that is really a decision — notably **bug-reports `admin_roles`**, which depends on org roles: if roles were skipped (Step 14) it defaults to empty (triage is admin-status-only); the admin can define roles via `@ai:edit-org` and re-run later.
    - **Write** `/{name}/setup/collection-setup-responses.md` with `setup_status: complete`; **verify read-back** (`aifs_read` returns `setup_status: complete`) before the next collection.
    - **Seed** files the setup's Setup Completion section declares (e.g. bug-reports manifest + log key; library taxonomy/doc-types; the `/shared/{name}-index/` directory; projects commons/index).
-   - **Provision grants** — the collection's `collaborative-acls.json` writer grants PLUS the unconditional collection code-dir reader grant (`all_members_group` reader on `/{name}/`, id-anchored). **Apply through the permission-changes procedure, exactly as `install-collection` Step 5.5 does**: one table per collection, the admin confirms, and `member_read_grant` follows the code-dir row. The procedure's no-op filter makes it idempotent. Resolve `{all_members_group}` / `{param}` placeholders; skip + flag if unresolvable.
+   - **Provision grants** — the collection's `collaborative-acls.json` writer grants PLUS the unconditional collection code-dir reader grant (`all_members_group` reader on `/{name}/`, id-anchored). **Apply through the permission-changes procedure, exactly as `install-collection` Step 5.5 does**: one table per collection, the admin confirms, and `member_read_grant` follows the code-dir row. **The code-dir reader row is always in that collection's table** — also when the collection's own setup brings a grant table of its own (client-intelligence does): merge the setup's rows with the acls rows and the code-dir row into the one table; never let a setup-defined table replace the core-required row (`createorgcodedirrow`, 3.32.0 live test). The procedure's no-op filter makes it idempotent. Resolve `{all_members_group}` / `{param}` placeholders; skip + flag if unresolvable.
    - **Register capability providers** if the collection declares `provides[]`.
    - **Set** `status: installed` + `installed_date` in `org-config.json`.
+
+**Before moving on, check the table for every collection:** it contains a row (proposed or already-in-effect) for the all-members reader on `/{name}/`. A collection whose table lacks it is not provisioned.
 
 Only after **every** selected collection is uploaded AND provisioned are their capabilities installable — Step 13 then installs them into the admin's own workspace, and members install via `@ai:setup`. Do NOT defer this to Step 10.5's marketplace flow (that flow is for adding *further* collections interactively; the Phase-1 selections are handled here).
 
@@ -847,6 +849,18 @@ By now the three resources members must reach at bootstrap all exist on remote: 
 **Idempotent.** Re-running create-org after a partial completion re-stats and re-writes the same ids — a no-op if they already match.
 
 **On success:** Proceed to Step 12.
+
+---
+
+### Step 11.6: Seed the Update Baseline (`createorgupdatebaseline`, 3.32.0)
+
+A new org starts with an update log, so every later mechanism has one path to follow:
+
+1. **`/shared/updates/published-state.json`:** the org's current state, assembled exactly as `publish-updates` Step 1 assembles it (infrastructure versions and commits, installed collections with `source_commit`, CLAUDE.md hash, adapter checksum, `distribution_channel`). It is the baseline the first `publish-updates` diffs against, so that publish contains only real changes, not "everything is new".
+2. **`/shared/updates/update-log.json`:** `{ "entries": [ { "id": "000", "type": "baseline", "date": "{today}", "summary": "Org created", "operations": [] } ] }`.
+3. **`/shared/updates/latest.json`:** `{ "latest_id": "000" }`.
+
+Write each file, read it back, and check it parses. In Step 13, set the admin's `member-index.json` `last_applied_update` to `"000"`. With `latest.json` present, session-start uses the update-instruction check, not the version-comparison fallback.
 
 ---
 
@@ -958,7 +972,7 @@ Say:
 The admin's member workspace is set up locally, following the same flow that members will experience (minus the bootstrap zip download — the admin already has everything local):
 
 1. Create the local member workspace directory structure: `{project_dir}/members/{admin_hash}/` with subdirectories: `skills/`, `tasks/`, `profile/`
-2. Create `member-index.json` for the admin (locally)
+2. Create `member-index.json` for the admin (locally), with `"last_applied_update": "000"` (the baseline seeded in Step 11.6)
 3. **Provision the admin's remote member space** — run the canonical **ensure-member-space subroutine** (defined in `member-bootstrap.md`, "ensure-my-drive-space"), exactly as a member would. The admin runs `create-org`, not `member-bootstrap`, so without this the admin never gets a remote member space and owned-content collections they run (strategy, capture, etc.) have no `member_folder_id` to anchor on. The subroutine: create `Agent-Index-Private` in the admin's own drive via `id:root/...`, stat the **resolved** id, record `member_folder_id` in the admin's `member-index.json`, and write the registry handshake. It is idempotent and backend-agnostic (`id:root` resolves to the admin's My Drive on gdrive / OneDrive). On OneDrive, if it returns `NOT_PROVISIONED`, surface the "sign in to office.com once" message and retry after. (Closes bug `20260615-8d20ea22-adminspace`.)
 4. Run the preferences-management initial interview
 5. If collections were installed via marketplace in Step 11, proceed to capability selection and installation for the admin
@@ -1044,6 +1058,8 @@ If the admin accepts: invoke the `upload-install-log` task. It handles reading t
 If the admin declines: accept gracefully. "No problem. The log is saved locally at `.agent-index/logs/{log_filename}` if you want to review or upload it later with '@ai:upload-install-log'."
 
 If `log_collector_url` or `log_collector_api_key` is not configured in `agent-index.json`: skip this step silently. The upload infrastructure is not yet set up.
+
+**Channel orgs (`distribution_channel` set): don't offer the upload.** Logs from unreleased code would mix into the production diagnostics. Say instead: *"This org runs distribution channel {name}, so the install log stays local at `.agent-index/logs/{log_filename}`."* (`channellogupload`, 3.32.0 live test.)
 
 **Telemetry key choice (added core 3.11.2 — distribution decision D3, deploy-readiness release record).** Before the first upload offer of a new org install, surface the telemetry identity explicitly rather than silently inheriting the template value:
 

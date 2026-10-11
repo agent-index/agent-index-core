@@ -88,6 +88,20 @@ Design record: `/shared/projects/core-improvements/artifacts/distribution-channe
 ### Fixed — fresh-clone setup (`createorgnoseed`)
 - **`create-org` Step 1 now creates `agent-index.json` from `templates/agent-index.template.json` on a fresh clone.** Since 3.6.0 retired `agent-index-core/agent-index.json`, nothing created the root configuration file, so a fresh clone halted at Step 1 unless the agent improvised the copy. Found by the 3.32.0 live test (new org on `channel/dev-1`). The README's Step 1 layout is corrected to match.
 
+### Fixed — found in the 3.32.0 live test (batch 2)
+- **create-org Step 9.5 uploads each collection to `/{collection name}/` (`createorgrepopath`).** It used the clone directory's repository name (`/agent-index-marketplace-projects/`), so every capability read failed with `FILE_NOT_FOUND`.
+- **create-org Step 9.5 always puts the code-folder reader row in a collection's table (`createorgcodedirrow`),** also when the collection's setup has a grant table of its own (client-intelligence). A check before moving on catches a missing row.
+- **create-org Step 11.6 seeds the update baseline (`createorgupdatebaseline`):** `published-state.json`, an `update-log.json` with a `000` baseline entry, and `latest.json`. The admin's cursor starts at `000`. The first publish then contains only real changes, and session-start always uses the update-instruction check.
+- **session-start no longer compares capability versions with collection versions (`capversionfallback`).** They are independent since 3.7.0, so the comparison reported almost every capability as upgradable.
+- **publish-updates Step 0b no longer halts when Step 0 found no core or marketplace file changes (`step0bfirstpublishhalt`).** Collection upgrades, adapter changes, channel commits and a first publish are found by Steps 1–3, which decide "nothing has changed".
+- **invite-member (`invitestalefolder`):** a previous membership is decided by the members registry, not by an existing artifacts folder. A cancelled invite deletes the empty folder it created.
+- **apply-updates:** the permission helper is optional when it isn't installed (`helperpinoptional`). The adapter's embedded-URL scan is advisory, because it aborted every real gdrive bundle; the checksum gate is the integrity control (`adapterdomainscan`). An adapter-step stop halts the whole update without advancing the cursor.
+- **org-setup: Pre-Setup Checks are advisory for installation (`presetupblocks`).** Only "collection setup completed" blocks; unmet checks are recorded and mentioned.
+- **CLAUDE.md template: when no `AGENT_INDEX_BOOTSTRAP` signal arrives, run session-start before the first request (`sessionstartnorun`).** In Cowork the hook's output often never reaches the session.
+- **Channel orgs don't upload install logs (`channellogupload`):** create-org Step 16 doesn't offer it, and `upload-install-log` halts unless asked explicitly.
+- **lib/clone/install-helper-binary expands `{ext}` in `install_destination` and prints the host-verified SHA-256 (`helperext`).**
+- **permission-changes unit test V10:** a direct grant layered on inherited access verifies as applied and can be removed. This is the shape the gdrive adapter reports from 2.11.2 (`getpermsinheritedmask`).
+
 ## [3.31.0] — 2026-09-27 — Multi-marketplace: unique names instead of mandatory prefixes; two publish-updates fixes
 
 **MINOR — relaxes a 3.30.0 rule; every 3.30.0-valid catalog stays valid.** Pairs with **agent-index-marketplace 2.21.0**.

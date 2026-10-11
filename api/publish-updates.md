@@ -208,7 +208,7 @@ Run prerequisites and proceed to publish? [Y/N]
 
 If no prereqs were detected and at least one CHANGELOG entry was inferred: surface only the entries section and the same Y/N prompt.
 
-If neither prereqs nor entries were detected (Step 0 had no real changes): **first run the Standing Reconciles (6d/6e/6f/6g from Step 6) — they run on every publish, including this no-op path (`standingreconcileunreachable`), and are idempotent no-ops on a healthy org** — then surface "Nothing has changed since the last publish." and halt cleanly.
+If neither prereqs nor entries were detected (Step 0 had no file changes in core or marketplace): **continue to Step 1 — don't halt here** (`step0bfirstpublishhalt`, 3.32.0 live test). Step 0 only sees the core and marketplace source trees. Collection upgrades, adapter changes, channel commits and an org's first publish (no `published-state.json` yet) are found by the diff in Steps 1–3, and Step 3 is where "Nothing has changed since the last publish" is decided (after the Standing Reconciles).
 
 On `N`: halt without running prereqs or writing CHANGELOG. Step 0's sync already happened; remote files reflect local state. Subsequent `@ai:publish-updates` re-runs will see no diff (idempotent) and report no-op.
 
