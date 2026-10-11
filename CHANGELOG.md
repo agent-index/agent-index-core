@@ -1,5 +1,25 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.0.0] — <RELEASE_DATE> — Permission helper removed
+
+**MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).
+
+### Removed
+- **`permission-change-helper` skill** (definition, setup, manifest) and **`pin-binary-version` task** (definition, setup, manifest). `collection.json` `api[]` no longer lists them.
+- **`lib/permission-helper-go/`** (the `agent-index-show-plan` binary source, installers, signing), **`lib/permission-spec/`** (`build-permission-spec`) and **`lib/clone/install-helper-binary.{ps1,sh}`**.
+- **Helper provisioning everywhere:** the infra clone no longer downloads or registers a binary (`lib/clone/clone-repos.{ps1,sh}`); create-org 3.14.0 drops the binary steps (old Step 13b and the binary bits of 3c, 9, 11, 12); member-bootstrap 3.11.0 drops Step 7b; org-setup 3.10.0 drops Phase 5b; `templates/backend-distribution.md` and `templates/clone-script-generator.md` drop `/shared/dist/binaries/`, binary SHAs and binary verification.
+- **`binaries` in org-config** (`org-config-schema.json`) and **`binaries[]` in the infrastructure directory.**
+- **standards.md:** the "Deprecated: the permission-change-helper flow" section (URL-handler and binary-download trust contracts) and the code-signing rule for native binaries.
+
+### Added
+- **`lib/uninstall/remove-permission-helper.{ps1,sh}`** (Level 3): removes the `agent-index://` handler, the install-folder copy (including the stray `agent-index-show-plan{ext}` folder) and the standalone installer's copy. Idempotent; prints one JSON line; exit 1 on partial failure, which never blocks an update.
+- **apply-updates 4.0.0 Step 1.6 "Remove the retired permission helper"** replaces Binary Pin Sync. It runs on every update until the removal succeeds (`helper_removed: true` in member-index).
+- **publish-updates 3.18.0:** Step 6.5 deletes `/shared/dist/binaries/` (listed and confirmed with the admin); Step 6.0 drops the org-config `binaries` key.
+- **`upgrade/3-to-4.md`** with the collection-version gate, the admin and member halves, and 3.x end of support (2027-01-31).
+
+### Changed
+- marketplace `check-updates` 2.13.1 no longer checks registered binary tools.
+
 ## [3.32.0] — 2026-10-01 — Permission changes: list, confirm, apply, verify
 
 **MINOR — additive for un-upgraded collections; changes how core's own tasks make permission changes.** Collections that still call the `permission-change-helper` keep working (the helper is deprecated, not removed). Pairs with **agent-index-marketplace 2.22.0** and **developer 1.14.0**; collections move over in their own releases. The helper is removed in **core 4.0.0**. Design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-{outcomes,solution-design,tech-design,test-plan}.md`.

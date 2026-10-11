@@ -2,7 +2,7 @@
 ## Marketplace Eligibility Specification
 
 **Maintained by:** agent-index
-**Last Updated:** 2026-10-10
+**Last Updated:** 2026-10-11
 
 ---
 
@@ -223,11 +223,11 @@ structure" — and is promoted here to normative status because core's wholesale
 
 ## Distribution: backend-first (Release C — the current model)
 
-**Members never fetch from github.com.** Each org's own backend is its distribution layer: the admin (the only GitHub touchpoint, over the **git protocol** — clone/pull, which is not subject to the raw/REST rate cap) publishes everything members need — collections, the directories, and the helper binary — to `/shared/dist/` on the org backend. Members read directories + binary from `/shared/dist/` and **SHA-verify them against `/shared/dist/manifest.json`** (the org's version authority), and read collection capability files from each collection's **id-anchored canonical base** (`id:{folder_id}`), gated on the manifest's collection versions. See the `backend-distribution` and `clone-script-generator` subroutines (`templates/`). This eliminates both root causes that recurred across Jeff / ms-install-5 / ms-install-6 — GitHub rate limiting (members make zero GitHub calls) and stale-cache (members read the backend, the admin's deterministic tag-pinned publish, not GitHub's cache-fronted raw layer).
+**Members never fetch from github.com.** Each org's own backend is its distribution layer: the admin (the only GitHub touchpoint, over the **git protocol** — clone/pull, which is not subject to the raw/REST rate cap) publishes everything members need — collections and the directories — to `/shared/dist/` on the org backend. Members read the directories from `/shared/dist/` and **SHA-verify them against `/shared/dist/manifest.json`** (the org's version authority), and read collection capability files from each collection's **id-anchored canonical base** (`id:{folder_id}`), gated on the manifest's collection versions. See the `backend-distribution` and `clone-script-generator` subroutines (`templates/`). This eliminates both root causes that recurred across Jeff / ms-install-5 / ms-install-6 — GitHub rate limiting (members make zero GitHub calls) and stale-cache (members read the backend, the admin's deterministic tag-pinned publish, not GitHub's cache-fronted raw layer).
 
-- **Member runtime path:** backend-first, always. `check-updates` answers "is this member current?" against `/shared/dist/manifest.json`; `apply-updates`/`member-bootstrap` fetch directories + binary from `/shared/dist/` and SHA-verify. **The SHA gate is real and mandatory (C.1.3):** both tasks compute the artifact SHA per the **Canonical SHA-256 rule** (`backend-distribution.md` — hash the stored `size` bytes, never `aifs_read` stdout) and refuse a mismatch. Pre-C.1.3 these tasks read the manifest for version numbers but never hashed the artifacts (`shagateunimplemented`), and a manifest computed from stdout-with-newline (`412094b4…`) didn't match the stored bytes (`e1d549e4…`) (`manifestsha`) — both fixed by computing identically on the publish and member sides.
+- **Member runtime path:** backend-first, always. `check-updates` answers "is this member current?" against `/shared/dist/manifest.json`; `apply-updates`/`member-bootstrap` fetch directories from `/shared/dist/` and SHA-verify. **The SHA gate is real and mandatory (C.1.3):** both tasks compute the artifact SHA per the **Canonical SHA-256 rule** (`backend-distribution.md` — hash the stored `size` bytes, never `aifs_read` stdout) and refuse a mismatch. Pre-C.1.3 these tasks read the manifest for version numbers but never hashed the artifacts (`shagateunimplemented`), and a manifest computed from stdout-with-newline (`412094b4…`) didn't match the stored bytes (`e1d549e4…`) (`manifestsha`) — both fixed by computing identically on the publish and member sides.
 - **One read path for collection files:** `id:{folder_id}` only. The legacy root-relative `/{collection}` read was **removed** as a default in C.1.3 (`memberapplynotdistaware` — Option A); a pre-backfill org with no `folder_id` is skipped with an explicit logged notice (re-publish backfills it), not silently read from `/{collection}`. **This is also why a bare `/{collection}` resolve is unsafe (`memberdupcollfolders`/`nameambig`):** on a drive where a collection's code dir shares a base name with a data folder (e.g. `/library` code dir vs a `library` data/commons folder), a **non-drive-member's** bare-name resolve is ambiguous (their view omits the drive-root parent, so the db13 tie-break can't pick) and either fails or resolves the wrong folder. Always resolve an installed collection's root by its `org-config` `installed_collections[].folder_id` id-anchor — never a bare `/{name}` — for reading capability definitions, browsing, or any collection access.
-- **`publish-updates` republishes `/shared/dist/` on every publish (C.1.3, `publishdistgap`)** — manifest + directories + binary — so the member-facing authority never goes stale after an in-place update, with a publish-time round-trip SHA self-check.
+- **`publish-updates` republishes `/shared/dist/` on every publish (C.1.3, `publishdistgap`)** — manifest + directories — so the member-facing authority never goes stale after an in-place update, with a publish-time round-trip SHA self-check.
 - **Admin path:** local clones (tag-pinned, or channel-pinned on a channel org; see § "Distribution channels") → publish to the backend. "Is the org current with upstream?" is an admin-only **git** check (`git fetch` + compare tags; on a channel org, compare commits), not a raw fetch.
 - **NEVER `WebSearch` to discover versions, releases, or directory state (`adminupstreamstale`, C.1.3.4 — HIGH).** A `WebSearch` returns a cached, weeks-stale snapshot of the *public* directory; an admin "update our org" run that web-searched concluded "org is ahead / nothing to update" against a June-9 cache while the org was many releases ahead, and the update never happened. For a **self-distributing org** (admin publishes from local clones rather than consuming the public directory) the canonical "latest release" is the **clone working tree / git tags**, and the public broadcast directory is *by design behind* the org's internal versions — so it must not be treated as upstream. "Update our org" routes to **clone-script refresh (git fetch --tags) → `publish-updates` from the refreshed clones**, never web/raw discovery. Repairing a corrupt remote file likewise re-sources from the clone (`git show HEAD:<path>`), never a web fetch.
 - **The SHA-pinned GitHub fetch protocol below is now the ADMIN-only path and the DEPRECATED member fallback** (used only by a not-yet-migrated org, with a deprecation warning; removal targeted for the release after C). New installs always have `/shared/dist/` and never use it.
@@ -317,7 +317,7 @@ The web-fetched catalog cache has had no writer on a clone-publishing org since 
 Publishing a new version of any artifact (a collection, an adapter, or core/marketplace) follows a fixed, gated procedure. The canonical, ordered gate list is the **release-checklist** in the developer collection (`release-checklist.md`); the `release` task there **generates** the push script that encodes it. Do not hand-author release scripts — generate them, so the invariants below are never left to memory.
 
 - **Preflight is a hard gate.** Every collection in the release passes `@ai:preflight` (or `lib/preflight-cli.sh`) with zero errors before anything is pushed. The push script runs this and aborts on error (the `release-script-runs-preflight` contract).
-- **Push in dependency order, `agent-index-resource-listings` LAST.** The broadcast layer must never reference a version whose code or binary isn't live yet (else `check-updates`/adapter-update flows resolve to a 404). Order: adapter → core → marketplace → collections → resource-listings.
+- **Push in dependency order, `agent-index-resource-listings` LAST.** The broadcast layer must never reference a version whose code isn't live yet (else `check-updates`/adapter-update flows resolve to a 404). Order: adapter → core → marketplace → collections → resource-listings.
 - **Tag every repo `v<version>` after a successful push.** The `clone-script-generator` and `/shared/dist/manifest.json` pin to these exact tags — tags are the contract between a release and the distribution layer. **Never move or delete a published tag** (cut a new one if a re-cut is truly needed). Distribution pins to release tags. The **only** exception is an org that has explicitly named a distribution channel (§ "Distribution channels"), which pins to `channel/<name>` branch heads with tag fallback.
 - **The agent never pushes or tags.** `git push`/`git tag` run natively on the admin's host, where credentials and a clean working tree are. Agent-side git over a synced/mounted filesystem produces torn commits (FCI-1).
 - **Agent-side git is read-only via `git show` (`gitwritelock`).** When the agent needs git content from the sandbox (e.g. the git-blob LF bytes of a file for a canonical SHA), use `git show <ref>:<path>` — a read that touches neither the working tree nor `index.lock`. Never `git checkout`/`git switch`/`git stash`/`git add` from the sandbox: those take the index lock and write torn files back through the mount (FCI-1), and can collide with the user's native git session. Read with `git show`; let all mutating git run natively on the host.
@@ -327,8 +327,7 @@ Publishing a new version of any artifact (a collection, an adapter, or core/mark
 - **Author orchestrator/helper scripts via heredoc to native tmp, not the Write tool onto the mount (`scriptnulltail`, M4 / C.1.3.4).** The same torn-write/null-tail hazard that affects backend writes also affects the **host Write tool writing onto the Cowork mount**: a script written there can come back tail-truncated or with NUL bytes in the tail (observed live during the ms_install_10 member apply — the resync orchestrator had to be rewritten via `bash` heredoc to a native `mktemp` path before it would run). When generating a script to execute, write it to a native temp dir via a `bash` heredoc (`cat > "$(mktemp -d)/x.py" <<'EOF' … EOF`), then **compile/verify it** (`python -m py_compile` / `node --check`) before running — never trust a Write-tool file on the mount for executable content. (This is the host-side sibling of the `collectionjson-tornwrite` backend bug.)
 - **Never read/consume a `/tmp` scratch file you did not create in the current session (`staletmpinject`, C.1.3.6).** Cross-session `/tmp` is shared: a fixed, predictable scratch name (e.g. `/tmp/reg.json`) can already hold a stale file left by an unrelated prior session, and consuming it injects wrong context. During a live `invite-member` this clobbered `/members-registry.json` with a phantom member because a `> /tmp/reg.json` redirect silently failed (`Permission denied` on a leftover file owned by another session) and the read-modify-write fell through to the pre-existing bytes. When staging a remote-read → modify → remote-write, always: (a) use a **unique per-invocation** path (`mktemp`) or a session-owned scratch dir you create — never a fixed shared name; and (b) **assert the populate step actually succeeded** — check its exit status AND that the file is non-empty / parses as expected — **before** consuming it; a failed populate must abort loud, never silently fall through to whatever bytes were already there. Keep the read-back-after-write verify on remote coordination files (`/members-registry.json`, `/org-config.json`, …) — it is the net that caught this. **And never re-discover the staged file by `ls`/newest-mtime/glob (`ocstalereselect`, C.1.4.0):** hold the exact unique path you wrote in a variable and reference *that* for the authoritative write. Ambient "newest staged file" selection can pick an *older same-session, same-org* copy — its `org_id` matches, so an identity-only assertion passes — and silently revert a just-made edit (a near-miss on `org-config.json` during a Dev 2 create-org). So also **extend the pre-write assertion beyond identity to content**: assert the staged bytes actually contain the change you just made (e.g. the entry you're registering is present) so a stale same-org copy is caught *before* the write, not only by the read-back.
 - **Then publish the backend** per the backend-first model above: clone at the new tags (`clone-script-generator`) → republish `/shared/dist/` + `manifest.json` (`backend-distribution`) → verify the manifest. The release is not "shipped" to members until the manifest reflects it.
-- **Native binaries must be code-signed (C.1).** Every helper-binary release artifact is signed before checksums are computed (Windows Authenticode / Trusted Signing; macOS Developer ID + notarized `.app`; optional Linux GPG) so the directory `sha256` pins the **signed** bytes, and a `verify-signed` gate fails the release otherwise. Unsigned binaries are hard-blocked by Windows Smart App Control with no user bypass. The directory's `post_install` is **per-platform** — darwin installs the notarized `.app` (macOS registers bundles, not loose executables); never `--register` a bare darwin binary. See `lib/permission-helper-go/SIGNING.md`.
-- **Install orchestration makes zero GitHub calls (C.1).** `create-org` (and the agent generally) never fetches `raw`/REST to resolve versions, the catalog, or the binary — all GitHub access is the git protocol (`ls-remote`, `clone`) and the signed binary's release-asset download, inside the host-run clone scripts. Version discovery is `git ls-remote` inside `lib/clone/resolve-refs.js` (no `main` fallback for infra repos that have tags); the binary is resolved backend-matched from the freshly-cloned listings.
+- **Install orchestration makes zero GitHub calls (C.1).** `create-org` (and the agent generally) never fetches `raw`/REST to resolve versions or the catalog — all GitHub access is the git protocol (`ls-remote`, `clone`), inside the host-run clone scripts. Version discovery is `git ls-remote` inside `lib/clone/resolve-refs.js` (no `main` fallback for infra repos that have tags).
 
 ## Distribution channels (core 3.32.0)
 
@@ -859,6 +858,8 @@ Remote connectivity may be unavailable (expired credentials, exec bundle missing
 
 *(Replaces § "Permission-Modifying Operations" as of core 3.32.0. Design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-solution-design.md` and `-tech-design.md`.)*
 
+Core 4.0.0 removed the permission-change-helper; collections that still call it must move to the procedure.
+
 The v2.0 adapter contract provides three permission-modifying operations: `aifs_share`, `aifs_unshare` and `aifs_transfer_ownership`. It also provides the read-only `aifs_get_permissions`, which any task may call directly.
 
 ### The rule
@@ -944,71 +945,10 @@ When composing a change, the recipient for an org member is that member's `shari
 ### Implementation enforcement
 
 Preflight (developer ≥ 1.14.0):
-- **ERROR** on any *invocation* of `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` (a call form, or `aifs-exec.sh <op>`) in a collection's `api/`, `setup/`, `internal/`, `upgrade/` or `templates/` Markdown. Prose that only names an op is not an invocation. Exempt: core's `internal/permission-changes.md` and the deprecated helper skill files; the developer collection's `preflight.md` (it quotes the patterns).
-- **WARNING** on remaining references to `permission-change-helper`, `build-permission-spec` or `agent-index://` (one per file).
+- **ERROR** on any *invocation* of `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` (a call form, or `aifs-exec.sh <op>`) in a collection's `api/`, `setup/`, `internal/`, `upgrade/` or `templates/` Markdown. Prose that only names an op is not an invocation. Exempt: core's `internal/permission-changes.md`; the developer collection's `preflight.md` (it quotes the patterns).
+- **WARNING** on remaining references to the removed `permission-change-helper`, `build-permission-spec` or `agent-index://` (one per file).
 - **WARNING** when `collaborative-acls.json` uses the legacy `grants` key instead of `acls`.
 - (Agent-run preflight, judgment) every change a workflow passes to the procedure names a declared `source`.
-
-### Deprecated: the permission-change-helper flow (removed in core 4.0.0)
-
-Collection versions released before their move to this procedure still invoke the `permission-change-helper` skill, which remains installed and working through core 3.x. The contracts below continue to govern that legacy flow until core 4.0.0 removes it. New and updated workflows MUST NOT use it.
-
-#### Trust contract for the agent in the URL-handler invocation flow
-
-The helper's invocation surface is a custom URL scheme (`agent-index://`) that the user clicks in chat. This section codifies what Claude does and does not do in this flow, so the safety boundary is in writing and testable at preflight.
-
-**The agent does:**
-
-- Build a permission-change spec from task context (data-only generation).
-- Write the spec to `outputs/permission-plan-{timestamp}.json` in the workspace folder.
-- Emit a markdown link in chat of the form `[summary text](agent-index://apply?spec=outputs/permission-plan-{timestamp}.json)`.
-- **Also emit the same URL inside a fenced code block**, immediately after the markdown link, as a fallback for clients that strip or hide custom-scheme links (e.g., current Cowork desktop builds as of 2026-05-20). The fenced URL still requires deliberate user action (copy → paste into browser address bar), so the trust boundary is preserved. The dual emission is normative — preflight enforces it (see "Implementation enforcement" below). Added in core 3.7.3 to close bug `20260519-8d20ea22`.
-- Wait for the user to report the outcome of clicking the link, or read the helper's structured outcome JSON if it's surfaced through a conversation channel. The outcome file is written by the binary on terminal state to `outputs/permission-plan-{timestamp}-outcome.json` (alongside the spec file; same timestamp).
-- After the user reports completion, verify the post-state by calling `aifs_get_permissions` on each affected path (read-only, agent-callable directly).
-- Surface concise narration to the user about what was applied and what verification confirmed.
-
-**The agent does not:**
-
-- Auto-fire the URL on the user's behalf. No HTML auto-redirects, no `window.location` injections in any document the user views, no programmatic navigation to `agent-index://...` URLs. The link must require a deliberate user click.
-- Embed pre-authorization tokens in the URL that bypass the review-page Accept step. The URL points to a spec; the binary opens a review page; the user must click Accept on that page. Skipping the review at the URL layer is not allowed.
-- Emit URLs that include the actual permission change as encoded parameters rather than referencing a spec file. Specs live on disk where the user can inspect them; URLs reference them by path.
-- Auto-confirm on the user's behalf. The page's Accept button must require the user's explicit click; the agent does not emit any mechanism that would simulate or pre-trigger that click.
-- Generate URLs targeting spec paths outside the workspace's `outputs/` directory. The helper binary should validate the spec path stays within the workspace and refuse otherwise — this is defense-in-depth against an attacker who can write to the URL bar.
-- Suppress the OS-level "allow this site to open agent-index?" confirmation prompt that the browser shows on first use. That prompt is a user-visible signal; it must remain.
-
-**Why these specific don'ts:** the safety boundary that gates permission writes is the rule "the agent shouldn't be the source of authority for security-changing actions." The URL-handler architecture routes around this by making the privileged action's call stack start at the user's deliberate click, not at the agent's tool call. Any of the listed don'ts would re-collapse the gap by putting the agent's automated emission upstream of the privileged action without the user's deliberate gating step in between. The list above is what makes the architecture honest.
-
-**Implementation enforcement:** preflight checks should grep task workflows for the disallowed patterns (e.g., `<script>.*agent-index://`, `window\.location\s*=\s*['"]agent-index://`, `auto.*click.*Accept`). Any match is an authoring error and fails preflight. Preflight also verifies the **positive** pattern added in core 3.7.3: every task that emits an `agent-index://apply` markdown link must be paired (within ~5 lines) with a fenced code block containing the same URL. A markdown link without the code-fence twin is an authoring warning — preflight surfaces it. This gives the trust contract teeth at release time rather than relying on author memory.
-
-#### Trust contract for binary-tool downloads (added in core 3.4.0)
-
-Binary tools (e.g. `permission-helper-go`) are downloaded from the registry declared in `infrastructure-directory.json` → `binaries[]` and installed by `apply-updates` Phase 1 step 7. This section codifies the trust boundary for that path.
-
-**The agent does:**
-
-- Read `infrastructure-directory.json` from `infrastructure_directory_url` (HTTPS only) to identify what binary tools the registry knows about.
-- Read `org-config.json` → `binaries{}` to identify what versions the org has pinned.
-- Read the local version file at the path declared by the registry's `version_file` to identify what's installed.
-- Surface the upgrade summary to the user in chat — source URL, target version, SHA256 fingerprint (truncated), local version, install destination.
-- Wait for explicit user Y/N confirmation in chat before downloading.
-- On Y: download the binary via HTTPS, compute SHA256 of the downloaded bytes, compare against the registry's published SHA256.
-- On SHA256 match: write atomically to `install_destination`, `chmod +x` on Unix, write the version string to the `version_file` path.
-- Run the registry's `post_install_command` (e.g. `--register`).
-- Surface the result of the install + post-install to the user.
-
-**The agent does not:**
-
-- Download binaries without explicit user Y/N approval in chat. The trust contract for the URL-handler flow extends to this: the user is the source of authority for making changes to their machine, including installing executables.
-- Skip SHA256 verification, even if the user wants to "just install it." A SHA256 mismatch is a security failure path. Abort, do not retry, surface clearly.
-- Install binaries to paths outside `mcp-servers/<name>/`. The registry's `install_destination` field is template-substituted with `{ext}` only; agents may not relocate binaries elsewhere.
-- Run `post_install_command` if the install or SHA256 step failed. Registration steps assume the binary is correctly placed; running them on a partial/corrupt install can leave the system in a worse state than no install.
-- Use download URLs not derived from the registry's `release_url_template`. URLs must come from the registry; the agent may not synthesize a URL that points elsewhere "because the registry seems out of date."
-- Pin to versions below the registry's `min_required_version`. That floor exists to lock everyone out of known-bad versions; the floor is non-negotiable from the agent side. Admins may try via `pin-binary-version`; that task validates and refuses.
-- Auto-run `--register` or any `post_install_command` outside the `apply-updates` flow. The trust contract requires the install + register pair to be a single user-approved step.
-
-**Why these specific don'ts:** the same boundary that gates permission writes also gates binary installs. The agent must not be the source of authority for "putting an executable on the user's machine." User-approved download in `apply-updates` makes the user the gating step; SHA256 verification makes the registry's signed identity the second gating step. The list above keeps both gates honest.
-
-**Implementation enforcement:** preflight checks should grep task workflows for disallowed patterns: bare `wget`/`curl` invocations for binary downloads outside the `apply-updates` Phase 1 step 7 flow, hard-coded URLs in any task that doesn't read from `infrastructure-directory.json`, any auto-confirm logic on the binary-install user-prompt step. Same pattern as the URL-handler enforcement above.
 
 ---
 

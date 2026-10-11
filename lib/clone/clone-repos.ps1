@@ -174,12 +174,5 @@ foreach ($x in $results) {
 Write-Host ""
 Write-Host ("clone summary: " + $okCount + " ok, " + $failNames.Count + " failed" + $(if ($failNames.Count) { ": " + ($failNames -join ", ") } else { "" }) + "  (record: .agent-index/clone-resolution.json)")
 
-# ---- infra mode: deprecated helper binary (removed in core 4.0.0) ----
-$helper = Join-Path $PSScriptRoot "install-helper-binary.ps1"
-if ($mode -eq "infra" -and $failNames.Count -eq 0 -and (Test-Path $helper)) {
-  & $helper -InstallRoot $installRoot -Backend $backend -HostArch $hostArch
-  if ($LASTEXITCODE -ne 0) { Write-Host "FATAL: helper binary install/registration failed"; exit 2 }
-}
-
 if ($failNames.Count -gt 0) { exit 1 } else { exit 0 }
 # AIFS:FILE-END

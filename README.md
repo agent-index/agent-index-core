@@ -80,11 +80,11 @@ Then say exactly this to Claude:
 
 Claude will read this README, create `agent-index.json` from the core template, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
 
-Setup also generates a **clone script** (PowerShell on Windows, bash on macOS/Linux) tailored to your machine and pins it to the published release tags. Running it is a one-shot step: it clones the adapter, marketplace, resource-listings, and the collections you selected, *and* downloads, SHA-verifies, places, and **registers** the permission-helper binary for the `agent-index://` scheme — so you never run a second "install the binary" script later. Setup then publishes everything to your backend's `/shared/dist/` and bakes the binary into the member bootstrap zip.
+Setup also generates a **clone script** (PowerShell on Windows, bash on macOS/Linux) tailored to your machine and pins it to the published release tags. Running it is a one-shot step: it clones the adapter, marketplace, resource-listings, and the collections you selected. Setup then publishes everything to your backend's `/shared/dist/` and builds the member bootstrap zip.
 
 That's it. Claude takes it from there.
 
-> **Distribution model (Release C):** Your org's backend *is* the distribution layer. After setup, members read the adapter, marketplace, resource-listings, installed collections, and the helper binary from `/shared/dist/` on your backend — never from github.com. `/shared/dist/manifest.json` is the authoritative record of what version your org is on. Only the admin touches GitHub, and only when bridging a new release into the org via the clone script (re-run on every add/update).
+> **Distribution model (Release C):** Your org's backend *is* the distribution layer. After setup, members read the adapter, marketplace, resource-listings, and installed collections from `/shared/dist/` on your backend — never from github.com. `/shared/dist/manifest.json` is the authoritative record of what version your org is on. Only the admin touches GitHub, and only when bridging a new release into the org via the clone script (re-run on every add/update).
 
 ---
 
@@ -97,7 +97,7 @@ After an org admin has completed org setup, new members follow this process:
 3. Open Claude Cowork and set your working folder to `~/agent-index/`
 4. Say: **"set up my agent-index member workspace"**
 
-The bootstrap hook will detect you as a new member and guide you through authenticating to the org's remote storage and setting up your local workspace. The permission-helper binary comes from the bootstrap zip (or your org backend's `/shared/dist/`) and is registered for you automatically — members never download anything from github.com.
+The bootstrap hook will detect you as a new member and guide you through authenticating to the org's remote storage and setting up your local workspace. Members never download anything from github.com.
 
 ---
 
@@ -136,11 +136,10 @@ Agent-index uses a two-tier filesystem: member files are local, org/shared files
     /members/artifacts/               ← per-member shared artifact namespace
     /marketplace-cache/
     /bootstrap/
-      member-bootstrap.zip            ← bootstrap zip for new members (binary baked in)
+      member-bootstrap.zip            ← bootstrap zip for new members
     /dist/                            ← distribution layer (Release C) — members read from here, not GitHub
       manifest.json                   ← authoritative org version record (per-artifact sha256)
       /directories/                   ← adapter, marketplace, resource-listings, installed collections
-      /binaries/                      ← permission-helper binary per platform (SHA-verified)
     /updates/
       update-log.json                 ← published update instructions for members
       published-state.json            ← snapshot of org state at last publish

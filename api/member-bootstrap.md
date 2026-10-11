@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.10.1
+version: 3.11.0
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -230,12 +230,15 @@ Create the local `member-index.json`:
   "member_folder_id": "{new_id from the ensure-my-drive-space subroutine above}",
   "agent_index_version": "{the ACTUAL installed core version — read it from agent-index-core/collection.json `version` on the remote; do NOT hardcode. Hardcoding a stale default like 2.0.0 is the versionmarker bug.}",
   "last_updated": "{today YYYY-MM-DD}",
+  "helper_removed": true,
   "installed": {
     "skills": [],
     "tasks": []
   }
 }
 ```
+
+`helper_removed: true`: a workspace created by core 4.0.0 or later never had the retired permission helper, so apply-updates Step 1.6 has nothing to remove.
 
 If `member-index.json` already exists: do not overwrite. This is a safety check — if it exists, this might be a re-run of setup and we should not lose installed capability records.
 
@@ -291,22 +294,7 @@ org_name: {org_name}
 status: connected
 ```
 
-**Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
-
-> **Deprecated in core 3.32.0 — now optional.** Core tasks and every collection moved in the 3.32.0 wave make permission changes through the core permission-changes procedure, which needs no binary and no URL handler. The helper is only used by collection versions not yet moved, and is removed in core 4.0.0. **Treat everything in this step as optional:** install/register it only if the org still runs such a collection version; offer the command once; never block onboarding on it; never re-surface it; never tell the member sharing won't work without it.
-
-**Release C + `regenzipnobinary` — the bootstrap zip carries NO binary; fetch the member's-arch build from `/shared/dist/binaries/` as an onboarding step (never from GitHub).** The zip is arch-neutral because the admin cannot know each member's os/arch at build time. So member-bootstrap MUST install the binary here — do **not** defer it to the member's first share (the `regenzipnobinary` miss was onboarding completing without a binary, leaving the member to hit `binary_not_found` at first share). Steps: **detect the host `os`/`arch`; select the matching build** from the manifest's per-backend×os×arch `binaries[]`; **`aifs_read` that specific build** from `/shared/dist/binaries/`; **SHA-verify** it against its own manifest entry; place it (shell-first + read-back) at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`; write `version.txt`; then prompt `--register` (below). This is the same arch-select-and-fetch as `apply-updates` Step 1.6. **If no build is published for the member's `<os>/<arch>`, FAIL LOUD** — "no permission-helper build published for your platform (`<os>/<arch>`) — ask your admin to publish it via `@ai:pin-binary-version` / `@ai:update`" — and do **not** report onboarding complete with a missing/mismatched binary. **Never fetch it from GitHub.**
-
-**Register the `agent-index://` handler — manual host step in Cowork (hostregister), per platform.** The registration CANNOT run from a Cowork session (Linux sandbox; the binary is host-native), and a Linux-sandbox registration of a Windows/Mac binary is NOT host registration. Do NOT claim it auto-registers or "registers on first use." Surface the exact host step as a required one-time action:
-- **Windows** (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
-- **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
-- **macOS host:** run the bundled **`.app` installer** — `--register` on the bare binary always fails on darwin (macOS registers bundles, not loose executables; bug `20260626-8d20ea22` `macosregister`). The darwin build fetched from `/shared/dist/binaries/` (the matrix's darwin entry) is the notarized `Agent-Index Helper.app` / `installer/darwin/install.sh`, not a loose binary; the member runs the installer, which places the `.app` in `~/Applications/` and registers via `lsregister`.
-
-After the member runs it on the host, **verify** rather than assume: macOS → `lsregister -dump | grep agent-index:` (or `--isregistered`); Windows → the HKCU `agent-index` scheme key; Linux → `xdg-mime query default x-scheme-handler/agent-index`. On the member's native platform a registration failure is a **hard** blocker for sharing — surface it as such, do not proceed as if registered.
-
-Signing behavior depends on the directory binary entry's **`signing`** field. If `"trusted"`: the assets are code-signed/notarized and an OS block ("unverified publisher" / Smart App Control) is a signing/release **defect** (bug `20260626-8d20ea22-2`) — report it, don't work around it. If `"unsigned-bypass"` (the interim state while certs are pending): the binary is intentionally unsigned, so a block is **expected** — point the member at the Smart App Control **Evaluation-mode** workaround in `lib/permission-helper-go/SIGNING.md` (and right-click→Open for an unsigned macOS `.app`).
-
-**Registration is a do-it-now completion step, not a closing footnote (`helpernoreg`, ms-install-9).** Present the register command as a required action the member runs **during bootstrap**, and re-surface until the helper setup check confirms the handler is registered. Do NOT defer it to a one-line "note at the end," and do NOT report bootstrap "complete" in a way that implies sharing works — because if the member skips registration, their **first owned-content share will emit an `agent-index://` link that does nothing** (the handler isn't registered; and in the unsigned-bypass interim SAC may block it even if it is). When that happens, the fallback is the helper's headless **`--cli <spec PATH>`** path (see `permission-change-helper` § headless fallback — pass the spec FILE path, not the `agent-index://` URL). State that consequence plainly so the member registers now rather than discovering the dead link at first share. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
+**Step 7b** — (Step removed in core 4.0.0: the permission helper is retired.)
 
 **Step 8 — Confirm and hand off**
 

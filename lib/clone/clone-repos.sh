@@ -133,9 +133,6 @@ echo ""
 FCOUNT=$(echo $FAILED | wc -w | tr -d ' ')
 echo "clone summary: $OK ok, $FCOUNT failed${FAILED:+:$FAILED}  (record: .agent-index/clone-resolution.json)"
 
-if [ "$MODE" = "infra" ] && [ "$FCOUNT" -eq 0 ] && [ -f "$SELF_DIR/install-helper-binary.sh" ]; then
-  bash "$SELF_DIR/install-helper-binary.sh" "$ROOT" "$BACKEND" "$ARCH" || { echo "FATAL: helper binary install/registration failed"; exit 2; }
-fi
 [ "$FCOUNT" -eq 0 ] || exit 1
 exit 0
 # AIFS:FILE-END
