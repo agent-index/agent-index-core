@@ -115,7 +115,15 @@ If the remote filesystem is already configured: attempt `aifs_exists("/org-confi
 
 If the remote filesystem is not configured (empty backend/connection fields): this is a fresh install. Proceed to Step 2.
 
-If `agent-index.json` cannot be read: surface: "I couldn't find the agent-index root configuration file. Make sure you've cloned agent-index-core into this directory before running org setup." Halt.
+**Fresh clone: create `agent-index.json` from the template (`createorgnoseed`).** A fresh clone of agent-index-core has no `agent-index.json` at the project root; the workspace template ships at `agent-index-core/templates/agent-index.template.json` (the legacy `agent-index-core/agent-index.json` was retired in core 3.6.0). If the project root has no `agent-index.json` **and** that template exists:
+
+1. Copy the template to `<project_dir>/agent-index.json` unchanged, except set the top-level `version` to the cloned core's version (`agent-index-core/collection.json` → `version`). Write shell-first and read it back (it must parse and contain `remote_filesystem`).
+2. Tell the admin: "Created `agent-index.json` from the core template — this is a fresh install."
+3. Continue as a fresh install (Step 2). Step 3c fills in `remote_filesystem` and `distribution_channel`.
+
+This is part of the task, not a workaround: it is the only way a fresh clone gets its root configuration file.
+
+If neither `agent-index.json` nor the template can be read: surface: "I couldn't find the agent-index root configuration file or its template. Make sure you've cloned agent-index-core into this directory before running org setup." Halt.
 
 ---
 

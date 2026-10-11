@@ -63,9 +63,12 @@ After cloning, your local directory should look like this:
 ```
 ~/agent-index/
   /agent-index-core/          ← just cloned
-    agent-index.json           ← root registry (inside agent-index-core)
+    templates/
+      agent-index.template.json  ← setup copies this to ~/agent-index/agent-index.json
     README.md                  ← this file
 ```
+
+To test an unreleased candidate on a distribution channel, clone that branch instead, e.g. `git clone -b channel/dev-1 https://github.com/agent-index/agent-index-core`, and answer the channel name when setup asks.
 
 ### Step 2: Open Cowork and run org setup
 
@@ -75,7 +78,7 @@ Then say exactly this to Claude:
 
 > **"Read the README, then set up my agent-index org"**
 
-Claude will read this README, find `agent-index.json`, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
+Claude will read this README, create `agent-index.json` from the core template, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
 
 Setup also generates a **clone script** (PowerShell on Windows, bash on macOS/Linux) tailored to your machine and pins it to the published release tags. Running it is a one-shot step: it clones the adapter, marketplace, resource-listings, and the collections you selected, *and* downloads, SHA-verifies, places, and **registers** the permission-helper binary for the `agent-index://` scheme — so you never run a second "install the binary" script later. Setup then publishes everything to your backend's `/shared/dist/` and bakes the binary into the member bootstrap zip.
 

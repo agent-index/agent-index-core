@@ -85,6 +85,9 @@ Design record: `/shared/projects/core-improvements/artifacts/distribution-channe
 ### Deprecated
 - **`permission-change-helper` 1.4.0** (skill, binary, `agent-index://` handler, `lib/permission-spec/`) — kept working through 3.x for collections not yet moved; removed in 4.0.0 together with `pin-binary-version` and the binaries registry entries.
 
+### Fixed — fresh-clone setup (`createorgnoseed`)
+- **`create-org` Step 1 now creates `agent-index.json` from `templates/agent-index.template.json` on a fresh clone.** Since 3.6.0 retired `agent-index-core/agent-index.json`, nothing created the root configuration file, so a fresh clone halted at Step 1 unless the agent improvised the copy. Found by the 3.32.0 live test (new org on `channel/dev-1`). The README's Step 1 layout is corrected to match.
+
 ## [3.31.0] — 2026-09-27 — Multi-marketplace: unique names instead of mandatory prefixes; two publish-updates fixes
 
 **MINOR — relaxes a 3.30.0 rule; every 3.30.0-valid catalog stays valid.** Pairs with **agent-index-marketplace 2.21.0**.
