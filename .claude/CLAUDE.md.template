@@ -86,6 +86,8 @@ When routing resolves to a capability, follow this procedure — **do not explor
 
 The general pattern: all task and skill definitions live at `/{collection}/api/{name}.md` on the remote filesystem. Read them with `aifs_read`, then follow the instructions in the file. **Do not `ls` or `aifs_list` to search for them** — the path is deterministic.
 
+**On a Google Drive org, if you aren't a member of its Shared Drive** (most members), read by id anchor instead: `id:{folder_id}/api/{name}.md`, where `folder_id` is the collection's entry in org-config `installed_collections[]` (read org-config as `id:{org_config_id}`). Use the id form whenever the path read fails, or returns a file whose collection version disagrees with org-config — a name lookup can reach a same-named folder outside this org.
+
 `<project_dir>` is the directory containing `agent-index.json`. In Cowork, this is the mounted workspace folder.
 
 ### Core aliases (always available)

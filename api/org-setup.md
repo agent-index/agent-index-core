@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.10.0
+version: 3.11.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -47,6 +47,8 @@ This skill manages capability installation and lifecycle. It does not manage pre
 ## Directives
 
 ### Remote Filesystem Access
+
+**Collection reads use the collection's read base, not a bare path (`memberpathreads`, core 4.0.0 live test).** Wherever this skill reads `/{collection}/...` (definitions, `setup/`, `apps/`), read it from the collection's base: on gdrive `id:{folder_id}/...` first (`folder_id` from org-config `installed_collections[]`), path as the fallback; on OneDrive the path first (see apply-updates' manifest-sync step 1.5). A member's root-level path lookup can miss, or, before gdrive adapter 2.11.3, reach a same-named folder in another org's drive: a fresh Dev Two install checked `/projects/apps` against another org's older `projects`, found nothing, and installed projects with no `apps/` and no `apps_path`. On gdrive read org-config itself as `id:{org_config_id}`.
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
@@ -165,7 +167,7 @@ Get confirmation before beginning any installations.
 
 **Phase 4a — Collection-level materialization (added in core 3.29.0).** Before the per-capability loop below, run once for each distinct collection represented in the installation order:
 
-1. Check whether the collection ships bundled scripts: `aifs_exists("/{collection}/apps")`. If it does not, skip to the next collection — this is the common case and is not an error.
+1. Check whether the collection ships bundled scripts: `aifs_exists("{base}/apps")`, `{base}` being the collection's read base (gdrive `id:{folder_id}`; see Remote Filesystem Access). If it does not, skip to the next collection — this is the common case and is not an error.
 2. Copy the collection's `apps/` directory to the member's LOCAL workspace at `members/{member_hash}/installed/{collection}/apps/`, preserving the directory structure beneath it (some collections nest scripts one level deep, e.g. `apps/gmail-labeler/label_emails.py`). Read each file with `aifs_read` and write it with the native file tools, the same remote-read → local-write pattern used for capability definitions in the loop below.
 3. Set the **core-injected** parameter `apps_path` for every capability in this collection. Two values, deliberately different (`standards.md`, "Core-Injected Parameters"):
 
@@ -337,6 +339,7 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
    - Write the migrated `setup-responses.md`.
    - **Re-materialize the collection's `apps/` directory (added in core 3.29.0)** if the collection ships one and this upgrade crosses a collection version boundary. `apps/` is collection-owned and core-managed, so the replacement is **wholesale**: remove `members/{member_hash}/installed/{collection}/apps/` entirely and copy the new version down from `/{collection}/apps` as in Phase 4a. There is no merge, no per-file diff, and no preservation of anything found in that directory — which is safe precisely because nothing but core writes there. A collection that has stashed member data inside `apps/` is in violation of the member-data rule and will lose it here; that is the intended failure, not an edge case to accommodate. Re-materialize once per collection per upgrade run, not once per capability. `apps_path` does not change and needs no migration.
 9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4b step 11's wording; same data-shape principle.)
+9a. **Aliases follow the setup template (`civiewpermsclash`, core 4.0.0).** If the new setup template registers a different `@ai:` alias than the member-index entry carries, replace the entry's alias with the template's (check it against the member's other aliases first, as on install). Client-intelligence 2.4.1 renamed its `view-permissions` alias to `@ai:view-client-permissions` this way, so it no longer shadows core's `@ai:view-permissions`.
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
 
 **If no upgrade script exists for this version boundary (MINOR or PATCH upgrade):** still perform steps 2 and 8 — read the new content from remote and write it to the local install path. Carry all existing setup responses forward unchanged. Update the version in `member-index.json`. The "no upgrade script" branch is *not* a bookkeeping-only operation — the actual file content must be replaced. Skipping step 8 leaves the local file stale relative to what `member-index.json` claims is installed (which is the failure mode in bug `20260502-8d20ea22-5`).

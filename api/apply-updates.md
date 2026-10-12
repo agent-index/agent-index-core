@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 4.0.0
+version: 4.1.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -76,7 +76,7 @@ Precedence rule: **the member's own handshake file outranks the registry** — t
 
 If local `member-index.json` has no `member_folder_id`, OR the handshake file `/shared/members/artifacts/{member_hash}/member-folder.json` does not exist (pre-3.9.0 member whose space is still on the org Shared Drive):
 
-Run the **ensure-my-drive-space subroutine** (canonical definition: `member-bootstrap.md` Step 5): create `Agent-Index-Private` in the member's own My Drive via `id:root/...`, stat for the resolved Drive ID, **migrate any content from the old Shared-Drive space** (per-file `aifs_copy`, read+write fallback; never delete the old space), write the handshake file, update local `member-index.json`. Surface: "✓ Your private member space is now in your own My Drive ({n} files migrated)."
+Run the **ensure-my-drive-space subroutine** (canonical definition: `member-bootstrap.md` Step 5): create this org's private space (`Agent-Index-Private ({org_id})`, with `org.json`) in the member's own My Drive via `id:root/...`, stat for the resolved Drive ID, **migrate any content from the old Shared-Drive space** (per-file `aifs_copy`, read+write fallback; never delete the old space), write the handshake file, update local `member-index.json`. Surface: "✓ Your private member space is now in your own My Drive ({n} files migrated)."
 
 This is the migration path for existing members: the 3.9.0 update entry triggers every member's `@ai:update`, which runs this step — no admin action per member. The admin's next `@ai:publish-updates` reconciles handshakes into the registry. Idempotent; must not block the update on failure (surface and continue).
 
@@ -104,7 +104,8 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 
 `agent-index.json` `version` and `member-index.json` `agent_index_version` both record the installed core version and can drift apart (observed: 3.21.0 vs 3.20.0). It's informational, but drift confuses `check-updates`-style reporting. **The authoritative source is NOT either local field** — the 3.22.1 version of this migration copied `agent-index.json.version` → member-index, which is **backwards on a fresh org**: create-org sets member-index correctly from `collection.json` (e.g. 3.22.2) while `agent-index.json.version` was born stale at the template's 3.1.1 (the `createorgversionstale` bug, fixed in create-org 3.9.1 but still present on orgs created before that). Copying the stale field would have **downgraded the correct one**. So reconcile to the org's authority instead:
 
-1. Read **`org-config.json` `agent_index_version`** (the org's authoritative installed core version — set by create-org, advanced by publish-updates) via `aifs_read`. Also read local `agent-index.json` `version` and `member-index.json` `agent_index_version`.
+0. **Remember the installed core version first (`m5beforemerge`, core 4.0.0 live test).** Migration 5 runs before the core files are updated, so after it the local field already shows the target and the plan would read "4.0.0 → 4.0.0". Before this migration raises either field, store the current local `agent-index.json` `version` in `member-index.json` as **`core_version_before_sync`** — only if that field is absent (a run that stopped before Phase 1 keeps the original value). Step 3 uses it as the core-update `from_version`; Phase 1 removes it once the core files are updated, and Step 6 removes it if the run had no core-update.
+1. Read **`org-config.json` `agent_index_version`** (the org's authoritative installed core version — set by create-org, advanced by publish-updates) via `aifs_read` (`id:{org_config_id}`; see "Remote addressing" under Directives). Also read local `agent-index.json` `version` and `member-index.json` `agent_index_version`.
 2. If `org-config.agent_index_version` is present and **either** local field differs from it, set **both** `agent-index.json.version` AND `member-index.json.agent_index_version` to the org-config value (verify-after-write each). Surface one line: "✓ Synced local version fields to org core version {version}." Otherwise silent.
 3. If `org-config.json` can't be read (offline/transient), do **nothing** — never reconcile two local fields against each other (that's the `migration5wrongdir` footgun: it can't tell which is stale). Skip and retry next run.
 4. Idempotent no-op once all three agree. Never block the update on failure.
@@ -121,6 +122,12 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 
 (org-setup writes the collection-qualified layout directly on a fresh org, so no drift originates there; this upgrade-path migration is where legacy duplicates are reconciled.)
 
+**Migration 7 — the private space belongs to this org (`privatespacecrossorg`, core 4.0.0 live test finding 9).** Before core 4.0.0 every org named the member space `Agent-Index-Private` and found it by that name in My Drive, so a person in two orgs got ONE folder used by both. Run the **org-ownership check** from the ensure-my-drive-space subroutine (`member-bootstrap.md` Step 5, item 0) against the local `member_folder_id`:
+1. Read `id:{member_folder_id}/org.json`. If it names this org's `org_id`: done (silent).
+2. If it's missing and the folder passes item 0's drive check (it's in the member's own drive, not the org's Shared Drive): this org claims the folder. Write `org.json` (`{"org_id": "{org_id}", "org_name": "{org_name}", "claimed": "{ISO 8601}"}`). Silent.
+3. If it names a different org: the folder belongs to that org. Run the ensure-my-drive-space subroutine, which creates this org's own space (`Agent-Index-Private ({org_id})`), writes the handshake and updates `member_folder_id`. Don't move any content: the existing folder can't be split by org. Surface: "Your private space was shared with another agent-index org ({other org_name}). This org now has its own private space; your earlier private items stay in the other org's space."
+Never block the update on failure; surface and continue.
+
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.
 
 ---
@@ -131,14 +138,15 @@ Core 4.0.0 removed the permission-change helper (the `agent-index-show-plan` bin
 
 1. **Decide whether to run.** Run the removal when EITHER `<install_root>/mcp-servers/permission-helper-go/` exists, OR local `member-index.json` has no `"helper_removed": true` marker. The marker check covers the URL handler: on Windows it lives in the registry (`HKCU\Software\Classes\agent-index`), which the agent can't see, so a member who ever had the helper is cleaned up once even if the folder is already gone. If the folder is absent and the marker is set, skip silently. Workspaces created by core 4.0.0 or later start with the marker set (create-org Step 13, member-bootstrap), so they never see this step.
 2. **Old Node helper folder.** If `<install_root>/mcp-servers/permission-helper/` exists (the Node helper retired in 3.7.4), delete it directly; it is a plain local folder. If the delete fails, note it and continue.
-3. **Surface the native removal command.** The handler and binary are host-side, so the member runs one command on their own machine (in Cowork the agent is in a Linux sandbox and can't run it for them; outside Cowork, run it directly if the shell is host-native):
-   - Windows: `powershell -ExecutionPolicy Bypass -File "<install_root>\agent-index-core\lib\uninstall\remove-permission-helper.ps1" -InstallRoot "<install_root>"`
-   - macOS / Linux: `bash "<install_root>/agent-index-core/lib/uninstall/remove-permission-helper.sh" "<install_root>"`
+3. **Put the removal script where the member's machine can run it (`uninstallscriptmissing`, core 4.0.0 live test finding 35).** Step 1.6 runs before Phase 1, and a member install has no local `agent-index-core/lib/` at all (only an admin's clone does). So: if `<install_root>/agent-index-core/lib/uninstall/remove-permission-helper.{ps1,sh}` exists locally, use it as `<script_dir>`. Otherwise read both scripts from the org's core through its read base (gdrive `id:{core folder_id}/lib/uninstall/remove-permission-helper.ps1` and `.sh`, `folder_id` from org-config `installed_collections[]`; OneDrive `/agent-index-core/lib/uninstall/...`), write them byte-exact (LF-normalized) to `<install_root>/.agent-index/tmp/uninstall/`, and use that as `<script_dir>`. Read the script before handing it over; it only removes the handler key, the `mcp-servers/permission-helper-go` folder and the binary under `%LOCALAPPDATA%\Agent-Index\bin` (or the macOS/Linux equivalents).
+4. **Surface the native removal command.** The handler and binary are host-side, so the member runs one command on their own machine (in Cowork the agent is in a Linux sandbox and can't run it for them; outside Cowork, run it directly if the shell is host-native). Use the host path of `<script_dir>`:
+   - Windows: `powershell -ExecutionPolicy Bypass -File "<script_dir>\remove-permission-helper.ps1" -InstallRoot "<install_root>"`
+   - macOS / Linux: `bash "<script_dir>/remove-permission-helper.sh" "<install_root>"`
 
    Say in one line why: "This removes the old permission helper, which agent-index no longer uses."
-4. **Read the result.** The script prints one JSON line `{handler_removed, binary_removed, stray_ext_removed, errors[]}` and exits 0 (everything removed, or nothing to remove) or 1 (partial). Ask the member to paste it, or read it if the agent ran the command.
-5. **On success** (exit 0, `errors` empty): set `"helper_removed": true` in `member-index.json`. One summary line, e.g. "✓ Removed the retired permission helper."
-6. **On failure** (exit 1, non-empty `errors`, or the member can't run it): do NOT fail the update and do NOT set the marker. Say: "The old permission helper couldn't be fully removed; it's unused and safe to leave." Repeat the manual command from item 3 and continue. The next `@ai:update` offers it again until it succeeds.
+5. **Read the result.** The script prints one JSON line `{handler_removed, binary_removed, stray_ext_removed, errors[]}` and exits 0 (everything removed, or nothing to remove) or 1 (partial). Ask the member to paste it, or read it if the agent ran the command.
+6. **On success** (exit 0, `errors` empty): set `"helper_removed": true` in `member-index.json` and delete `<install_root>/.agent-index/tmp/uninstall/` if this run created it. One summary line, e.g. "✓ Removed the retired permission helper."
+7. **On failure** (exit 1, non-empty `errors`, or the member can't run it): do NOT fail the update and do NOT set the marker. Say: "The old permission helper couldn't be fully removed; it's unused and safe to leave." Repeat the manual command from item 4 and continue. The next `@ai:update` offers it again until it succeeds.
 
 Proceed to Step 2.
 
@@ -148,7 +156,7 @@ Proceed to Step 2.
 
 Read the member's `member-index.json` from the local filesystem. Extract `last_applied_update`. This is the cursor — a string ID (e.g., `"004"`) representing the last update entry the member successfully applied. If `last_applied_update` is null or absent, the member has never applied an update.
 
-Read `/shared/updates/update-log.json` from the remote filesystem via `aifs_read("/shared/updates/update-log.json")`.
+Read the update log via `aifs_read("id:{resource_ids.shared_root}/updates/update-log.json")` (path `/shared/updates/update-log.json` as the fallback; see "Remote addressing" under Directives).
 
 If the file does not exist: surface "No update instructions have been published for your org yet. Your admin can publish updates by running '@ai:publish-updates'." Halt.
 
@@ -181,11 +189,13 @@ The merge algorithm collapses all pending update entries into a single set of op
 
 **Commit-carrying operations (core 3.32.0, distribution channels).** An operation that carries `ref`/`commit` (published by a channel org, or on a channel switch) is a real change **even when its `target_version` equals the member's installed version**, or is lower (a move back to released code). Never drop it as "already at that version". Apply it like any update of its type, and record the applied commit in `member-index.json` `applied_commits[<repo>]`. Latest-supersedes merging works as usual: the latest entry's commit wins.
 
+**Entries with no `operations[]` (`flatupdateentry`, finding 27).** `upgrade-collection` before marketplace 2.22.1 wrote entries with the operation fields at entry level (`type: "collection-update"`, `collection`, `target_version`, `ref`/`commit`) and no `operations[]`. Treat such an entry as one operation built from those fields. A flat entry is a real change; never skip it as empty.
+
 **Walk each pending entry chronologically** and apply its operations to the merged plan:
 
 For each operation in the entry:
 
-**`core-update`:** Replace the existing `core_update` with this operation. If a previous `core-update` existed in the merged plan, the new one supersedes it (the latest `target_version` is the only one that matters). Set `from_version` to the member's currently installed core version (from local `agent-index.json`), not from the operation's `from_version` field.
+**`core-update`:** Replace the existing `core_update` with this operation. If a previous `core-update` existed in the merged plan, the new one supersedes it (the latest `target_version` is the only one that matters). Set `from_version` to `member-index.json` `core_version_before_sync` when present (recorded by Migration 5 step 0, before it synced the version fields), else the local `agent-index.json` `version` — never the operation's `from_version` field.
 
 **`marketplace-update`:** Same logic as `core-update` — latest supersedes.
 
@@ -275,13 +285,13 @@ This prerequisite check is gated on target version ≥ 3.1.0. Updates that do no
 **Phase 1 — Infrastructure updates**
 
 If `core-update` is present:
-1. Read the updated `agent-index-core/collection.json` from the remote filesystem via `aifs_read`
-2. Read each updated core API member from remote via `aifs_read("/{collection}/api/{name}.md")`
+1. Read the updated `agent-index-core/collection.json` from core's read base (gdrive `id:{core folder_id}/collection.json`; see "Remote addressing")
+2. Read each updated core API member from the same base (`{base}/api/{name}.md`)
 3. Overwrite the local core files with the updated versions
 4. Update the local `agent-index.json` version field. Also migrate any new top-level fields that are present in the canonical workspace template (read from remote) but missing locally. The canonical template lives at `agent-index-core/templates/agent-index.template.json` (introduced in core 3.4.0; the legacy collection-root path `agent-index-core/agent-index.json` was retired in core 3.6.0). Read via `aifs_read("/agent-index-core/templates/agent-index.template.json")`. Specifically as of 3.1.1: if `infrastructure_directory_url` is missing locally, copy it from the canonical template — without it, `check-updates` cannot determine the latest core or marketplace version. Field migrations are non-destructive: never overwrite a field the member has already set, only add fields that are absent.
 5. **Clean up deprecated v2 artifacts:** If `agent-index-core/tools/aifs-bridge/` exists locally, delete the entire directory (it contains `aifs-bridge.mjs` and `aifs-call.sh` which reference the removed `server.bundle.js`). Also delete `mcp-servers/filesystem/server.bundle.js` if present. These are pre-v3 artifacts that cause errors if Claude discovers and tries to use them.
 
-   **Strip stale `remote_filesystem.mcp_server` and `remote_filesystem.exec` blocks from `org-config.json`** (the `mcp_server` strip added in core 3.3.1, the `exec` strip added in core 3.6.0; together they close bug `20260502-8d20ea22-3`): read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`. Then:
+   **Strip stale `remote_filesystem.mcp_server` and `remote_filesystem.exec` blocks from `org-config.json`** (the `mcp_server` strip added in core 3.3.1, the `exec` strip added in core 3.6.0; together they close bug `20260502-8d20ea22-3`): read `org-config.json` (gdrive `id:{org_config_id}`). Then:
 
    a. **`mcp_server` strip (3.3.1):** If `remote_filesystem.mcp_server` exists AND its `bundle_path` field references the v2 default `mcp-servers/filesystem/server.bundle.js`, delete the entire `mcp_server` block from `remote_filesystem`. Migration is non-destructive: only strips the block if the `bundle_path` is the v2 default; if an admin has manually edited the block, leave it alone and surface a notice.
 
@@ -289,7 +299,8 @@ If `core-update` is present:
 
    Write the updated `org-config.json` back via `aifs_write` if either strip ran. Rationale (both strips): in v3 the bundle path moved to `agent-index.json → remote_filesystem.exec.bundle_path` exclusively. Both `mcp_server` (v2 leftover) and `exec` (3.6.0 fix to create-org template) in `org-config.json` are obsolete. Each strip step runs at most once per install — subsequent runs are no-ops because the blocks are already gone.
 6. **Merge triggers into routing.json.** After updating core files, check the updated `agent-index-core/collection.json` for trigger arrays. If present and `routing.json` exists (or was created by a previous phase in this update), merge new triggers using the same logic as Phase 4 step 4. Core capabilities (org-setup, preferences-management, system-tutorial, apply-updates, author-collection, validate-collection) have triggers that should appear in routing.json alongside member-installed collection triggers.
-7. Surface: "agent-index-core updated to {target_version}."
+7. Remove `core_version_before_sync` from `member-index.json`.
+8. Surface: "agent-index-core updated to {target_version}."
 
 If `marketplace-update` is present:
 1. Same pattern — read updated marketplace files from remote, overwrite local
@@ -299,14 +310,14 @@ If `marketplace-update` is present:
 **Phase 2 — CLAUDE.md**
 
 If `claude-md-update` is present:
-1. Read `CLAUDE.md` from the remote filesystem via `aifs_read("/CLAUDE.md")`
+1. Read the org's `CLAUDE.md`. On gdrive a member takes it from the bootstrap zip (`id:{resource_ids.shared_root}/bootstrap/member-bootstrap.zip`), since a member can't reliably read the root `/CLAUDE.md` by path; an admin (Drive member) and OneDrive members read `/CLAUDE.md`. Check the SHA-256 of its **LF-normalized** bytes against the `claude-md-update` operation's `hash`. On a mismatch, don't overwrite the local file: surface "The CLAUDE.md your org published doesn't match the copy available to you; ask your admin to re-publish." and continue with the other phases (the CLAUDE.md update counts as processed).
 2. Overwrite the local `CLAUDE.md` with the remote version
 3. Surface: "CLAUDE.md updated with current org directives."
 
 **Phase 3 — Adapter bundle**
 
 If `adapter-bundle-update` is present:
-1. Read `/shared/bootstrap/member-bootstrap.zip` from the remote filesystem (or the adapter bundle files directly if the admin has published them to a known location).
+1. Read the bootstrap zip (gdrive `id:{resource_ids.shared_root}/bootstrap/member-bootstrap.zip`, else `/shared/bootstrap/member-bootstrap.zip`) (or the adapter bundle files directly if the admin has published them to a known location).
 2. **Verify bundle integrity BEFORE overwriting anything — and do not defer on the sandbox proxy notice.** The fetch runs through the sandbox's transport proxy, so an `[aifs] Proxy detected — added CA certificate from …` line is **expected, benign, and not a trust signal** — it is documented adapter behavior (since v2.0.2) and prints on every aifs-exec call. Bundle authenticity is established by the **checksum gate below, not by transport trust**, so proceed through these checks rather than pausing on the proxy notice:
    - **Checksum gate (required).** Compute the fetched `aifs-exec.bundle.js`'s SHA-256 and compare it to the `exec_bundle_checksum` declared in the target `adapter.json` (which itself comes from the trusted org backend). On mismatch: **abort, do not install**, surface "adapter bundle checksum mismatch — expected `<declared>`, got `<actual>`; this is a security failure, not retrying. Report to your admin." A matching hash defeats any in-transit tampering regardless of the proxy.
    - **Embedded-URL scan (advisory).** List the hostnames that appear in the bundle and compare them with the adapter's declared `required_domains`. Bundles carry many URLs that are never contacted (library comments, JSON-schema ids, spec links, alternative auth paths such as `iamcredentials`/`sts`), so an unlisted hostname is a **note in the summary, not an abort** (`adapterdomainscan`, 3.32.0 live test: the required scan aborted every real gdrive bundle). The checksum gate is the integrity control; the bundle's contents are fixed by that hash.
@@ -328,7 +339,7 @@ For each `collection-update` where the member has capabilities installed from th
 1. Determine the member's current installed version and the target version
 2. Determine the upgrade path — check for upgrade scripts on the remote filesystem:
    - For same-MAJOR upgrades (e.g., 2.0.0 → 2.3.0): no upgrade script needed, carry responses forward
-   - For cross-MAJOR upgrades (e.g., 2.0.0 → 3.0.0): read upgrade script via `aifs_read("/{collection}/upgrade/{from_major}-to-{target_major}.md")`
+   - For cross-MAJOR upgrades (e.g., 2.0.0 → 3.0.0): read upgrade script via `aifs_read("{base}/upgrade/{from_major}-to-{target_major}.md")` (the collection's read base)
    - For multi-MAJOR jumps (e.g., 1.0.0 → 3.0.0): chain upgrade scripts — read 1-to-2, then 2-to-3. Apply in sequence.
 3. For each of the member's installed capabilities from this collection:
    - Delegate to the org-setup skill's upgrade flow (Phase 4 steps 1–9 of org-setup's "Upgrading an Installed Capability" section)
@@ -339,6 +350,7 @@ For each `collection-update` where the member has capabilities installed from th
 4. **Merge new triggers into routing.json.** After upgrading all capabilities from a collection, read the updated `collection.json` from remote and check whether it contains trigger arrays (object-format `api` entries with a `triggers` field). If it does:
    - Read the member's existing `routing.json` from `members/{member_hash}/profile/routing.json`. If it does not exist, initialize it with an empty `mappings` array (version `"1.0.0"`, member_hash, timestamp).
    - For each trigger in the updated collection: check if a mapping with the same `phrase` already exists in `routing.json`. If not, add it with `source: "collection-default"`, `active: true`. If a mapping with the same phrase exists from a different collection, present the collision to the member and let them choose. If a mapping with the same phrase exists from the same collection, leave the existing one (it may have been customized).
+   - **Prune mappings the collection no longer declares (`routingstale`, finding 33).** For each mapping whose `collection` is this collection and whose `capability` is not in the updated `collection.json` `api[]` — or whose `phrase` is no longer among that capability's `triggers` (a collection may retire a phrase, as client-intelligence 2.4.1 did with "view permissions") — remove it if `source` is `collection-default`; if the member customized it (any other `source`), set `active: false` and say "'{phrase}' pointed at {capability}, which {collection} no longer has; it's switched off." Apply the same pruning when core or the marketplace is updated (Phase 1 step 6) — core 4.0.0, for example, removed two retired capabilities.
    - Write the updated `routing.json`.
    - Surface: "Natural language triggers updated for {collection}."
    
@@ -354,7 +366,7 @@ This phase runs **unconditionally** on every `apply-updates` invocation that rea
 **Subroutine revision constant.** The manifest-sync subroutine (defined below) has a `CURRENT_SUBROUTINE_REVISION` constant that bumps whenever a step is added or its data-shape semantics change. As of core 3.29.2 this constant is **`7`** (revision 7 changed step 5b's stored form from an absolute path to one relative to `project_dir` — `appspathsandboxleak`; without this bump, an install that already advanced to revision 6 under 3.29.1 would keep a recorded value naming a Cowork sandbox that no longer exists). Prior: as of core 3.29.1 this constant was **`6`** (revision 6 added step 5b — record the core-injected `apps_path` in each affected capability's setup-responses). Prior: as of core 3.29.0 this constant was **`5`** (revision 5 added step 5a — materialize the collection's bundled `apps/` directory into the member-local install layout). Prior: as of core 3.10.1 this constant was **`4`** (revision 4 added step 1.5 — id-anchored read base via the collection's stored `folder_id`, falling back to the legacy `/{collection}` path; this forces a one-time re-sync per collection so reads migrate to id-anchored addressing wherever a `folder_id` is present). Prior: as of core 3.7.6 this constant was **`3`** (revision 1 was the 3.6.1 release with steps 1–6 and step 8; revision 2 added step 7 in 3.7.0, which reconciles `member-index.installed[].version` with the `.md` frontmatter version; revision 3 added step 9 in 3.7.6, which reconciles setup-responses org-mandated values against `collection-setup-responses.md` at the corrected path — closes the data half of bug `20260527-8d20ea22-4`). Phase 4.5 uses this constant alongside `manifest_sync[C]` to decide when to re-run the subroutine — this protects against the structural bug `20260512-8d20ea22` where a 3.7.0 install with already-populated `manifest_sync` (from a 3.6.1+ backfill) had the new step 7 silently skipped.
 
 1. Read `member-index.json`'s `manifest_sync` object (default to `{}` if the field is absent — pre-3.6.1 installs won't have it). Also read `manifest_sync_subroutine_revision` (default to `{}` if absent — pre-3.7.1 installs won't have it; effectively all entries default to revision 0).
-2. Build the org's collection-version map: read `aifs_read("/org-config.json")` and extract `installed_collections[]`. For each entry `{ name, version, status }` with `status: "installed"`, record `orgCollectionVersions[name] = version`. (Skip entries that are removed/deprecated.)
+2. Build the org's collection-version map: read org-config (`aifs_read("id:{org_config_id}")`) and extract `installed_collections[]`. For each entry `{ name, version, status }` with `status: "installed"`, record `orgCollectionVersions[name] = version`. (Skip entries that are removed/deprecated.)
 3. Build the member's effective collection set: union of the collections appearing in `member-index.installed.skills[].collection` and `member-index.installed.tasks[].collection`. (Members may have a subset of the org's installed collections.)
 4. For each collection `C` in the effective set:
    - Let `orgVersion = orgCollectionVersions[C]` (the version the org has installed). If absent (collection is in member's installs but not in org-config — this is an inconsistency; surface a notice and skip).
@@ -376,7 +388,7 @@ This phase runs **unconditionally** on every `apply-updates` invocation that rea
    2. For each `{type, name}`: stat the canonical anchor file at the collection-qualified `members/{member_hash}/installed/{C}/{type}/{name}/{name}.md` via `aifs_stat`. The anchor file is authoritative — other files (manifest.json, setup.md) can be re-derived from the subroutine if missing; the `.md` file is the capability definition.
    3. Issue the stats in parallel across all capabilities for this collection. Implementations that cannot parallelize fall back to sequential — the result is the same, only the latency differs. For a typical 7-collection install, parallel completes in 1–2 seconds; sequential ~10–20 seconds.
    4. `canonicalAnchorsMissing` is **true** if ANY stat returns "not found." Errors other than not-found (permission denied, network timeout) are treated as "unknown": skip the filesystem check for this collection this run, do NOT set `canonicalAnchorsMissing`, and let the other drift criteria apply. A transient failure should not cause spurious notices.
-   5. **Bundled-scripts sub-check (added in core 3.29.0).** If collection C ships bundled scripts (`aifs_exists("/{C}/apps")` is true), also stat `members/{member_hash}/installed/{C}/apps/` locally. If the directory is absent, set `appsMissing` — a drift condition in its own right, independent of `canonicalAnchorsMissing`. This is the third and now most common drift class on this install base: every member who installed a collection before core 3.29.0 has correct capability files and no `apps/` at all, and without this check the sweep reports the layout complete while every `{apps_path}` invocation in that collection fails. The same "unknown on non-not-found errors" rule in item 4 applies.
+   5. **Bundled-scripts sub-check (added in core 3.29.0).** If collection C ships bundled scripts (`aifs_exists("{base}/apps")` is true, `{base}` = C's read base), also stat `members/{member_hash}/installed/{C}/apps/` locally. If the directory is absent, set `appsMissing` — a drift condition in its own right, independent of `canonicalAnchorsMissing`. This is the third and now most common drift class on this install base: every member who installed a collection before core 3.29.0 has correct capability files and no `apps/` at all, and without this check the sweep reports the layout complete while every `{apps_path}` invocation in that collection fails. The same "unknown on non-not-found errors" rule in item 4 applies.
 
    **4.2. Notice format on filesystem-drift detection** (added in core 3.7.3). When `canonicalAnchorsMissing` is what triggers the drift classification, surface this line in the apply-updates progress narration immediately before invoking the subroutine:
 
@@ -406,10 +418,10 @@ Given `(collection, targetVersion)`:
 
 1. **Identify the capabilities to sync.** Read `member-index.json`'s `installed.skills[]` and `installed.tasks[]`, filter to entries with `collection === <collection>`. Each entry has `name` and (implicit by which array) `type`.
 
-1.5. **Resolve the read base — path-primary, id-anchor fallback (core 3.22.2, J0; corrects the 3.22.0 Option-A regression).** Read `org-config.json` → `installed_collections[]`, find the entry for `<collection>`. Set the read base to the **collection path `/{collection}`** as the primary, and `id:{folder_id}` (if a non-empty `folder_id` is recorded) as the fallback:
-   - **Primary: `base = "/{collection}"`** — the collection-root path. This is the read `org-setup` already uses for the same files, and it is the read that works for a non-admin member on **both** backends: the all-members group holds `reader` on each collection root (install-collection cr01 / Migration 4), so the path is enumerable; and on OneDrive the path resolves against the configured **site drive**, which is where collection files live.
+1.5. **Resolve the read base — backend-dependent (core 3.22.2, J0; gdrive order flipped in core 4.0.0, `memberpathreads`).** Read `org-config.json` → `installed_collections[]`, find the entry for `<collection>`. **On gdrive, `id:{folder_id}` is the primary and the path the fallback**: a non-Drive-member's root-level name lookup is unreliable and, before adapter 2.11.3, could resolve into another org's drive (finding 34). **On OneDrive keep the order below** — path primary, `id:{folder_id}` fallback:
+   - **OneDrive primary: `base = "/{collection}"`** — the collection-root path. This is the read that works for a non-admin member on OneDrive: the all-members group holds `reader` on each collection root (install-collection cr01 / Migration 4), so the path is enumerable; and on OneDrive the path resolves against the configured **site drive**, which is where collection files live.
    - **Why this is the correction:** 3.22.0 (Option A / `memberapplynotdistaware`) made `id:{folder_id}` the *only* base. On OneDrive a **bare `id:{folder_id}` resolves against the member's OWN drive (`/me/drive`), not the site drive** where the collection lives, so every member collection read 404'd (`i1onedrivebreak`, ms_prod_9). The `/{collection}` path is not "legacy" — it is the correct site-drive read. Restoring it as primary fixes OneDrive and keeps gdrive working (org-setup proves the path read on both backends).
-   - **Fallback: `id:{folder_id}`** — if the path read in steps 2–3 fails (read error / PATH_NOT_FOUND) AND a non-empty `folder_id` is recorded, retry that read against `id:{folder_id}`. This is the gdrive determinism/enumeration safety net (and on gdrive a bare id-anchor resolves globally). If both the path and the id-anchor fail (or no `folder_id` to try), treat the collection as unreadable: surface a logged notice (`"{collection}: not readable via /{collection} or id:{folder_id} — ask your admin to (re-)publish / grant access"`) and **skip** it (leave `manifest_sync[<collection>]` unadvanced so a later run retries). Never silently conclude success on an unread collection.
+   - **OneDrive fallback: `id:{folder_id}`** — if the path read in steps 2–3 fails (read error / PATH_NOT_FOUND) AND a non-empty `folder_id` is recorded, retry that read against `id:{folder_id}`. This is the gdrive determinism/enumeration safety net (and on gdrive a bare id-anchor resolves globally). If both the path and the id-anchor fail (or no `folder_id` to try), treat the collection as unreadable: surface a logged notice (`"{collection}: not readable via /{collection} or id:{folder_id} — ask your admin to (re-)publish / grant access"`) and **skip** it (leave `manifest_sync[<collection>]` unadvanced so a later run retries). Never silently conclude success on an unread collection.
 
    All reads in steps 2–3 use `{base}/...` (the primary), falling back per above. **Note (cross-backend):** the bare `id:{folder_id}` anchor is backend-sensitive — global on gdrive, own-drive-scoped on OneDrive — which is exactly why the path is primary. (A future unification could use the qualified cross-drive anchor `id:{site_drive_id}:{folder_id}` on OneDrive; tracked separately, not required here.)
 
@@ -460,7 +472,7 @@ Given `(collection, targetVersion)`:
 
 8. **After all capabilities for this collection have been resynced successfully**, set `manifest_sync[<collection>] = coll.version` AND `manifest_sync_subroutine_revision[<collection>] = CURRENT_SUBROUTINE_REVISION` (currently 7) in `member-index.json` and write the file. Both fields advance together; if any capability failed in steps 2–7, step 5a, or step 9 (step 5b is non-fatal — see its own note), do NOT advance either field; the failure leaves them at their prior values, and the next apply-updates run retries.
 
-9. **Reconcile setup-responses org-mandated values** (added in core 3.7.6 to close the data half of bug `20260527-8d20ea22-4`). For each capability that was just resynced in steps 2–7, check whether its local `setup-responses.md` org-mandated values match the org's authoritative `collection-setup-responses.md` (read via `aifs_read("/{collection}/setup/collection-setup-responses.md")` — note the corrected path; the pre-3.7.6 `org-setup` spec had this wrong, which is why this reconciliation is needed on every existing install). If drifted: re-inject the org-mandated values into the local setup-responses, preserving member-defined and role-suggested values.
+9. **Reconcile setup-responses org-mandated values** (added in core 3.7.6 to close the data half of bug `20260527-8d20ea22-4`). For each capability that was just resynced in steps 2–7, check whether its local `setup-responses.md` org-mandated values match the org's authoritative `collection-setup-responses.md` (read via `aifs_read("{base}/setup/collection-setup-responses.md")` — note the corrected path; the pre-3.7.6 `org-setup` spec had this wrong, which is why this reconciliation is needed on every existing install). If drifted: re-inject the org-mandated values into the local setup-responses, preserving member-defined and role-suggested values.
 
    **Detection mechanics:**
    - Read `/{collection}/setup/collection-setup-responses.md` once per subroutine invocation (cache for the loop over this collection's capabilities).
@@ -493,7 +505,7 @@ Given `(collection, targetVersion)`:
 
 If the update plan includes a `core-update` with target version ≥ 3.0.5, and the member's `routing.json` file does not yet exist at `members/{member_hash}/profile/routing.json`:
 
-1. Build the list of collections to scan for triggers. Start with `agent-index-core` and `agent-index-marketplace` (these are infrastructure collections whose triggers are always relevant but are not listed in `member-index.json`). Then add every unique collection name from the member's `member-index.json` installed capabilities. For each collection in this combined list, read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")`.
+1. Build the list of collections to scan for triggers. Start with `agent-index-core` and `agent-index-marketplace` (these are infrastructure collections whose triggers are always relevant but are not listed in `member-index.json`). Then add every unique collection name from the member's `member-index.json` installed capabilities. For each collection in this combined list, read the collection's `collection.json` from its read base (gdrive: `id:{folder_id}/collection.json`; see "Remote addressing").
 2. Extract trigger entries from each collection's `api` array — entries using the object format with a `triggers` array.
 3. Build the initial `routing.json`:
    ```json
@@ -560,7 +572,7 @@ If `org_config_updates` is non-empty: surface a brief summary of what changed:
 After all phases complete (or after the member has declined all optional items):
 
 1. Update `member-index.json` with `"last_applied_update": "{target_cursor}"` — the ID of the last entry in the pending batch
-2. Delete `pending-update-plan.json` if it exists (cleanup from a previous interrupted run)
+2. Delete `pending-update-plan.json` if it exists (cleanup from a previous interrupted run), and remove `core_version_before_sync` from `member-index.json` if it's still there
 3. Surface the completion summary:
 
 > "Updates applied successfully.
@@ -573,6 +585,18 @@ After all phases complete (or after the member has declined all optional items):
 ## Directives
 
 ### Remote Filesystem Access
+
+**Remote addressing (`memberpathreads`, findings 34/36) — Google Drive orgs.** A member who isn't a member of the org's Shared Drive can't look up root-level names reliably, and before gdrive adapter 2.11.3 such a lookup could land in another org's drive. On gdrive, read the org's top-level resources by id anchor, and use a path only as the fallback. **On OneDrive, use the paths** (path first, id as the fallback): there a bare `id:` resolves against the member's own drive, not the org's site drive.
+
+| Resource | Read as |
+|---|---|
+| `/org-config.json` | `id:{org_config_id}` (local `agent-index.json` → `remote_filesystem.connection.org_config_id`) |
+| `/members-registry.json` | `id:{resource_ids.members_registry}` (from org-config) |
+| `/shared/...` (update log, `latest.json`, bootstrap zip) | `id:{resource_ids.shared_root}/...` |
+| `/{collection}/...` on gdrive (core, marketplace, collections) | `id:{folder_id}/...` (org-config `installed_collections[]`) |
+| `/CLAUDE.md` | the copy inside the bootstrap zip, verified against the entry's hash |
+
+Everywhere this task says "read base" or names an `id:` form, apply this rule. If a read by path returns content whose identity doesn't match this org (an `org-config.json` with another `org_id`, a `collection.json` version that disagrees with org-config `installed_collections[]`), discard it and re-read by id. Never fall back to the storage connector.
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 

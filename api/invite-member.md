@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.13.0
+version: 1.13.1
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, applies the member-directory grants through the core permission-changes procedure (admin confirms the exact changes in chat), verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
@@ -265,7 +265,7 @@ Surface to the admin:
 
 > Done. `{display_name}` ({email}) is now a member.
 > - Artifacts dir: `/shared/members/artifacts/{hash}/` (admin + member writer)
-> - Private space: created in THEIR My Drive at first bootstrap (`Agent-Index-Private`); registry gets the folder ID via your next `@ai:publish-updates` reconcile
+> - Private space: created in THEIR My Drive at first bootstrap (`Agent-Index-Private ({org_id})`); registry gets the folder ID via your next `@ai:publish-updates` reconcile
 > - Registry: appended at revision {new_revision} (member_folder_id pending bootstrap)
 > - Welcome email: {sent | drafted | skipped}
 >

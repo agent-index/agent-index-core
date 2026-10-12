@@ -20,6 +20,16 @@
 ### Changed
 - marketplace `check-updates` 2.13.1 no longer checks registered binary tools.
 
+### Fixed (dev-1 live test, Dev Two)
+- **Members read org files by id anchor (`memberpathreads`, findings 34/36).** A member in two orgs resolved `/agent-index-core` and `/org-config.json` into the other org's drive (pairs with gdrive adapter 2.11.3, which scopes the lookup to the org's drive). session-start 3.2.0 reads org-config as `id:{org_config_id}` and `latest.json` / the registry through `resource_ids`; apply-updates 4.1.0 adds a "Remote addressing" table and reads gdrive collections id-first; the CLAUDE.md template tells members to load definitions from `id:{folder_id}/api/{name}.md`; standards.md extends the bootstrap id-anchor rule to every member read of a root-level resource.
+- **One private space per org (`privatespacecrossorg`, finding 9).** (invite-member 1.13.1 shows the new name.) member-bootstrap 3.12.0 names the space `Agent-Index-Private ({org_id})`, tags it with `org.json`, and never reuses a space another org owns; apply-updates Migration 7 checks existing members.
+- **Helper removal works on member installs (`uninstallscriptmissing`, finding 35).** apply-updates Step 1.6 reads the removal script from the org's core into `.agent-index/tmp/uninstall/` when the install has no local `agent-index-core/lib/`.
+- **apply-updates 4.1.0:** the core-update `from_version` is the version before Migration 5 synced it (`m5beforemerge`, finding 32); entries without `operations[]` are read as one operation (`flatupdateentry`, finding 27); routing mappings to removed capabilities are pruned (`routingstale`, finding 33).
+- **publish-updates 3.19.0:** Step 0b also derives prerequisites from state (template vs root CLAUDE.md, CLAUDE.md and adapter vs the last publish), so a re-run doesn't lose them (`step0bprereqlost`, finding 31); the M3 guard ignores the `<RELEASE_DATE>` placeholder on channel orgs (finding 29).
+- **org-setup 3.11.0** reads collections from their id-anchored base on gdrive (a member install checked another org's `projects` for `apps/` and installed projects without its scripts), and its upgrade flow replaces a capability's alias when the new setup template registers a different one (client-intelligence 2.4.1 `@ai:view-client-permissions`, finding 24).
+- **edit-org 3.5.1** syncs `agent-index.json` `adapter_version` when it deploys an adapter (`editorgadapterversion`, finding 28).
+- **upgrade/3-to-4.md:** the gate checks downloaded collections too, and install-collection applies the same minimums (`gatedownloaded`, finding 26).
+
 ## [3.32.0] — 2026-10-01 — Permission changes: list, confirm, apply, verify
 
 **MINOR — additive for un-upgraded collections; changes how core's own tasks make permission changes.** Collections that still call the `permission-change-helper` keep working (the helper is deprecated, not removed). Pairs with **agent-index-marketplace 2.22.0** and **developer 1.14.0**; collections move over in their own releases. The helper is removed in **core 4.0.0**. Design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-{outcomes,solution-design,tech-design,test-plan}.md`.

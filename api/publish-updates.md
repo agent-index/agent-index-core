@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.18.0
+version: 3.19.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -96,7 +96,7 @@ Before computing the diff, walk the admin's local `agent-index-core/` and `agent
 
 **Step 0 MUST compute and compare file-level SHA-256 hashes on every run — never conclude "already synced" from a version match (pubstep0versionmatch, C.1.4.0).** A source file can be hand-edited without any version bump; a version-equality check misses it entirely — this is the publish-side sibling of `d1rv` ("staleness keyed off version alone; content changed without a bump is invisible"), and a file edited without a bump would then silently never publish. Always do the content-based walk defined below (hash each in-scope source file, compare to the remote bytes, upload what differs). Do **not** substitute "versions match remote and I didn't edit source this session" for the walk. To keep the walk feasible in the tool window — the reason agents were tempted to shortcut it — use the batch stat/write op (`aifs_write_batch`, gdrive adapter 2.9.0+ / onedrive 2.x+; bug `bulkuploadserial`) so hundreds of files reconcile in one process instead of timing out. Optional exact fast-path: since the admin publishes from git clones, compare the git-blob SHAs the admin already has (`git cat-file`) instead of re-hashing every file live. Either way the comparison is content-based, never version-based.
 
-**Pre-publish version-mismatch guard (M3, core 3.22.4 / C.1.3.4).** Before uploading anything, cross-check that the pieces about to be published are version-consistent, and surface any drift for the admin to resolve up front rather than discover mid-publish: (a) the local `agent-index-core/collection.json` `version` and the version the core CHANGELOG's top entry claims; (b) the deployed adapter (`mcp-servers/filesystem/adapter.json` `version`) against the adapter version the core release notes pair with — if core's notes say "pairs with onedrive adapter X.Y.Z" and the deployed bundle is behind, flag it ("deploy the adapter via `@ai:edit-org` first, then publish, or the baseline records the older adapter"); (c) each installed collection's local `collection.json` `version` against its `api/*-manifest.json` `collection_version` (restamp drift). Report drift as a checklist with the resolving action; proceed only on the admin's confirmation. This makes the adapter/core mismatch the ms_install_10 publish caught *by hand* an explicit gate.
+**Pre-publish version-mismatch guard (M3, core 3.22.4 / C.1.3.4).** Before uploading anything, cross-check that the pieces about to be published are version-consistent, and surface any drift for the admin to resolve up front rather than discover mid-publish: (a) the local `agent-index-core/collection.json` `version` and the version the core CHANGELOG's top entry claims (the entry's date may be the `<RELEASE_DATE>` placeholder on a channel org — channel code is unreleased and the date is stamped at release; that's expected, not drift, so don't report it — `channeldateplaceholder`, finding 29); (b) the deployed adapter (`mcp-servers/filesystem/adapter.json` `version`) against the adapter version the core release notes pair with — if core's notes say "pairs with onedrive adapter X.Y.Z" and the deployed bundle is behind, flag it ("deploy the adapter via `@ai:edit-org` first, then publish, or the baseline records the older adapter"); (c) each installed collection's local `collection.json` `version` against its `api/*-manifest.json` `collection_version` (restamp drift). Report drift as a checklist with the resolving action; proceed only on the admin's confirmation. This makes the adapter/core mismatch the ms_install_10 publish caught *by hand* an explicit gate.
 
 **Durable read-back verify on every uploaded file (M2, `collectionjson-tornwrite`, core 3.22.4 / C.1.3.4 — HIGH).** Every file this step uploads (and every file `create-org` Step 9 uploads) MUST be verified by **reading the committed bytes back from the backend and comparing byte count + canonical SHA-256 against the local source** — NOT by trusting `aifs_write`'s response-size check alone. The response size is write-time metadata; a OneDrive simple-PUT can report a full size while durably committing a truncated object, and the adapter's only re-read is gated to sentinel-bearing files, so a non-sentinel `collection.json`/manifest can ship truncated and undetected (this is exactly how ms_install_10's core `collection.json` shipped at 31030/32402 bytes). Use the **Canonical SHA-256 rule** (`templates/backend-distribution.md`: `aifs_stat` `size` → `head -c <size>` → `sha256sum`; never hash `aifs_read` stdout). On mismatch, re-upload from source and re-verify (retry up to 2×); if still mismatched, halt naming the file. This is the `/shared/dist/` round-trip self-check extended to the source-sync uploads.
 
@@ -182,6 +182,12 @@ Walk the file paths from Step 0's `upload` + `delete` sets. For each path, apply
 | Any other file under `agent-index-core/` | (folded into `core-update`) | n/a |
 | Any other file under `agent-index-marketplace/` | (folded into `marketplace-update`) | n/a |
 
+**Also derive prerequisites from state, not only from this run's uploads (`step0bprereqlost`, core 4.0.0 live test finding 31).** Step 0 is idempotent: if an earlier run uploaded the template or bundle and then stopped (declined, halted, re-run on a newer publish-updates), the re-run's upload set is empty and the table above fires nothing, so the change never reaches members. After walking the upload set, check these regardless of it:
+- **Template vs root CLAUDE.md.** Render the current local `agent-index-core/.claude/CLAUDE.md.template` in memory (the same substitution `render_root_claude_md` uses) and compare it with the remote root `/CLAUDE.md`, ignoring the preserve-marker regions. If they differ, add `render_root_claude_md`.
+- **CLAUDE.md vs last publish.** If the LF-normalized SHA-256 of the local project `CLAUDE.md` (the same source and bytes as Step 1.3) differs from `published-state.json` `claude_md_hash`, add `bootstrap_regen` and a `claude-md-update`.
+- **Adapter vs last publish.** If the local `mcp-servers/filesystem/adapter.json` `exec_bundle_checksum` differs from `published-state.json` `commits.adapter.checksum`, add `bootstrap_regen` and an `adapter-bundle-update`. If the snapshot has no `commits.adapter` (written before core 3.32.0), skip this check; Step 3's comparison handles it.
+(No `published-state.json` yet — an org's first publish — means the CLAUDE.md and template checks count as changed.)
+
 Aggregate the results:
 
 - A `Set<prerequisite>` — for 3.5.0 this is just `{bootstrap_regen}` or empty.
@@ -207,7 +213,7 @@ Run prerequisites and proceed to publish? [Y/N]
 
 If no prereqs were detected and at least one CHANGELOG entry was inferred: surface only the entries section and the same Y/N prompt.
 
-If neither prereqs nor entries were detected (Step 0 had no file changes in core or marketplace): **continue to Step 1 — don't halt here** (`step0bfirstpublishhalt`, 3.32.0 live test). Step 0 only sees the core and marketplace source trees. Collection upgrades, adapter changes, channel commits and an org's first publish (no `published-state.json` yet) are found by the diff in Steps 1–3, and Step 3 is where "Nothing has changed since the last publish" is decided (after the Standing Reconciles).
+If neither prereqs nor entries were detected (no file changes in core or marketplace, and the state checks above found nothing): **continue to Step 1 — don't halt here** (`step0bfirstpublishhalt`, 3.32.0 live test). Step 0 only sees the core and marketplace source trees. Collection upgrades, adapter changes, channel commits and an org's first publish (no `published-state.json` yet) are found by the diff in Steps 1–3, and Step 3 is where "Nothing has changed since the last publish" is decided (after the Standing Reconciles).
 
 On `N`: halt without running prereqs or writing CHANGELOG. Step 0's sync already happened; remote files reflect local state. Subsequent `@ai:publish-updates` re-runs will see no diff (idempotent) and report no-op.
 
@@ -262,7 +268,7 @@ Read and assemble the current org state — this is the "truth" that members sho
 
 2. **Installed collections:** Read `installed_collections` from `org-config.json`. For each, also read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")` to get the current `version` and `api` array.
 
-3. **CLAUDE.md hash:** Read `CLAUDE.md` from the local project directory. Compute SHA-256 hash of its content. This is used to detect changes without storing the full file.
+3. **CLAUDE.md hash:** Read `CLAUDE.md` from the local project directory. Compute SHA-256 of its content **after LF normalization** (`\r\n` and lone `\r` → `\n`) — the same bytes the bootstrap zip ships, so a member's check of the zip copy matches on a Windows admin's machine. This is used to detect changes without storing the full file.
 
 4. **Adapter bundle version:** Read the local `mcp-servers/filesystem/adapter.json`. Extract `version` and `bundle_built_at`.
 

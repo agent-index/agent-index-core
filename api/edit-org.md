@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.5.0
+version: 3.5.1
 collection: agent-index-core
 description: Edit org configuration — update the admin list, manage marketplace subscriptions, set the org's distribution channel, or launch the marketplace to install or manage collections.
 stateful: false
@@ -166,6 +166,8 @@ Overwrite the three deployed files in `mcp-servers/filesystem/`. **Source the te
 - `aifs-exec.sh` and `adapter.json` — deploy from the git blob (`git -C <adapter-clone> show <ref>:dist/aifs-exec.sh` / `<ref>:adapter.json`), which is LF-correct on every platform, **not** a `Copy-Item`/`cp` from the working tree.
 
 After deploying, **smoke-test the new executor** (an `aifs_auth_status` + a verified read) and confirm the wrapper is LF (no CRLF) before proceeding — catch a torn/CRLF deploy here, not after the bootstrap zip ships it to members.
+
+**Sync `agent-index.json` (`editorgadapterversion`, core 4.0.0 live test finding 28).** Set the local `agent-index.json` `remote_filesystem.exec.adapter_version` to the new `adapter.json` `version` (shell-first write, read back and `JSON.parse`), the same sync apply-updates Phase 3 step 4 does for members. Do it before step 5: the bootstrap zip bakes in this `agent-index.json`, so a stale value would ship to every new member.
 
 Surface: "Adapter bundle updated from version {old_version} (built {old_date}) to version {new_version} (built {new_date})."
 
