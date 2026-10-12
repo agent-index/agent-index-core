@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.14.0
+version: 3.15.0
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -84,7 +84,7 @@ If the file exists and `status` is `"awaiting-network-allowlist"` or `"awaiting-
 
    Check what was completed in the previous session by inspecting `completed_steps`:
 
-   - If `completed_steps` includes `"3c"` (config files and bundle already written): restore the collected state (`org_name`, `org_id`, `distribution_channel`, `backend`, `connection` config) from the install state file and skip directly to **Step 4** (authentication).
+   - If `completed_steps` includes `"3c"` (config files and bundle already written): restore the collected state (`org_name`, `org_id`, `org_uuid`, `distribution_channel`, `backend`, `connection` config) from the install state file and skip directly to **Step 4** (authentication).
 
    - If `completed_steps` only goes through `"3b"` or earlier (domains were blocked before bundle download): restore the collected state and resume at **Step 3c** (download bundle and write config files).
 
@@ -235,6 +235,7 @@ For documentation purposes, the canonical file currently enumerates the followin
   "collected": {
     "org_name": "{org_name}",
     "org_id": "{org_id}",
+    "org_uuid": "{random UUID v4 generated when org_id is collected in Step 3; reused on resume and written to org-config in Step 8}",
     "distribution_channel": "{from Step 3c 1-pre; null until asked / for released code}",
     "connection": {
       // All connection config collected in Step 3
@@ -371,6 +372,7 @@ Place: `mcp-servers/filesystem/aifs-exec.bundle.js` (executor bundle), `aifs-exe
   "collected": {
     "org_name": "{org_name}",
     "org_id": "{org_id}",
+    "org_uuid": "{random UUID v4 generated when org_id is collected in Step 3; reused on resume and written to org-config in Step 8}",
     "distribution_channel": "{from Step 3c 1-pre; null until asked / for released code}",
     "connection": {
       // All connection config collected in Step 3
@@ -552,6 +554,7 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
 {
   "org_name": "{org_name}",
   "org_id": "{org_id}",
+  "org_uuid": "{install-state collected.org_uuid — a random UUID v4 (crypto.randomUUID() / uuidgen, lowercase) generated once in Step 3 when org_id was collected. Permanent: it names every member's private space, Agent-Index-Private-{org_uuid} (member-bootstrap Step 5), so two orgs never collide in a member's My Drive. Never regenerate it.}",
   "agent_index_version": "{the ACTUAL agent-index-core version being installed — read it from the downloaded agent-index-core/collection.json `version`. Do NOT hardcode a default like 2.0.0: that is the `versionmarker` drift that made ms-install-5's check-updates report nonsense (org-config said 2.0.0 while collection.json said 3.15.0). The installed collection.json is the source of truth for the installed version.}",
   "distribution_channel": {the value chosen in Step 3c 1-pre — read it from install-state `collected.distribution_channel` / local `agent-index.json`; null for released code},
   "created": "{today YYYY-MM-DD}",

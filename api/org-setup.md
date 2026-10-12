@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.11.0
+version: 3.12.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -264,6 +264,8 @@ Write onboarding completion state to `/members/{member-hash}/profile/onboarding-
 ```
 
 After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` **by id** — `id:{members_registry_id}` (from org-config `resource_ids.members_registry`; path fallback if absent — `groupshareapivisibility`): read via `aifs_read("id:{members_registry_id}")`, modify, write back via `aifs_write("id:{members_registry_id}", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
+
+**Phase 5a — Natural-language routing (`freshrouting`, core 4.0.0 live test finding 45).** If `members/{member_hash}/profile/routing.json` doesn't exist, create it now — a fresh member otherwise has none until some later `@ai:update` happens to run apply-updates Phase 5. Use exactly apply-updates' Phase 5 procedure and schema: scan `agent-index-core`, `agent-index-marketplace` and every collection just installed (each `collection.json` from its read base), collect the `triggers`, present cross-collection phrase collisions to the member (the unchosen mapping gets `active: false`), show the table, write the file. If `routing.json` already exists (an install adding capabilities later), merge the new collections' triggers as apply-updates Phase 4 step 4 does, never overwriting customized mappings.
 
 **Phase 5b** — (Step removed in core 4.0.0: the permission helper is retired.)
 

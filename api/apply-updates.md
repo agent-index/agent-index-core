@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 4.1.0
+version: 4.2.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -76,7 +76,7 @@ Precedence rule: **the member's own handshake file outranks the registry** — t
 
 If local `member-index.json` has no `member_folder_id`, OR the handshake file `/shared/members/artifacts/{member_hash}/member-folder.json` does not exist (pre-3.9.0 member whose space is still on the org Shared Drive):
 
-Run the **ensure-my-drive-space subroutine** (canonical definition: `member-bootstrap.md` Step 5): create this org's private space (`Agent-Index-Private ({org_id})`, with `org.json`) in the member's own My Drive via `id:root/...`, stat for the resolved Drive ID, **migrate any content from the old Shared-Drive space** (per-file `aifs_copy`, read+write fallback; never delete the old space), write the handshake file, update local `member-index.json`. Surface: "✓ Your private member space is now in your own My Drive ({n} files migrated)."
+Run the **ensure-my-drive-space subroutine** (canonical definition: `member-bootstrap.md` Step 5): create this org's private space (`Agent-Index-Private-{org_uuid}`, with `org.json`) in the member's own My Drive via `id:root/...`, stat for the resolved Drive ID, **migrate any content from the old Shared-Drive space** (per-file `aifs_copy`, read+write fallback; never delete the old space), write the handshake file, update local `member-index.json`. Surface: "✓ Your private member space is now in your own My Drive ({n} files migrated)."
 
 This is the migration path for existing members: the 3.9.0 update entry triggers every member's `@ai:update`, which runs this step — no admin action per member. The admin's next `@ai:publish-updates` reconciles handshakes into the registry. Idempotent; must not block the update on failure (surface and continue).
 
@@ -122,10 +122,10 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 
 (org-setup writes the collection-qualified layout directly on a fresh org, so no drift originates there; this upgrade-path migration is where legacy duplicates are reconciled.)
 
-**Migration 7 — the private space belongs to this org (`privatespacecrossorg`, core 4.0.0 live test finding 9).** Before core 4.0.0 every org named the member space `Agent-Index-Private` and found it by that name in My Drive, so a person in two orgs got ONE folder used by both. Run the **org-ownership check** from the ensure-my-drive-space subroutine (`member-bootstrap.md` Step 5, item 0) against the local `member_folder_id`:
-1. Read `id:{member_folder_id}/org.json`. If it names this org's `org_id`: done (silent).
-2. If it's missing and the folder passes item 0's drive check (it's in the member's own drive, not the org's Shared Drive): this org claims the folder. Write `org.json` (`{"org_id": "{org_id}", "org_name": "{org_name}", "claimed": "{ISO 8601}"}`). Silent.
-3. If it names a different org: the folder belongs to that org. Run the ensure-my-drive-space subroutine, which creates this org's own space (`Agent-Index-Private ({org_id})`), writes the handshake and updates `member_folder_id`. Don't move any content: the existing folder can't be split by org. Surface: "Your private space was shared with another agent-index org ({other org_name}). This org now has its own private space; your earlier private items stay in the other org's space."
+**Migration 7 — the private space belongs to this org (`privatespacecrossorg`, core 4.0.0 live test findings 9/40).** Before core 4.0.0 every org named the member space `Agent-Index-Private`, so a person in two orgs could end up with one folder used by both. Spaces are now identified by org-config `org_uuid` (`member-bootstrap.md` Step 5, item 0). The local `member_folder_id` is this org's own record, so start from it:
+1. Read `id:{member_folder_id}/org.json`. If it names this org's `org_uuid`: done (silent).
+2. If `org.json` is missing, or names this org's `org_id` without an `org_uuid` (tagged by an earlier 4.0.0 build), and the folder is outside the org's Shared Drive (`aifs_stat` `drive_id` null or a different drive; **if the stat result has no `drive_id` key, the installed adapter predates gdrive 2.11.4 — skip, and the next `@ai:update` (after Phase 3 installs the new adapter) tags it**): tag it — write `org.json` `{"org_uuid", "org_id", "org_name", "tagged"}`. The folder keeps its name (there's no rename, and nothing finds the space by name). Silent. If org-config has no `org_uuid` yet, skip; the next run tags it.
+3. If `org.json` names a **different** org (another `org_uuid`, or another `org_id`): the folder belongs to that org. Run the ensure-my-drive-space subroutine, which creates this org's own `Agent-Index-Private-{org_uuid}`, writes the handshake and updates `member_folder_id`. Don't move any content. Surface: "Your private space was being used by another agent-index org ({other org_name}). This org now has its own private space; your earlier private items stay where they were."
 Never block the update on failure; surface and continue.
 
 Future member-local schema migrations append here as numbered entries; each must be idempotent and must not block the update on failure.

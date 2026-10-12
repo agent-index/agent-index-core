@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.19.0
+version: 3.20.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -372,7 +372,7 @@ For each collection in the current `installed_collections`:
 
 Compare `org_roles` arrays. If roles were added, removed, or had their `default_collections` modified: generate an `org-config-update` operation with a `changes` summary listing what shifted.
 
-If no operations were generated (nothing changed since last publish): **first run the Standing Reconciles (6d/6e/6f/6g from Step 6) — unconditional on every publish, `standingreconcileunreachable`** — then surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
+If no operations were generated (nothing changed since last publish): **first run the Standing Reconciles (6d–6h from Step 6) — unconditional on every publish, `standingreconcileunreachable`** — then surface "Nothing has changed since the last publish on {previous snapshot_date}. No update instructions to generate." Halt.
 
 **On success:** Proceed to Step 4.
 
@@ -560,9 +560,9 @@ On admin **confirmation:** apply the backfill values together with the per-opera
 
 On admin **decline:** skip the backfill but still apply the per-operation updates from 6a/6b for the current publish. The drift state persists; next publish-updates run will surface the same prompt.
 
-#### Standing reconciles (6d–6g) — run on EVERY publish, INCLUDING an empty-diff / no-op publish (`standingreconcileunreachable`)
+#### Standing reconciles (6d–6h) — run on EVERY publish, INCLUDING an empty-diff / no-op publish (`standingreconcileunreachable`)
 
-The four reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`, 6g marketplace subscriptions + provenance) heal drift that has **no content diff** — a revoked/absent all-members reader grant on core/marketplace, a stale member-folder handshake, a missing `resource_ids` block. Because that drift produces no publishable operations, these reconciles **MUST NOT sit behind the empty-diff early-halt**. Whenever `publish-updates` would otherwise halt with "Nothing has changed" (Step 0b, Step 3, or the rapid-re-run edge case), **run 6d/6e/6f/6g FIRST, then halt.** On a normal (has-diff) publish they run here in Step 6 in the usual order. All four are idempotent no-ops on a healthy org, so running them unconditionally on every invocation is cheap and safe.
+The reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`, 6g marketplace subscriptions + provenance, 6h `org_uuid`) heal drift that has **no content diff** — a revoked/absent all-members reader grant on core/marketplace, a stale member-folder handshake, a missing `resource_ids` block. Because that drift produces no publishable operations, these reconciles **MUST NOT sit behind the empty-diff early-halt**. Whenever `publish-updates` would otherwise halt with "Nothing has changed" (Step 0b, Step 3, or the rapid-re-run edge case), **run 6d–6h FIRST, then halt.** On a normal (has-diff) publish they run here in Step 6 in the usual order. All five are idempotent no-ops on a healthy org, so running them unconditionally on every invocation is cheap and safe.
 
 (Fixes `standingreconcileunreachable`: a no-op publish previously exited at Step 0b/Step 3 before ever reaching Step 6, so a missing member-read grant — exactly the state 6e is designed to heal — was never auto-fixed. That made the C.1.4.4 `memberreadgrantnotauto` hardening inert in its target case, since an org whose only problem is a missing grant has nothing else to publish.)
 
@@ -637,6 +637,12 @@ Brings a pre-3.30.0 org onto the `standards.md` § "Marketplaces" model with **n
 
 Idempotent: once `marketplaces[]` exists and every entry has the key, this is a silent no-op. It never edits an existing subscription and never changes a present `marketplace_id` — subscription changes are `@ai:edit-org` → Manage marketplaces.
 
+#### 6h. `org_uuid` back-fill (core 4.0.0 — `privatespacecrossorg`)
+
+Every org carries a permanent random identifier, org-config `org_uuid`, that names its members' private spaces (`Agent-Index-Private-{org_uuid}`, member-bootstrap Step 5 item 0) so two orgs can never collide in a member's My Drive. create-org generates it; this standing check back-fills orgs created before core 4.0.0.
+
+If org-config has no `org_uuid`: generate a random UUID v4 (lowercase, e.g. from `crypto.randomUUID()` / `uuidgen`), write it via the **safe org-config rewrite rule** (unique `mktemp` staging, identity assert on `org_id` + `drive_id`/`site_id`, content assert that `org_uuid` is now present, never re-select the staged file by glob/mtime), read it back. Surface one line: "Gave the org its permanent ID for member private spaces." **Never change an existing `org_uuid`** — members' spaces are tagged with it. Silent no-op once present.
+
 ### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
 
 **This step is mandatory on every publish that changes any distributed artifact** (a directory file or a collection version). Before C.1.3, publish-updates wrote the `/shared/updates/` log but never refreshed `/shared/dist/` — so `manifest.json` (the org's version authority) went stale after an in-place update, and members reading the backend-distribution layer saw the *old* versions/SHAs. `/shared/dist/` is only as current as its last publish; this step keeps it current.
@@ -703,7 +709,7 @@ Never modify collection directories or any file outside the documented write sur
 - `/shared/updates/latest.json`
 - `/shared/updates/published-state.json`
 - `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` — ONLY these fields, each written by the step named: removal of the retired `binaries` key (6.0), `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent), `installed_collections[].member_read_grant` (6e, 3.32.0). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
+- `/org-config.json` — ONLY these fields, each written by the step named: removal of the retired `binaries` key (6.0), `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent), `org_uuid` (6h, only when absent), `installed_collections[].member_read_grant` (6e, 3.32.0). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
 - `/shared/dist/` (Step 6.5)
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.

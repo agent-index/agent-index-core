@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.13.1
+version: 1.13.2
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, applies the member-directory grants through the core permission-changes procedure (admin confirms the exact changes in chat), verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false
@@ -86,11 +86,11 @@ Confirm the hash to the admin: "I'll provision org access for `{email}` (hash `{
 
 ### Step 4: Re-invite detection
 
-Check whether the email was previously a member: **a `members-registry.json` entry with this `member_hash` (or a registry record of their removal)** is what makes someone a previous member. Then check `aifs_exists("/shared/members/artifacts/{hash}/")`.
+Check whether the email was previously a member: **a `members-registry.json` entry with this `member_hash`, or a `removed_members[]` record for it (written by remove-member 1.4.0+)**, is what makes someone a previous member. Then check `aifs_exists("/shared/members/artifacts/{hash}/")`.
 
 **An artifacts folder with no registry entry is not a previous membership** (`invitestalefolder`, 3.32.0 live test): it's left over from an invite that never finished. Don't ask the re-invite question. Reuse the folder in Step 5 and tell the admin in one line: *"An empty artifacts folder from an earlier unfinished invite exists; I'll reuse it."*
 
-If previously a member (registry entry found):
+If previously a member (registry entry or removal record found):
 
 > This email was previously a member. Their shared-artifacts directory (`/shared/members/artifacts/{hash}/`) still exists, and their private member space (if any) is in their own My Drive — outside org control, untouched by removal or re-invite.
 >
@@ -109,7 +109,7 @@ This step creates the folder if it doesn't exist. It performs **no permission wr
 - If it already exists (re-invite case): leave it untouched.
 - **Capture the directory's Drive id (bug `groupshareapivisibility`).** After materializing (or on re-invite/reuse, against the existing dir), `aifs_stat("/shared/members/artifacts/{hash}/")` and record the resolved Drive id as `artifacts_dir_id`. This id is persisted on the registry entry in Step 8 so that `member-bootstrap` can write its onboarding handshake **by id** (`aifs_write("id:{artifacts_dir_id}/member-folder.json", …)`) — a member's by-path resolution into the artifacts namespace isn't reliable before group-share propagation, but writing to its own artifacts dir by id works pre-visit.
 
-**The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private` in the member's **own personal space** — their My Drive on gdrive, their OneDrive on onedrive — created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not; on onedrive the member owns their OneDrive items outright). On onedrive this requires the member to have a OneDrive-inclusive license and to have signed into office.com once (see memberlicense; create-org now surfaces this prerequisite to the admin). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
+**The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private-{org_uuid}` (older spaces keep earlier names) in the member's **own personal space** — their My Drive on gdrive, their OneDrive on onedrive — created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not; on onedrive the member owns their OneDrive items outright). On onedrive this requires the member to have a OneDrive-inclusive license and to have signed into office.com once (see memberlicense; create-org now surfaces this prerequisite to the admin). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
 
 ### Step 6: Apply the member-directory grants (permission-changes procedure)
 
@@ -196,10 +196,10 @@ If this question was already asked in Step 6, reuse that answer and skip to item
 Read the current registry with revision:
 
 ```
-{ content, revision } = aifs_read("/members-registry.json")
+{ content, revision } = aifs_read("id:{resource_ids.members_registry}")
 ```
 
-(Note: `aifs_read` returns content as a string; the revision can be obtained via a parallel `aifs_stat("/members-registry.json")` call which returns `{ revision, ... }` in v2.0.)
+(Address the registry by id anchor — `resource_ids.members_registry` from org-config; `/members-registry.json` only as a fallback. `aifs_read` returns content as a string; the revision comes from a parallel `aifs_stat("id:{resource_ids.members_registry}")`, which returns `{ revision, ... }`.) If the registry has a `removed_members[]` record for this `member_hash`, drop it in this same write — they're a member again.
 
 Parse, append the new member entry:
 
@@ -225,7 +225,7 @@ Parse, append the new member entry:
 Write back with the captured revision:
 
 ```
-aifs_write("/members-registry.json", new_content, if_revision=revision)
+aifs_write("id:{resource_ids.members_registry}", new_content, if_revision=revision)
 ```
 
 If `REVISION_CONFLICT`: re-read, re-apply, retry. Cap at 5 retries before surfacing an error to the admin (another concurrent registry write would be unusual but not impossible).
@@ -265,7 +265,7 @@ Surface to the admin:
 
 > Done. `{display_name}` ({email}) is now a member.
 > - Artifacts dir: `/shared/members/artifacts/{hash}/` (admin + member writer)
-> - Private space: created in THEIR My Drive at first bootstrap (`Agent-Index-Private ({org_id})`); registry gets the folder ID via your next `@ai:publish-updates` reconcile
+> - Private space: created in THEIR My Drive at first bootstrap (`Agent-Index-Private-{org_uuid}`); registry gets the folder ID via your next `@ai:publish-updates` reconcile
 > - Registry: appended at revision {new_revision} (member_folder_id pending bootstrap)
 > - Welcome email: {sent | drafted | skipped}
 >

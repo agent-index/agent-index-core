@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.3.0
+version: 1.4.0
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Revokes the two member-directory grants invite-member created (through the core permission-changes procedure, each removal confirmed individually), removes their entry from members-registry.json, and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — it does not walk the broader ACL graph; Workspace IT handles identity offboarding.
 stateful: false
@@ -60,13 +60,13 @@ On demand, when a member leaves the team or org.
 
 ### Step 2: Find the member
 
-Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
+Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` (by id: `id:{resource_ids.members_registry}`) and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
 
 Confirm to the admin:
 
 > Removing `{display_name}` ({email}) from the member registry.
 >
-> Their private member space lives in THEIR own My Drive (`Agent-Index-Private`) — it is not org property, agent-index has no access to it, and this task will not (and cannot) touch it or any sharing grants they made on it. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org.
+> Their private member space lives in THEIR own My Drive (`Agent-Index-Private-{org_uuid}`; older spaces keep earlier names) — it is not org property, agent-index has no access to it, and this task will not (and cannot) touch it or any sharing grants they made on it. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org.
 >
 > Continue?
 
@@ -135,13 +135,14 @@ It does NOT walk the broader ACL graph looking for orphan grants on project reso
 ### Step 3: Remove the entry (revision-aware)
 
 ```
-{ content, revision } = aifs_read("/members-registry.json"), aifs_stat("/members-registry.json")
+{ content, revision } = aifs_read("id:{resource_ids.members_registry}"), aifs_stat("id:{resource_ids.members_registry}")
 ```
+(Address the registry by id anchor; the root path is the fallback.)
 
-Parse, remove the entry whose `member_hash` matches, write back with the captured revision:
+Parse, remove the entry whose `member_hash` matches, **and append a removal record** to the registry's top-level `removed_members[]` (create the array if absent): `{"member_hash", "email", "display_name", "removed": "{ISO 8601}", "removed_by": "{admin member_hash}"}` (`removalrecord`, core 4.0.0 live test finding 42 — without it a later re-invite saw only the leftover artifacts folder and called the person "an unfinished invite"). Write back with the captured revision:
 
 ```
-aifs_write("/members-registry.json", new_content, if_revision=revision)
+aifs_write("id:{resource_ids.members_registry}", new_content, if_revision=revision)
 ```
 
 On `REVISION_CONFLICT`: re-read, re-apply the removal, retry. Cap at 5 retries.

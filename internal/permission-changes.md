@@ -163,6 +163,12 @@ Result notes:
   Step 7 decides.
 - A gdrive transfer returns once it has been *requested*. Google then emails the new owner, who
   must accept.
+- gdrive 2.11.4+ transfers a folder together with the contents the caller owns. If some contents
+  didn't transfer it returns `{transferred:true, partial:true, failed_items:[{id, error}]}`. Record
+  that as `{ok:false, error:{code:"TRANSFER_PARTIAL", message:"the folder transferred but N item(s)
+  inside didn't: <ids>"}}` so the row ends `failed` and the caller doesn't update its records as
+  if the transfer were complete. Tell the person which items are left; they can transfer those in
+  Google Drive (Share → Transfer ownership).
 
 In `all_or_nothing` mode, stop at the first failure. Don't call the remaining rows.
 

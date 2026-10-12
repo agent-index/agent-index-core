@@ -163,7 +163,9 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
   `remote_filesystem.connection`. **A non-Drive-member cannot resolve root-level files by
   path** — `aifs_read("/org-config.json")` returns `FILE_NOT_FOUND` even though the file
   exists and is readable. Same for `members-registry.json`, whose id is
-  `resource_ids.members_registry` in org-config. `/shared/**` paths resolve normally.
+  `resource_ids.members_registry` in org-config. On Google Drive the same goes for `/shared/**`:
+  a member may get `PATH_NOT_FOUND` on a `/shared/...` path — re-read it as
+  `id:{resource_ids.shared_root}/...` (finding 46).
 - **`members-registry.json`** (remote): member lookup table. Read by id anchor —
   `resource_ids.members_registry` in `org-config.json`. Same path caveat as above.
 - **`member-index.json`** (local: `members/{hash}/member-index.json`): Member's installed capabilities

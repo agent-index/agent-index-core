@@ -20,6 +20,14 @@
 ### Changed
 - marketplace `check-updates` 2.13.1 no longer checks registered binary tools.
 
+### Fixed (dev-1 live test, Dev Two — batch 5)
+- **Member private spaces are named by a permanent org UUID (`privatespacecrossorg`, findings 9/40).** create-org 3.15.0 generates org-config `org_uuid` (publish-updates 3.20.0 standing reconcile 6h back-fills existing orgs); member-bootstrap 3.13.0 creates `Agent-Index-Private-{org_uuid}`, adopts a folder only from this org's own records (never by the legacy name `Agent-Index-Private`), and tags it with `org.json` (`org_uuid`); apply-updates 4.2.0 Migration 7 tags recorded spaces and gives a member whose space another org tagged a new one. Nothing finds the space by name, so existing spaces keep their names.
+- **A new member's update cursor is set at bootstrap** (`newmembercursor`, finding 43): member-bootstrap writes `last_applied_update` from `latest.json`.
+- **org-setup 3.12.0 creates `routing.json` for a fresh member** (`freshrouting`, finding 45), using apply-updates' Phase 5 procedure.
+- **remove-member 1.4.0 keeps a removal record** (`removed_members[]` in the registry), so invite-member 1.13.2 recognises a returning member and clears the record on re-invite (`removalrecord`, finding 42); both read and write the registry by id.
+- **permission-changes procedure:** a gdrive 2.11.4 transfer that moves the folder but not all of its contents is recorded as failed (`TRANSFER_PARTIAL`), so no caller updates its records as if it were complete.
+- **CLAUDE.md template:** members on Google Drive may also need the id form for `/shared/**` (finding 46).
+
 ### Fixed (dev-1 live test, Dev Two)
 - **Members read org files by id anchor (`memberpathreads`, findings 34/36).** A member in two orgs resolved `/agent-index-core` and `/org-config.json` into the other org's drive (pairs with gdrive adapter 2.11.3, which scopes the lookup to the org's drive). session-start 3.2.0 reads org-config as `id:{org_config_id}` and `latest.json` / the registry through `resource_ids`; apply-updates 4.1.0 adds a "Remote addressing" table and reads gdrive collections id-first; the CLAUDE.md template tells members to load definitions from `id:{folder_id}/api/{name}.md`; standards.md extends the bootstrap id-anchor rule to every member read of a root-level resource.
 - **One private space per org (`privatespacecrossorg`, finding 9).** (invite-member 1.13.1 shows the new name.) member-bootstrap 3.12.0 names the space `Agent-Index-Private ({org_id})`, tags it with `org.json`, and never reuses a space another org owns; apply-updates Migration 7 checks existing members.
