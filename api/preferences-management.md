@@ -118,10 +118,11 @@ List active mappings grouped by collection and capability, showing the phrases f
 
 **"Add a phrase"** (e.g. "make 'what's on deck' open my daily view")
 1. Resolve the target to an installed capability in `member-index.json`. If it isn't installed, say so and stop.
-2. Check the phrase against existing active mappings, comparing case-insensitively and ignoring punctuation:
+2. **Check switched-off mappings first.** If a mapping with the same phrase exists with `active: false`, do not add a second row. Switch that row back on and point it at the target: set `active: true`, `source: member-custom`, and its `capability` and `collection`. Confirm with the member as for any change ("'{phrase}' is switched off at the moment. I'll switch it back on and point it at {capability}."), then go to Writing. Compare case-insensitively and ignoring punctuation, as below.
+3. Check the phrase against existing active mappings, comparing case-insensitively and ignoring punctuation:
    - **Same phrase, different capability:** surface it. "That phrase already opens {capability}. Change it to {new}, or pick a different phrase?" Do not write until resolved.
    - **Overlap** (the new phrase is contained in, or contains, an active phrase for a different capability): say so. Routing picks the more specific phrase, so both keep working, but the member should know.
-3. Write a new mapping with `source: member-custom`, `active: true`.
+4. Write a new mapping with `source: member-custom`, `active: true`.
 
 **"Change where a phrase goes"**
 Update `capability` and `collection` on the mapping, and set `source: member-custom`. A changed default must be marked custom, or the next update could set it back.
@@ -131,8 +132,15 @@ Update `capability` and `collection` on the mapping, and set `source: member-cus
 - For a `collection-default` mapping: **do not edit the text.** Set the original to `active: false` and `source: member-custom`, then add the new wording as a new `member-custom` mapping to the same capability. If the default's text were edited, the next update would find the original wording missing and add it back.
 
 **"Delete a phrase" / "stop using this phrase"**
-- A phrase that came from a collection default (current `source` is `collection-default`, or it was originally one): set `active: false` and `source: member-custom`. **Never remove the row.** A removed default comes back with the next update, so a deletion that isn't recorded doesn't last.
-- A phrase the member added that is not one of the collection's defaults: remove the row.
+First decide whether the phrase is one of a collection's defaults. `source` alone can't tell you: a default whose target or wording the member changed is marked `member-custom` too.
+- `source: collection-default`: it is a default.
+- `source: member-custom`: check the phrase against the declared triggers of every collection the member has installed (from `member-index.json`), read from each `collection.json` by id, the same way Reset does. Start with the collection the mapping names, and stop at the first match. It is a default if any collection declares it. Checking only the named collection is not enough: "change where a phrase goes" can move a default to a capability in another collection, so a phrase that now names capture may be one of projects' defaults, and the next projects update would add it back. If any collection's triggers can't be read and no match was found in the ones that could, treat it as a default.
+
+Then:
+- **A default:** set `active: false` and `source: member-custom`. **Never remove the row.** A removed default comes back with the next update, so a deletion that isn't recorded doesn't last.
+- **Not a default** (the member added it, and the collection's triggers were read and don't include it): remove the row.
+
+When the triggers can't be read, switching off is the safe choice. A switched-off row that turns out not to be a default does no harm. A removed row that turns out to be a default comes back on the next update.
 
 **"Reset"** (one phrase, one collection, or all)
 Read the collection's current declared triggers from its `collection.json`. Read it by id, the way CLAUDE.md § "How to execute a skill or task" reads collection files. Then:
@@ -185,7 +193,7 @@ For alias management, be precise. Aliases have exact values — show them exactl
 
 ### Constraints
 
-Never write to `preferences.md` or `member-index.json` without explicit member confirmation of the specific proposed change.
+Never write to `preferences.md`, `member-index.json` or `routing.json` without explicit member confirmation of the specific proposed change.
 
 Never rewrite the entire `preferences.md` file for a single-field update. Write targeted field updates only. This prevents accidentally overwriting fields the member has not touched.
 
