@@ -60,7 +60,7 @@ All fields listed below are required. No field may be omitted.
 | `version` | string | Semantic version (MAJOR.MINOR.PATCH) |
 | `description` | string | One sentence, plain language |
 | `author` | string | Author or organization name |
-| `license` | string | License type (`open`, `commercial`, `proprietary`, or SPDX identifier) |
+| `license` | string | License type (`open`, `commercial`, `proprietary`, or an SPDX expression). The collection's author chooses it: a collection is not bound by the platform's AGPL (Agent Index Collection Exception, core `COLLECTION-EXCEPTION.md`) |
 | `category` | string | Functional category (see Category Registry below) |
 | `agent_index_min_version` | string | Minimum agent-index-core version required |
 | `api` | array | List of public skill/task names. Empty array if none. |

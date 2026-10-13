@@ -44,6 +44,9 @@
 - **edit-org 3.5.1** syncs `agent-index.json` `adapter_version` when it deploys an adapter (`editorgadapterversion`, finding 28).
 - **upgrade/3-to-4.md:** the gate checks downloaded collections too, and install-collection applies the same minimums (`gatedownloaded`, finding 26).
 
+### License
+- **Licensed under AGPL-3.0-only with the Agent Index Collection Exception 1.0** (`AGPL-3.0-only WITH LicenseRef-AgentIndex-Collection-Exception-1.0`): the platform is open; collections and storage adapters built on it are their authors' to license (`COLLECTION-EXCEPTION.md`). Earlier releases keep the license they were released with.
+
 ## [3.32.0] — 2026-10-01 — Permission changes: list, confirm, apply, verify
 
 **MINOR — additive for un-upgraded collections; changes how core's own tasks make permission changes.** Collections that still call the `permission-change-helper` keep working (the helper is deprecated, not removed). Pairs with **agent-index-marketplace 2.22.0** and **developer 1.14.0**; collections move over in their own releases. The helper is removed in **core 4.0.0**. Design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-{outcomes,solution-design,tech-design,test-plan}.md`.
