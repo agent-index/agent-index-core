@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 4.2.0
+version: 4.2.1
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -634,7 +634,7 @@ The merge algorithm in Step 3 must produce a correct net plan regardless of how 
 
 ### Constraints
 
-Never modify any file on the remote filesystem. This task reads from remote — it writes only to the member's local workspace.
+Never modify org files on the remote filesystem (collections, org-config, registry, `/shared/updates/`). This task reads them and writes the member's local workspace. The only remote writes are to the member's **own** space and handshake, by the standing migrations that maintain them (Migration 2 creates the space and writes the handshake; Migration 7 writes the space's `org.json`) (`applyremotewrites`, finding 51).
 
 Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
 

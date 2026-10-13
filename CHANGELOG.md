@@ -20,6 +20,12 @@
 ### Changed
 - marketplace `check-updates` 2.13.1 no longer checks registered binary tools.
 
+### Fixed (dev-1 live test — batch 6, release wording)
+- **apply-updates 4.2.1:** the Constraints name the member's own space and handshake as the only remote writes (Migrations 2 and 7), instead of "never modify remote" (finding 51).
+- **create-org 3.15.1:** the bootstrap-zip rule names what is excluded (credentials, tokens, path cache) and documents the gdrive installed-app OAuth client secret the zip carries (finding 52); the admin gets an artifacts dir and `artifacts_dir_id` before the private-space subroutine, so its handshake is written by id (finding 57); Step 13 names the space `Agent-Index-Private-{org_uuid}`.
+- **member-bootstrap 3.13.1:** no install-log upload offer on a distribution-channel org (finding 58).
+- **upgrade/3-to-4.md:** cx-studio's minimum is 5.1.0. cx-studio 5.0.0 was released separately and still calls the helper; its move to the permission-changes procedure ships as 5.1.0 after this release, so orgs with cx-studio installed stay on core 3.x until then.
+
 ### Fixed (dev-1 live test, Dev Two — batch 5)
 - **Member private spaces are named by a permanent org UUID (`privatespacecrossorg`, findings 9/40).** create-org 3.15.0 generates org-config `org_uuid` (publish-updates 3.20.0 standing reconcile 6h back-fills existing orgs); member-bootstrap 3.13.0 creates `Agent-Index-Private-{org_uuid}`, adopts a folder only from this org's own records (never by the legacy name `Agent-Index-Private`), and tags it with `org.json` (`org_uuid`); apply-updates 4.2.0 Migration 7 tags recorded spaces and gives a member whose space another org tagged a new one. Nothing finds the space by name, so existing spaces keep their names.
 - **A new member's update cursor is set at bootstrap** (`newmembercursor`, finding 43): member-bootstrap writes `last_applied_update` from `latest.json`.

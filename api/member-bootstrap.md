@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.13.0
+version: 3.13.1
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -309,11 +309,11 @@ Confirm to the member that bootstrap is complete:
 
 > "You're all set up and connected to {org_name}. Next, I'll help you configure your preferences and install your org's skills and tasks."
 
-**Offer install log upload:** If an install log file exists in `.agent-index/logs/` for this run and `log_collector_url` is configured in `agent-index.json`, offer to share it:
+**Offer install log upload:** If an install log file exists in `.agent-index/logs/` for this run, `log_collector_url` is configured in `agent-index.json`, **and the org runs released code** (local `agent-index.json` / org-config `distribution_channel` is null — a channel org's logs would pollute production telemetry; `channellogoffer`, finding 58), offer to share it:
 
 > "Your setup generated a diagnostic log that can help the agent-index team improve the experience. It contains step-level diagnostics with hashed identifiers — no credentials or personal information. Would you like to share it?"
 
-If the member accepts: invoke the `upload-install-log` task. If they decline: "No problem. The log is at `.agent-index/logs/{log_filename}` if you change your mind." If `log_collector_url` is not configured: skip silently.
+If the member accepts: invoke the `upload-install-log` task. If they decline: "No problem. The log is at `.agent-index/logs/{log_filename}` if you change your mind." If `log_collector_url` is not configured, or the org runs a distribution channel: skip silently.
 
 Hand off to the preferences-management skill for the initial setup interview, then to org-setup for capability selection and installation.
 

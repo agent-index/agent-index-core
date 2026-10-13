@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.15.0
+version: 3.15.1
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -972,7 +972,7 @@ The admin's member workspace is set up locally, following the same flow that mem
 
 1. Create the local member workspace directory structure: `{project_dir}/members/{admin_hash}/` with subdirectories: `skills/`, `tasks/`, `profile/`
 2. Create `member-index.json` for the admin (locally), with `"last_applied_update": "000"` (the baseline seeded in Step 11.6) and `"helper_removed": true` (a 4.0.0 install never had the retired permission helper, so apply-updates Step 1.6 has nothing to remove)
-3. **Provision the admin's remote member space** — run the canonical **ensure-member-space subroutine** (defined in `member-bootstrap.md`, "ensure-my-drive-space"), exactly as a member would. The admin runs `create-org`, not `member-bootstrap`, so without this the admin never gets a remote member space and owned-content collections they run (strategy, capture, etc.) have no `member_folder_id` to anchor on. The subroutine: create `Agent-Index-Private` in the admin's own drive via `id:root/...`, stat the **resolved** id, record `member_folder_id` in the admin's `member-index.json`, and write the registry handshake. It is idempotent and backend-agnostic (`id:root` resolves to the admin's My Drive on gdrive / OneDrive). On OneDrive, if it returns `NOT_PROVISIONED`, surface the "sign in to office.com once" message and retry after. (Closes bug `20260615-8d20ea22-adminspace`.)
+3. **Provision the admin's remote member space** — run the canonical **ensure-member-space subroutine** (defined in `member-bootstrap.md`, "ensure-my-drive-space"), exactly as a member would. The admin runs `create-org`, not `member-bootstrap`, so without this the admin never gets a remote member space and owned-content collections they run (strategy, capture, etc.) have no `member_folder_id` to anchor on. The subroutine: create `Agent-Index-Private-{org_uuid}` in the admin's own drive via `id:root/...`, stat the **resolved** id, record `member_folder_id` in the admin's `member-index.json`, and write the registry handshake. **Before running it, give the admin an artifacts dir like any member** (`adminartifactsdir`, finding 57): materialize `/shared/members/artifacts/{admin_hash}/.placeholder`, `aifs_stat` it for its id, and write `artifacts_dir_id` into the admin's `members-registry.json` entry (by id, `id:{resource_ids.members_registry}`, revision-aware) — so the subroutine's handshake write is by id, not the path fallback. It is idempotent and backend-agnostic (`id:root` resolves to the admin's My Drive on gdrive / OneDrive). On OneDrive, if it returns `NOT_PROVISIONED`, surface the "sign in to office.com once" message and retry after. (Closes bug `20260615-8d20ea22-adminspace`.)
 4. Run the preferences-management initial interview
 5. If collections were installed via marketplace in Step 11, proceed to capability selection and installation for the admin
 
@@ -1163,7 +1163,7 @@ The current member running this task is always added to the admin list. They can
 
 Never skip generating and uploading the bootstrap zip in Step 12. This is the distribution mechanism for members. Without it, members cannot set up agent-index.
 
-Never include credentials or tokens in the bootstrap zip. The zip contains connection config (endpoint identifiers, OAuth client IDs) but never secrets. Members authenticate individually during their setup.
+Never include credentials or tokens in the bootstrap zip — no `.agent-index/credentials/`, no OAuth tokens, no path cache. The zip contains connection config: endpoint identifiers and the OAuth client ID, plus, on gdrive, the OAuth client **secret** the adapter's `connection_schema` requires. That secret belongs to an installed-app (desktop) OAuth client, which Google does not treat as confidential; members need it to sign in. Members authenticate individually during their setup (`zipsecretwording`, finding 52).
 
 Never skip writing `CLAUDE.md` during Step 8 (both locally and on remote). This file gives Claude the context it needs to understand agent-index. Without it, the bootstrap hook's output is meaningless.
 
