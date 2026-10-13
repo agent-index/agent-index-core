@@ -1,9 +1,9 @@
 ---
 name: edit-org
 type: task
-version: 3.4.0
+version: 3.5.1
 collection: agent-index-core
-description: Edit org configuration — update the admin list, manage marketplace subscriptions, or launch the marketplace to install or manage collections.
+description: Edit org configuration — update the admin list, manage marketplace subscriptions, set the org's distribution channel, or launch the marketplace to install or manage collections.
 stateful: false
 produces_artifacts: false
 produces_shared_artifacts: false
@@ -63,6 +63,7 @@ If the member invoked generally: present the management options:
 > Org roles: {role count, or "none defined"}
 > Installed collections: {count} — say 'open marketplace' to manage
 > Marketplaces: {enabled subscription display names, or "Agent Index Marketplace (default)" if `marketplaces[]` is absent}
+> Distribution channel: {org-config `distribution_channel`, or "none — released code"}
 >
 > What would you like to do?
 > 1. Add or remove an org admin
@@ -71,6 +72,9 @@ If the member invoked generally: present the management options:
 > 4. Open the marketplace
 > 5. Publish updates for members
 > 6. Manage marketplace subscriptions
+> 7. Set the distribution channel (run unreleased code for testing, or go back to released code)
+
+Route: 1 → Step 3 · 2 → Step 4 · 3 → Step 5 · 4 → Step 6 · 5 → Step 7 · 6 → Step 5.9 · 7 → Step 5.7. Natural language such as "put this org on dev-1" or "switch back to released code" also routes to Step 5.7.
 
 ---
 
@@ -148,20 +152,22 @@ Read the local `mcp-servers/filesystem/adapter.json`. Note the current `version`
 
 **2. Obtain the adapter bundle:**
 
-**For a self-distributing org (M1/M3, C.1.3.4), prefer the admin's local adapter clone over a `zip_url` download.** The `infra-clone` script already cloned the adapter repo at the org's pinned tag; that clone is the canonical, tag-correct source and avoids a stale `zip_url`/directory fetch (same source-of-truth rule as `publish-updates`). Take `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the clone at the target tag. Only fall back to the `filesystem-adapter-directory.json` → `zip_url` download if no local adapter clone is present (a non-self-distributing org). Whichever source: do NOT `WebSearch` for the adapter version.
+**For a self-distributing org (M1/M3, C.1.3.4), prefer the admin's local adapter clone over a `zip_url` download.** The `infra-clone` script already cloned the adapter repo at its resolved ref (the release tag ("pinned tag" in older text), or on a channel org the `channel/<name>` head; see `.agent-index/clone-resolution.json`, written into `<ref>` below); that clone is the canonical source and avoids a stale `zip_url`/directory fetch (same source-of-truth rule as `publish-updates`). Take `dist/aifs-exec.bundle.js`, `dist/aifs-exec.sh`, and `adapter.json` from the clone at the target tag. Only fall back to the `filesystem-adapter-directory.json` → `zip_url` download if no local adapter clone is present (a non-self-distributing org). Whichever source: do NOT `WebSearch` for the adapter version. **Never on a channel org** (org-config `distribution_channel` set): a ZIP is the default branch and would silently revert the org; refresh the clone with the channel instead (core 3.32.0).
 
 Verify bundle integrity: compute SHA-256 of `aifs-exec.bundle.js` and compare against `exec_bundle_checksum` in the downloaded `adapter.json`. If mismatch, report the error and halt.
 
-Compare the downloaded `adapter.json` version against the local version. If the downloaded version is not newer: surface "Your adapter bundle is already up to date (version {version}, built {bundle_built_at})." and offer to regenerate the bootstrap zip anyway (the admin may want to regenerate for other reasons, e.g. updated CLAUDE.md or settings).
+Compare the downloaded `adapter.json` version against the local version (**compare `exec_bundle_checksum` instead when the org has a channel, or the last publish recorded a channel adapter** (published-state `commits.adapter.ref` starts with `channel/`). A channel candidate can carry the same version with a different build, and returning to released code can mean a lower version.). If the downloaded version is not newer (channel org: the checksum is unchanged): surface "Your adapter bundle is already up to date (version {version}, built {bundle_built_at})." and offer to regenerate the bootstrap zip anyway (the admin may want to regenerate for other reasons, e.g. updated CLAUDE.md or settings).
 
 **3. Replace the local bundle:**
 
 Overwrite the three deployed files in `mcp-servers/filesystem/`. **Source the text files (`aifs-exec.sh`, `adapter.json`) from the git blob, never a working-tree/zip copy (M3, `adapterdeploydoc`, C.1.3.4 — standards.md "Host-deploy byte-exact files via `git cat-file`/`git show`").** A Windows working-tree copy CRLF-converts the shell wrapper and corrupts the executor — observed live in the ms_install_10 publish, where the deployed `aifs-exec.sh` came up CRLF and broke `bash` until it was re-deployed from the blob. So:
 
-- `aifs-exec.bundle.js` — copy **byte-exact** (it is checksum-gated against `exec_bundle_checksum`; preserve it exactly, do not normalize). If sourced from a clone, `git -C <adapter-clone> cat-file blob <tag>:dist/aifs-exec.bundle.js > mcp-servers/filesystem/aifs-exec.bundle.js`.
-- `aifs-exec.sh` and `adapter.json` — deploy from the git blob (`git -C <adapter-clone> show <tag>:dist/aifs-exec.sh` / `:adapter.json`), which is LF-correct on every platform, **not** a `Copy-Item`/`cp` from the working tree.
+- `aifs-exec.bundle.js` — copy **byte-exact** (it is checksum-gated against `exec_bundle_checksum`; preserve it exactly, do not normalize). If sourced from a clone, `git -C <adapter-clone> cat-file blob <ref>:dist/aifs-exec.bundle.js > mcp-servers/filesystem/aifs-exec.bundle.js` (`<ref>` = the adapter's resolved ref from `clone-resolution.json`).
+- `aifs-exec.sh` and `adapter.json` — deploy from the git blob (`git -C <adapter-clone> show <ref>:dist/aifs-exec.sh` / `<ref>:adapter.json`), which is LF-correct on every platform, **not** a `Copy-Item`/`cp` from the working tree.
 
 After deploying, **smoke-test the new executor** (an `aifs_auth_status` + a verified read) and confirm the wrapper is LF (no CRLF) before proceeding — catch a torn/CRLF deploy here, not after the bootstrap zip ships it to members.
+
+**Sync `agent-index.json` (`editorgadapterversion`, core 4.0.0 live test finding 28).** Set the local `agent-index.json` `remote_filesystem.exec.adapter_version` to the new `adapter.json` `version` (shell-first write, read back and `JSON.parse`), the same sync apply-updates Phase 3 step 4 does for members. Do it before step 5: the bootstrap zip bakes in this `agent-index.json`, so a stale value would ship to every new member.
 
 Surface: "Adapter bundle updated from version {old_version} (built {old_date}) to version {new_version} (built {new_date})."
 
@@ -197,6 +203,27 @@ After the subroutine completes, surface the member distribution instructions:
 
 ---
 
+### Step 5.7: Distribution Channel (added in edit-org 3.5.0 / core 3.32.0)
+
+See standards.md § "Distribution channels". Show the current value and, if `.agent-index/clone-resolution.json` exists, each repo's resolved ref and short commit.
+
+1. **Choose:** set or change the channel (a name such as `dev-1`, validated against `^[a-z0-9][a-z0-9-]{0,39}$`), or clear it (back to released code).
+2. **Explain before writing:**
+   - Every repo with a `channel/<name>` branch will come from that branch head; the rest stay on released code.
+   - Members get it at their next update.
+   - The org shows a channel banner until it's cleared.
+
+   When clearing: the org returns to the latest release tags at the next refresh and publish.
+3. **On explicit confirmation,** write org-config `distribution_channel` (safe org-config rewrite rule, revision-aware) and the local `agent-index.json` mirror.
+4. **Offer to apply it now, in this order:**
+   1. **Refresh clones:** emit the infra manifest and a collections manifest for every installed collection repo, both with the new `channel`, via the clone-manifest emitter. Surface the committed `clone-repos` invocation and wait for the admin to run it.
+   2. **Collections:** run `@ai:upgrade-collection {name}` for each installed collection whose refreshed clone commit differs from its `source_commit`. upgrade-collection compares commits here, so a move back to a lower released version works.
+   3. **Adapter:** run Step 5 (adapter update) if the adapter clone's bundle checksum differs from the deployed one.
+   4. **Publish:** run `@ai:publish-updates`.
+
+   publish-updates sees the channel change and treats every component whose backend identity changed as updated, so members move in either direction, including back to a lower released version.
+5. **Never switch silently.** A channel is only ever set or cleared here or by create-org.
+
 ### Step 5.8: Capability Provider Management (added in 3.10.0)
 
 If the admin asks to view, deregister, or re-order capability providers:
@@ -217,7 +244,7 @@ Actions:
 
 1. **Subscribe to a catalog.**
    - Ask for the source. v1 accepts **`clone`** only for new subscriptions: the catalog repo's git URL. (`url` exists solely for the synthesised legacy entry; `backend` is reserved — refuse with "Backend-hosted catalogs aren't supported yet.")
-   - If the repo is not already cloned under the install root, add it to the **infra clone manifest** and surface the committed `lib/clone/clone-repos` invocation per the `clone-manifest-emitter` subroutine (`templates/clone-script-generator.md`). **Never author a clone script and never run git from the sandbox** — the admin runs the committed script natively. Halt until the admin confirms it ran; then confirm the clone exists and its `origin` matches the git URL.
+   - If the repo is not already cloned under the install root, add it to the **infra clone manifest** (with the org's `channel`) and surface the committed `lib/clone/clone-repos` invocation per the `clone-manifest-emitter` subroutine (`templates/clone-script-generator.md`). **Never author a clone script and never run git from the sandbox** — the admin runs the committed script natively. Halt until the admin confirms it ran; then confirm the clone exists and its `origin` matches the git URL.
    - Read the clone's `marketplace-directory.json`. **Refuse** if it lacks `marketplace_id`, if that id is already subscribed, if any of its collection names is already offered by another subscribed catalog (unique names — core 3.31.0), if any of its names falls in a prefix another subscribed catalog reserves, if any *other* subscribed catalog offers a name in the prefix this catalog reserves, or if its reservation overlaps an existing one. Name the offending entries. A catalog may declare `namespace: null` (reserve nothing), and its own entries may use any names — namespaces only reserve, they do not restrict (3.31.0).
    - Show the admin what they are subscribing to — id, display name, namespace, entry count and names — and confirm.
    - Write the subscription (`source.ref` **relative to the install root**, never absolute — `appspathsandboxleak`; `trust_anchor.git_url`; `enabled: true`; `skip_if_unavailable: false`; `subscribed_date`/`subscribed_by`) via the **safe org-config rewrite rule** (see `create-org` Step 10: unique `mktemp` staging, identity assert, content assert that the new id is present, no glob/mtime re-select). Read back.

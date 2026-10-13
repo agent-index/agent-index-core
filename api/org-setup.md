@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.9.2
+version: 3.12.0
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true
@@ -47,6 +47,8 @@ This skill manages capability installation and lifecycle. It does not manage pre
 ## Directives
 
 ### Remote Filesystem Access
+
+**Collection reads use the collection's read base, not a bare path (`memberpathreads`, core 4.0.0 live test).** Wherever this skill reads `/{collection}/...` (definitions, `setup/`, `apps/`), read it from the collection's base: on gdrive `id:{folder_id}/...` first (`folder_id` from org-config `installed_collections[]`), path as the fallback; on OneDrive the path first (see apply-updates' manifest-sync step 1.5). A member's root-level path lookup can miss, or, before gdrive adapter 2.11.3, reach a same-named folder in another org's drive: a fresh Dev Two install checked `/projects/apps` against another org's older `projects`, found nothing, and installed projects with no `apps/` and no `apps_path`. On gdrive read org-config itself as `id:{org_config_id}`.
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
@@ -165,7 +167,7 @@ Get confirmation before beginning any installations.
 
 **Phase 4a — Collection-level materialization (added in core 3.29.0).** Before the per-capability loop below, run once for each distinct collection represented in the installation order:
 
-1. Check whether the collection ships bundled scripts: `aifs_exists("/{collection}/apps")`. If it does not, skip to the next collection — this is the common case and is not an error.
+1. Check whether the collection ships bundled scripts: `aifs_exists("{base}/apps")`, `{base}` being the collection's read base (gdrive `id:{folder_id}`; see Remote Filesystem Access). If it does not, skip to the next collection — this is the common case and is not an error.
 2. Copy the collection's `apps/` directory to the member's LOCAL workspace at `members/{member_hash}/installed/{collection}/apps/`, preserving the directory structure beneath it (some collections nest scripts one level deep, e.g. `apps/gmail-labeler/label_emails.py`). Read each file with `aifs_read` and write it with the native file tools, the same remote-read → local-write pattern used for capability definitions in the loop below.
 3. Set the **core-injected** parameter `apps_path` for every capability in this collection. Two values, deliberately different (`standards.md`, "Core-Injected Parameters"):
 
@@ -189,6 +191,7 @@ Get confirmation before beginning any installations.
 4. Inject org-mandated parameter values (from the collection's `setup/collection-setup-responses.md`, read via `aifs_read`) into the setup context, together with the core-injected `apps_path` resolved in Phase 4a (if this collection ships `apps/`). Core-injected values are supplied silently and are never presented for confirmation.
 5. Inject role-suggested parameter defaults from `role.md` into the setup context
 6. Read the setup template (`{name}-setup.md`) from the remote collection via `aifs_read("/{collection}/api/{name}-setup.md")`
+   **Pre-Setup Checks are advisory for installation** (`presetupblocks`, 3.32.0 live test). A template's `## Pre-Setup Checks` describe what the capability needs before it is *useful* (e.g. "at least one project exists"). Except for "collection setup completed" (`collection-setup-responses.md` exists — that one blocks), a failed check never blocks installing: install the capability, record the unmet check in its `manifest.json` (`presetup_unmet: [...]`), and tell the member in one line, e.g. *"Installed manage-action-items — it'll be useful once you have a project."* A new member normally has no projects or strategies yet.
 7. Conduct the setup interview for this skill or task:
    - Skip questions for `[org-mandated]` parameters — inject the value silently
    - Pre-fill `[role-suggested]` parameters with role defaults — present to member for confirmation
@@ -262,15 +265,9 @@ Write onboarding completion state to `/members/{member-hash}/profile/onboarding-
 
 After writing `onboarding-state.md`, also update the member's entry in `members-registry.json` **by id** — `id:{members_registry_id}` (from org-config `resource_ids.members_registry`; path fallback if absent — `groupshareapivisibility`): read via `aifs_read("id:{members_registry_id}")`, modify, write back via `aifs_write("id:{members_registry_id}", ...)`) with `org_role` set to the selected org role's `role_id` (or null if none selected).
 
-**Phase 5b — Permission-helper registration (do-it-now, verified — added in core 3.22.0, `helpernoreg`).** Onboarding installs sharing-capable capabilities (Library docs, Projects ideas, owned-content shares), so the `agent-index://` URL handler must be registered on the host or the member's **first share will emit a link that does nothing.** This is the same do-it-now/verified treatment `member-bootstrap` applies — it MUST also run here, because "set up my workspace" routes to **this skill**, not member-bootstrap, and a closing "optional, everything else works without it" footnote (the pre-3.22.0 behavior on this path) is exactly the framing that left members with a dead first-share link.
+**Phase 5a — Natural-language routing (`freshrouting`, core 4.0.0 live test finding 45).** If `members/{member_hash}/profile/routing.json` doesn't exist, create it now — a fresh member otherwise has none until some later `@ai:update` happens to run apply-updates Phase 5. Use exactly apply-updates' Phase 5 procedure and schema: scan `agent-index-core`, `agent-index-marketplace` and every collection just installed (each `collection.json` from its read base), collect the `triggers`, present cross-collection phrase collisions to the member (the unchosen mapping gets `active: false`), show the table, write the file. If `routing.json` already exists (an install adding capabilities later), merge the new collections' triggers as apply-updates Phase 4 step 4 does, never overwriting customized mappings.
 
-1. **Check whether the helper is registered.** If a registration-state probe is available for the platform (Windows HKCU `agent-index` scheme key; macOS `lsregister -dump | grep agent-index:`; Linux `xdg-mime query default x-scheme-handler/agent-index`), use it. In a Cowork/Linux sandbox you cannot register a host-native Windows/Mac binary and a sandbox registration does not count — so do not claim it auto-registers.
-2. **If not confirmed registered, present it as a required action the member runs now** (not a footnote), per platform:
-   - **Windows** (PowerShell, note the leading `&`): `& "{project_dir}\mcp-servers\permission-helper-go\agent-index-show-plan.exe" --register`
-   - **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
-   - **macOS host:** run the bundled `.app` installer (`installer/darwin/install.sh`) — **never** `--register` the bare darwin binary (macOS registers bundles; bug `20260626-8d20ea22`).
-3. **State the consequence plainly:** "Until this is registered, your first owned-content share will produce an `agent-index://` link that does nothing. The fallback is the helper's headless `--cli <spec PATH>` (pass the spec **file path**, not the `agent-index://` URL — see `permission-change-helper` § headless fallback)."
-4. **Re-surface until confirmed.** Do not report onboarding "complete (sharing works)" while registration is unconfirmed on the member's native platform — on that platform an unregistered handler is a hard blocker for the click-to-approve flow. Record the registration state in `onboarding-state.md`. (If the member's install pre-dates a pinned helper, skip this silently.)
+**Phase 5b** — (Step removed in core 4.0.0: the permission helper is retired.)
 
 Surface the completion summary to the member:
 
@@ -344,6 +341,7 @@ When a member asks to upgrade, or when upgrading is triggered from the managemen
    - Write the migrated `setup-responses.md`.
    - **Re-materialize the collection's `apps/` directory (added in core 3.29.0)** if the collection ships one and this upgrade crosses a collection version boundary. `apps/` is collection-owned and core-managed, so the replacement is **wholesale**: remove `members/{member_hash}/installed/{collection}/apps/` entirely and copy the new version down from `/{collection}/apps` as in Phase 4a. There is no merge, no per-file diff, and no preservation of anything found in that directory — which is safe precisely because nothing but core writes there. A collection that has stashed member data inside `apps/` is in violation of the member-data rule and will lose it here; that is the intended failure, not an edge case to accommodate. Re-materialize once per collection per upgrade run, not once per capability. `apps_path` does not change and needs no migration.
 9. Update the `version` field in `member-index.json` for this capability to the **`.md` frontmatter version** parsed in step 2 — the same value written to `manifest.json` in step 8. Do NOT use the collection's `collection.json` version. (Clarified in core 3.7.0 to match Phase 4b step 11's wording; same data-shape principle.)
+9a. **Aliases follow the setup template (`civiewpermsclash`, core 4.0.0).** If the new setup template registers a different `@ai:` alias than the member-index entry carries, replace the entry's alias with the template's (check it against the member's other aliases first, as on install). Client-intelligence 2.4.1 renamed its `view-permissions` alias to `@ai:view-client-permissions` this way, so it no longer shadows core's `@ai:view-permissions`.
 10. Confirm: "{Display name} upgraded from {old version} to {new version}."
 
 **If no upgrade script exists for this version boundary (MINOR or PATCH upgrade):** still perform steps 2 and 8 — read the new content from remote and write it to the local install path. Carry all existing setup responses forward unchanged. Update the version in `member-index.json`. The "no upgrade script" branch is *not* a bookkeeping-only operation — the actual file content must be replaced. Skipping step 8 leaves the local file stale relative to what `member-index.json` claims is installed (which is the failure mode in bug `20260502-8d20ea22-5`).

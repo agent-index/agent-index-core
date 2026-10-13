@@ -1,7 +1,7 @@
 ---
 name: author-collection
 type: task
-version: 3.1.0
+version: 3.1.1
 collection: agent-index-core
 description: Guided workflow for creating a new agent-index collection from scratch — scaffolds directory structure, generates all required files, and ensures standards compliance.
 stateful: false
@@ -106,7 +106,7 @@ If the collection doesn't fit any category, note that the author can propose a n
 
 **Author** — person or organization name.
 
-**License** — `open`, `commercial`, or an SPDX identifier.
+**License** — `open`, `commercial`, `proprietary`, or an SPDX expression. It's the author's choice: the platform is AGPL, but collections built on it are not bound by that (Agent Index Collection Exception, core `COLLECTION-EXCEPTION.md`).
 
 **Dependencies** — other collections this collection depends on. Empty array for most collections.
 

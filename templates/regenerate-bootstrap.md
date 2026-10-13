@@ -115,28 +115,25 @@ aifs_write("/shared/bootstrap/member-bootstrap.zip", "base64:<base64-encoded-zip
 The bootstrap zip must remain accessible to the org's all-members Google Group (or equivalent in non-Drive backends). The share is preserved automatically when overwriting an existing file in most backends, but verify post-upload:
 
 ```
-aifs_get_permissions("/shared/bootstrap/member-bootstrap.zip")
+aifs_get_permissions({"path": "/shared/bootstrap/member-bootstrap.zip", "include_inherited": true})
 ```
 
-If `<org-config>.remote_filesystem.connection.all_members_group` is NOT in the recipients list with `reader` role:
+If `<org-config>.remote_filesystem.connection.all_members_group` is NOT in the recipients list with at least `reader` (directly or inherited):
 
-- For backends that support it via API (gdrive): build a single-op spec for the permission-change-helper:
+- For backends that support it via API (gdrive, onedrive): follow `/agent-index-core/internal/permission-changes.md` with one change, the admin confirming:
   ```json
   {
-    "operations": [{
-      "op": "share",
-      "resource": "/shared/bootstrap/member-bootstrap.zip",
-      "recipient": "<all_members_group>",
-      "role": "reader"
-    }],
-    "context": {
-      "requestor": "<admin-member-hash>",
-      "calling_task": "regenerate-bootstrap",
-      "purpose": "Restore reader access to the bootstrap zip after regeneration"
-    }
+    "calling_task": "regenerate-bootstrap",
+    "purpose": "Restore all members' read access to the regenerated bootstrap zip",
+    "confirmer": "admin",
+    "changes": [{
+      "op": "share", "resource": "/shared/bootstrap/member-bootstrap.zip", "resource_label": "the member bootstrap zip",
+      "recipient": "<all_members_group>", "role": "reader",
+      "reason": "New members download this to join the org", "source": "org_config"
+    }]
   }
   ```
-  Pass to permission-change-helper as a sub-step. Wait for the helper's outcome. On success, continue. On reject/timeout, surface to the admin: "Bootstrap zip uploaded but the all-members share was not restored. Re-run @ai:edit-org or apply the share manually."
+  On `complete`, continue. Otherwise, surface to the admin: "Bootstrap zip uploaded but the all-members share was not restored. Re-run this step or apply the share manually," and give the procedure's `summary_lines`.
 - For backends without programmatic share APIs: surface the share state and ask the admin to verify via the backend's UI. Continue without halting.
 
 ### Step 8: Update published-state.json bootstrap hash and clean up

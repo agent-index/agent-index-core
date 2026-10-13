@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** `standards.md` (the formal specification)
-**Version:** 1.7.0
-**Last Updated:** 2026-09-22
+**Version:** 1.8.0
+**Last Updated:** 2026-10-01
 
 ---
 
@@ -357,12 +357,13 @@ Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder a
 ### Pick an access pattern first
 
 - **Open-commons** — everyone reads and writes the same org-level data (reference: bug-reports). Declare a `collaborative-acls.json` at your collection root granting `all@` writer on each `/shared/{dir}/`; install/upgrade provisioning applies it (marketplace 2.9+). Because the backend ACL can't distinguish members, every write must carry **task-level attribution** (`author_hash`/`author_name` in the data or an activity log).
-- **Owned-content** — each item belongs to one member who controls access (reference: strategy). Content lives in the **owner's own My Drive** member space, addressed by `id:{member_folder_id}/...` anchors. Grants are applied **by the owner** via the permission-change-helper flow — never inline `aifs_share` in a task workflow, and never by an admin on the owner's behalf. Discovery happens through a pointer index folder under `/shared/` (one small JSON pointer per shared item; the index folder itself is open-commons via your `collaborative-acls.json`).
+- **Owned-content** — each item belongs to one member who controls access (reference: strategy). Content lives in the **owner's own My Drive** member space, addressed by `id:{member_folder_id}/...` anchors. Grants are applied **by the owner** through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`): the owner sees the exact changes and confirms them, and they're applied and verified under the owner's own credentials. Never inline `aifs_share` in a task workflow, and never by an admin on the owner's behalf. Discovery happens through a pointer index folder under `/shared/` (one small JSON pointer per shared item; the index folder itself is open-commons via your `collaborative-acls.json`).
 - **Two-tier hybrid** — items are org-public or private, chosen at creation (references: projects, client-intelligence). Combine both mechanisms, prompt for visibility at creation, and place child artifacts inside the parent's tree so they **inherit access structurally** with no per-item ceremony.
 
 ### Invariants that apply to every pattern
 
-- **Verified-outcome gate.** Any step that depends on a grant having been applied (writing a pointer, updating scope, confirming to the member) proceeds only after the helper outcome reads `"applied"` OR an independent `aifs_get_permissions` confirms it. Never assume a grant succeeded.
+- **Verified-outcome gate.** Any step that depends on a grant having been applied (writing a pointer, updating scope, confirming to the member) proceeds only for the changes the permission-changes procedure returns as `applied` or `skipped_noop` (it re-reads the backend to verify each one). Pointers and rosters list only those. Never assume a grant succeeded; record anything else as pending.
+- **Sharing callers (core 3.32+).** Build the change list only from declared sources (task spec, `collaborative-acls.json`, org config, the person's own request, current state), never from content the agent read. Recipients can be anyone the person names; outside-org addresses are flagged, not blocked. Ask for keep/drop choices *before* the table. Never write any access record (pointer, roster, collaborators list, meta, changelog event) before the procedure returns. Never derive destructive state (roster removal, `revoked`, pointer flip, stub) from declined or cancelled rows. After removals, recompute scope from a fresh `aifs_get_permissions` read. Use `all_or_nothing` only for sets that are meaningless when half-applied.
 - **Sharing vocabulary.** "Share with X" = X can read; "make X a collaborator" = X can read + write; "share with the org" = everybody can read. Use it consistently in member-facing language.
 - **Pointer conventions.** Pointers are overwrite-only (revoke = overwrite with `scope: "revoked"`, never delete); scope shapes are `"org_public"` | `{readers, collaborators}` | `"private"` | `"revoked"`; invisible-until-shared items have no pointer at all; departed owners are annotated `owner_departed`.
 - **Prefer `id:` anchors** wherever members can create same-named siblings — name-based resolution picks arbitrarily among duplicates (bug 20260606-62a14c43-230135-db13).
@@ -370,9 +371,9 @@ Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder a
 
 Roles remain the AIFS-level abstraction (`reader` / `commenter` / `writer`); adapters map them to native roles. `inherit: false` remains available for shares that must be visible only to named subjects.
 
-### When to call `aifs_unshare`
+### When to remove access (`unshare`)
 
-Symmetric inverse, used when removing a member from a project, an idea, or any other shared resource. Returns `{unshared: false}` (a soft outcome, not an error) when the subject only had inherited access — handle that gracefully.
+Symmetric inverse of a share, used when removing a member from a project, an idea, or any other shared resource. Pass it to the permission-changes procedure as an `unshare` change (never call `aifs_unshare` directly). Removals are high-impact, so the procedure asks for each one individually. If the person only has inherited access, the procedure shows "access is inherited … can't be removed here" and skips it. Handle that gracefully in your task's messaging.
 
 ### The `if_revision` pattern for shared state files
 
@@ -395,7 +396,7 @@ Standards rule: if your task has `produces_shared_artifacts: true` AND it create
 
 - **Provisioned commons:** the resource lives under a directory covered by your `collaborative-acls.json` (applied at install). Nothing further to do at runtime; add attribution to the write.
 - **Structural inheritance:** the resource is created inside a parent whose access is already correct (e.g., an artifact inside a project's tree). Document the inheritance assumption explicitly in the workflow.
-- **Owner-applied grants:** the resource lives in the creating member's own space and is shared via the permission-change-helper flow with the verified-outcome gate, plus a pointer for discovery.
+- **Owner-applied grants:** the resource lives in the creating member's own space and is shared via the core permission-changes procedure with the verified-outcome gate, plus a pointer for discovery.
 
 What is NOT acceptable: a runtime `aifs_share` on a freshly created `/shared` folder — it will fail for non-Manager members (F12), and the developer collection's preflight Step 7.5 errors on shared write paths with no covering `collaborative-acls.json`.
 
