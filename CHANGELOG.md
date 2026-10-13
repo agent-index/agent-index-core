@@ -1,6 +1,6 @@
 ﻿# Agent-Index Core — Changelog
 
-## [4.0.0] — <RELEASE_DATE> — Permission helper removed
+## [4.0.0] — 2026-10-13 — Permission helper removed
 
 **MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).
 
@@ -39,7 +39,7 @@
 - **One private space per org (`privatespacecrossorg`, finding 9).** (invite-member 1.13.1 shows the new name.) member-bootstrap 3.12.0 names the space `Agent-Index-Private ({org_id})`, tags it with `org.json`, and never reuses a space another org owns; apply-updates Migration 7 checks existing members.
 - **Helper removal works on member installs (`uninstallscriptmissing`, finding 35).** apply-updates Step 1.6 reads the removal script from the org's core into `.agent-index/tmp/uninstall/` when the install has no local `agent-index-core/lib/`.
 - **apply-updates 4.1.0:** the core-update `from_version` is the version before Migration 5 synced it (`m5beforemerge`, finding 32); entries without `operations[]` are read as one operation (`flatupdateentry`, finding 27); routing mappings to removed capabilities are pruned (`routingstale`, finding 33).
-- **publish-updates 3.19.0:** Step 0b also derives prerequisites from state (template vs root CLAUDE.md, CLAUDE.md and adapter vs the last publish), so a re-run doesn't lose them (`step0bprereqlost`, finding 31); the M3 guard ignores the `<RELEASE_DATE>` placeholder on channel orgs (finding 29).
+- **publish-updates 3.19.0:** Step 0b also derives prerequisites from state (template vs root CLAUDE.md, CLAUDE.md and adapter vs the last publish), so a re-run doesn't lose them (`step0bprereqlost`, finding 31); the M3 guard ignores the `2026-10-13` placeholder on channel orgs (finding 29).
 - **org-setup 3.11.0** reads collections from their id-anchored base on gdrive (a member install checked another org's `projects` for `apps/` and installed projects without its scripts), and its upgrade flow replaces a capability's alias when the new setup template registers a different one (client-intelligence 2.4.1 `@ai:view-client-permissions`, finding 24).
 - **edit-org 3.5.1** syncs `agent-index.json` `adapter_version` when it deploys an adapter (`editorgadapterversion`, finding 28).
 - **upgrade/3-to-4.md:** the gate checks downloaded collections too, and install-collection applies the same minimums (`gatedownloaded`, finding 26).
@@ -1461,6 +1461,7 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` — reference schema for org-config.json
 - `standards.md` — open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 
 
 
