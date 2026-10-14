@@ -53,13 +53,17 @@ When new collections are installed, their default triggers are merged into `rout
 
 ### How to execute a skill or task
 
-When routing resolves to a capability, read its definition and follow it — **do not explore the filesystem looking for the file**. Every task and skill definition is at `api/{name}.md` inside its collection, and the collection is addressed **by id, never by a bare `/{collection}` path** (a bare path does not resolve for a non-Drive member, or resolves the wrong folder):
+When routing resolves to a capability, follow this procedure — **do not explore the filesystem looking for the file**:
 
-```
-bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"id:{folder_id}/api/{name}.md"}'
-```
+1. **Core capabilities** (from the `agent-index-core` collection): read the definition from the remote filesystem:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/agent-index-core/api/{name}.md"}'`
+2. **Marketplace capabilities** (from the `agent-index-marketplace` collection): read from:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/agent-index-marketplace/api/{name}.md"}'`
+3. **Installed collection capabilities** (member's own skills/tasks): read from:
+   `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/{collection}/api/{name}.md"}'`
+   where `{collection}` is the collection name from the mapping table or `member-index.json`.
 
-`{folder_id}` is the collection's id. Use the one saved on the collection's entry in `member-index.json` when present; otherwise read `installed_collections[]` → `folder_id` for that collection from `org-config.json` (read by `org_config_id`, § "Key Files"). If a saved id fails, re-read it from `org-config.json` — never fall back to a bare path. Core, marketplace and installed collections all follow the same pattern. **Do not `ls` or `aifs_list` to search for definitions** — the location is deterministic.
+The general pattern: all task and skill definitions live at `/{collection}/api/{name}.md` on the remote filesystem. Read them with `aifs_read`, then follow the instructions in the file. **Do not `ls` or `aifs_list` to search for them** — the path is deterministic.
 
 **On a Google Drive org, if you aren't a member of its Shared Drive** (most members), read by id anchor instead: `id:{folder_id}/api/{name}.md`, where `folder_id` is the collection's entry in org-config `installed_collections[]` (read org-config as `id:{org_config_id}`). Use the id form whenever the path read fails, or returns a file whose collection version disagrees with org-config — a name lookup can reach a same-named folder outside this org.
 
@@ -112,7 +116,7 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"id:{f
 If a request matches `@ai:{name}` and is not in the tables above, resolve it as an installed skill or task before declaring it unknown. The resolution sequence is:
 
 1. **Check the local member index first.** Read `members/{member_hash}/member-index.json` and look for an installed capability whose `name` (or one of its `aliases`) equals `{name}`. If found, read the capability's `.md` file at the path recorded in the index and execute it.
-2. **Fall back to a remote scan.** If the member index has no match, list installed collections from `org-config.json` (remote) and, for each entry, check whether `id:{folder_id}/api/{name}.md` exists (that entry's `folder_id`; never a bare `/{collection}` path). If exactly one collection has a matching task/skill file, read and execute it. If multiple match, ask the member which one they meant.
+2. **Fall back to a remote scan.** If the member index has no match, list installed collections from `org-config.json` (remote) and, for each `installed_collections[].name`, check whether `/{collection}/api/{name}.md` exists on the remote filesystem. If exactly one collection has a matching task/skill file, read and execute it. If multiple match, ask the member which one they meant.
 3. **Only then declare it unknown.** If neither step finds a match, surface: "I don't recognize the alias `@ai:{name}`. Try `@ai:tutorial` to see what's available, or `@ai:marketplace` to browse installable collections." Do **not** require the alias to appear in this routing table to consider it valid — this table is a fast-path index, not an allowlist.
 
 ## Key Files
@@ -135,12 +139,13 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 
 ## Addressing
 
-*Paths for what you can enumerate; ID anchors for what you're granted.* Non-admin members are not Shared-Drive members and cannot enumerate the backend root, so for them:
+*Paths for what you can enumerate; ID anchors for what you're granted.* On Google Drive, non-admin members are not Shared-Drive members and cannot enumerate the backend root, so for them:
 
 - **Root-level resources are reached through the top-level id manifest:** `org-config.json` by `org_config_id` (local `agent-index.json`); `/shared` by `resource_ids.shared_root` and the registry by `resource_ids.members_registry` (both in org-config); each collection by `installed_collections[].folder_id`.
 - **Nested resources are reached by walking down from an id-addressed ancestor:** `id:{shared_root}/dist/manifest.json`, `id:{folder_id}/api/{name}.md`.
 - **The `id:` prefix is required.** A bare `{folderId}/child` is read as a literal path and fails.
-- A bare `/shared/...` path works today only through an adapter fallback that is being removed. Use `id:{shared_root}/...`.
+- On Google Drive, a bare `/shared/...` path can fail for a member (`PATH_NOT_FOUND`); use `id:{shared_root}/...`.
+- **On OneDrive, paths stay primary for org files.** A bare `id:` there resolves against the member's own drive, not the org's site drive (`memberpathreads`; `runtime-reference.md` § "Addressing: Owned Content and Sharing").
 
 Owned content, sharing and cross-drive anchors: `runtime-reference.md` § "Addressing: Owned Content and Sharing".
 
@@ -152,7 +157,7 @@ All remote agent-index content — org config, the registry, `/shared/...`, coll
 
 ## Reference Documents
 
-Rules needed only for a specific operation live in two documents in `agent-index-core`, read by id: `id:{core_folder_id}/runtime-reference.md` and `id:{core_folder_id}/admin-distribution.md`, where `{core_folder_id}` is the `agent-index-core` folder id (§ "How to execute a skill or task" says where it comes from). Read them when this file points to a section.
+Rules needed only for a specific operation live in two documents in `agent-index-core`: `runtime-reference.md` and `admin-distribution.md`. Read them like any core file (§ "How to execute a skill or task"): `/agent-index-core/runtime-reference.md`, or `id:{folder_id}/runtime-reference.md` on Google Drive when you aren't a member of its Shared Drive, with `folder_id` from the `agent-index-core` entry in org-config `installed_collections[]`. Read them when this file points to a section.
 
 - `runtime-reference.md` — permission changes, owned content and sharing, the registry schema, shared-data paths, the adapter operations contract, and the default natural-language mappings.
 - `admin-distribution.md` — releases, distribution, marketplaces, the update log, org roles, and the admin side of "check for updates".
