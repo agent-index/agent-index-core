@@ -9,7 +9,7 @@
 
 This is the runtime reference for agents working in an agent-index org. It holds the rules a session needs **only when performing a specific operation** — changing permissions, sharing owned content, writing shared data, resolving identities. The rules every session needs at all times are in the org's `CLAUDE.md` and are **authoritative there**; this document does not restate them, and points to them where they matter.
 
-**How to reach it.** By ID anchor: `id:{folder_id}/runtime-reference.md`, where `{folder_id}` is the `agent-index-core` entry in `org-config.json` → `installed_collections[]`. A bare `/agent-index-core/...` path does not resolve for a non-Drive member.
+**How to reach it.** Like any core file (CLAUDE.md § "How to execute a skill or task"): `/agent-index-core/runtime-reference.md`, or on Google Drive, when you aren't a member of its Shared Drive, `id:{folder_id}/runtime-reference.md`, where `{folder_id}` is the `agent-index-core` entry in `org-config.json` → `installed_collections[]`.
 
 **Citing it.** Cite as `runtime-reference.md § "Exact Heading"`. Headings only — no line numbers, no bold labels.
 
