@@ -1,23 +1,23 @@
 # Agent-Index Core — Roadmap
 
-Current version: 3.29.2
-Last updated: 2026-09-23
+Current version: 4.0.0
+Last updated: 2026-10-11
 
 ---
 
 ## Current State
 
-Core is at **3.29.2** (2026-09-23). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
+Core is at **4.0.0** (2026-10-11). The collection provides session initialization, member onboarding, org and capability management, and collection publishing/update distribution, over a hybrid local/remote filesystem model: member-specific data stays local, org and shared data lives on a remote storage backend reached through the on-demand executor (`aifs_*`). Google Drive and OneDrive are both in production use. No S3 implementation work has shipped.
 
 Four things have changed the shape of the system since v3.1.0:
 
-**Backend-first distribution (Release C, 3.18.0, 2026-06-25).** Members never fetch from GitHub. The admin publishes to the org backend at `/shared/dist/`, SHA-gated, and members read from there. C.1 (3.19.0) completed GitHub-free install orchestration and added signed cross-platform helper builds; C.1.4.0 (3.23.0) added the full os×arch build matrix and publish-side re-render of the org's `/CLAUDE.md`.
+**Backend-first distribution (Release C, 3.18.0, 2026-06-25).** Members never fetch from GitHub. The admin publishes to the org backend at `/shared/dist/`, SHA-gated, and members read from there. C.1 (3.19.0) completed GitHub-free install orchestration; C.1.4.0 (3.23.0) added publish-side re-render of the org's `/CLAUDE.md`.
 
 **ID-anchored addressing (3.8.0, 2026-06-03; bootstrap-critical resources in C.1.4.3, 3.25.0).** Absolute paths address enumerable locations; `id:{folderId}/...` anchors address granted-but-non-enumerable ones. Bootstrap entry points are id-anchored because a non-Drive-member cannot enumerate the Shared Drive root, which makes root-level paths unresolvable for them.
 
 **Member-owned private spaces (3.9.0, 2026-06-04).** Member spaces moved to each member's own My Drive — owner-sovereign sharing, with a pointer-index convention for discovery and soft-delete semantics in place of trashing.
 
-**Helper-gated permission model.** Permission-modifying operations (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are never called by collections directly; they route through `permission-change-helper` and apply under the member's own OAuth token after a deliberate Accept. The Go binary has been the only implementation since 3.7.4. The one sanctioned exception is `create-org`'s install-time bootstrap, which may apply directly and falls back to the helper if it does not.
+**List → confirm → apply → verify permission model (3.32.0).** Permission-modifying operations (`aifs_share`, `aifs_unshare`, `aifs_transfer_ownership`) are called only from the core procedure `internal/permission-changes.md`. It shows the exact changes, takes a fresh confirmation from the owner/admin running the task, applies under their own credentials, verifies on the backend and records the approval. There are no exceptions (create-org included). Core 4.0.0 removed the permission-change-helper; collections that still call it must move to the procedure. Upgrade guide: `upgrade/3-to-4.md` (design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-*.md`).
 
 The **capability provider system** runtime V1 shipped in 3.10.0 (single-provider auto-bind; multi-provider bindings remain post-V1).
 

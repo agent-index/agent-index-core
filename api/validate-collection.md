@@ -1,7 +1,7 @@
 ---
 name: validate-collection
 type: task
-version: 3.1.0
+version: 3.1.1
 collection: agent-index-core
 description: Validates an existing collection against agent-index standards — checks file structure, frontmatter, cross-references, naming conventions, and marketplace eligibility.
 stateful: false
@@ -70,7 +70,7 @@ Check `collection.json` against the required schema.
 | `version` | Present, valid semantic version (MAJOR.MINOR.PATCH) |
 | `description` | Present, non-empty |
 | `author` | Present, non-empty |
-| `license` | Present, one of: `open`, `commercial`, or valid SPDX identifier |
+| `license` | Present, one of: `open`, `commercial`, `proprietary`, or a valid SPDX expression |
 | `category` | Present, valid category from registry |
 | `agent_index_min_version` | Present, valid semantic version |
 | `api` | Present, is array |

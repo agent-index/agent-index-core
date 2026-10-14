@@ -1,7 +1,7 @@
 ---
 name: verify-workspace-policy
 type: task
-version: 1.0.1
+version: 1.0.2
 collection: agent-index-core
 description: Admin diagnostic task. Verifies the Workspace-level policies that the access-control model depends on (per-folder ACLs allowed, per-file sharing with non-drive-members allowed, all-members Google Group exists and is reachable, drive base role is sane). Reports findings; does not modify policy.
 stateful: false
@@ -142,7 +142,7 @@ If any direct check failed: surface specific remediation steps for each.
 
 - Never attempt to read Workspace admin APIs. agent-index doesn't have those credentials and shouldn't pretend to.
 - The probe of all-members-group reachability uses an existing org-readable resource (`/CLAUDE.md`), not a sentinel write — the task should be safe to run any number of times without side effects.
-- **This task is read-only and must remain so.** All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the `permission-change-helper` skill per `agent-index-core/standards.md` § "Permission-Modifying Operations" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly.
+- **This task is read-only and must remain so.** All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`) per `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - v1.0 is on-demand only. Session-start integration is a separate change that reads this task's findings and surfaces non-fatal warnings to admin sessions.
 
 ### Edge Cases

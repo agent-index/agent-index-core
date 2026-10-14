@@ -63,9 +63,12 @@ After cloning, your local directory should look like this:
 ```
 ~/agent-index/
   /agent-index-core/          ← just cloned
-    agent-index.json           ← root registry (inside agent-index-core)
+    templates/
+      agent-index.template.json  ← setup copies this to ~/agent-index/agent-index.json
     README.md                  ← this file
 ```
+
+To test an unreleased candidate on a distribution channel, clone that branch instead, e.g. `git clone -b channel/dev-1 https://github.com/agent-index/agent-index-core`, and answer the channel name when setup asks.
 
 ### Step 2: Open Cowork and run org setup
 
@@ -75,13 +78,13 @@ Then say exactly this to Claude:
 
 > **"Read the README, then set up my agent-index org"**
 
-Claude will read this README, find `agent-index.json`, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
+Claude will read this README, create `agent-index.json` from the core template, and guide you through the rest of the setup — including naming your org, choosing your remote storage backend (Google Drive, OneDrive, or S3), authenticating, uploading org files to remote, and generating a bootstrap zip for members. As part of setup, Claude writes `CLAUDE.md` and `.claude/settings.json` locally, and uploads all shared files to the remote filesystem.
 
-Setup also generates a **clone script** (PowerShell on Windows, bash on macOS/Linux) tailored to your machine and pins it to the published release tags. Running it is a one-shot step: it clones the adapter, marketplace, resource-listings, and the collections you selected, *and* downloads, SHA-verifies, places, and **registers** the permission-helper binary for the `agent-index://` scheme — so you never run a second "install the binary" script later. Setup then publishes everything to your backend's `/shared/dist/` and bakes the binary into the member bootstrap zip.
+Setup also generates a **clone script** (PowerShell on Windows, bash on macOS/Linux) tailored to your machine and pins it to the published release tags. Running it is a one-shot step: it clones the adapter, marketplace, resource-listings, and the collections you selected. Setup then publishes everything to your backend's `/shared/dist/` and builds the member bootstrap zip.
 
 That's it. Claude takes it from there.
 
-> **Distribution model (Release C):** Your org's backend *is* the distribution layer. After setup, members read the adapter, marketplace, resource-listings, installed collections, and the helper binary from `/shared/dist/` on your backend — never from github.com. `/shared/dist/manifest.json` is the authoritative record of what version your org is on. Only the admin touches GitHub, and only when bridging a new release into the org via the clone script (re-run on every add/update).
+> **Distribution model (Release C):** Your org's backend *is* the distribution layer. After setup, members read the adapter, marketplace, resource-listings, and installed collections from `/shared/dist/` on your backend — never from github.com. `/shared/dist/manifest.json` is the authoritative record of what version your org is on. Only the admin touches GitHub, and only when bridging a new release into the org via the clone script (re-run on every add/update).
 
 ---
 
@@ -94,7 +97,7 @@ After an org admin has completed org setup, new members follow this process:
 3. Open Claude Cowork and set your working folder to `~/agent-index/`
 4. Say: **"set up my agent-index member workspace"**
 
-The bootstrap hook will detect you as a new member and guide you through authenticating to the org's remote storage and setting up your local workspace. The permission-helper binary comes from the bootstrap zip (or your org backend's `/shared/dist/`) and is registered for you automatically — members never download anything from github.com.
+The bootstrap hook will detect you as a new member and guide you through authenticating to the org's remote storage and setting up your local workspace. Members never download anything from github.com.
 
 ---
 
@@ -133,11 +136,10 @@ Agent-index uses a two-tier filesystem: member files are local, org/shared files
     /members/artifacts/               ← per-member shared artifact namespace
     /marketplace-cache/
     /bootstrap/
-      member-bootstrap.zip            ← bootstrap zip for new members (binary baked in)
+      member-bootstrap.zip            ← bootstrap zip for new members
     /dist/                            ← distribution layer (Release C) — members read from here, not GitHub
       manifest.json                   ← authoritative org version record (per-artifact sha256)
       /directories/                   ← adapter, marketplace, resource-listings, installed collections
-      /binaries/                      ← permission-helper binary per platform (SHA-verified)
     /updates/
       update-log.json                 ← published update instructions for members
       published-state.json            ← snapshot of org state at last publish
@@ -181,3 +183,7 @@ To submit a collection to the marketplace, open an issue at: https://github.com/
 ## Version History
 
 See CHANGELOG.md.
+
+## License
+
+The Agent Index platform is licensed under the **GNU Affero General Public License v3.0 only**, with the **Agent Index Collection Exception 1.0** (`AGPL-3.0-only WITH LicenseRef-AgentIndex-Collection-Exception-1.0`). In short: if you change the platform, you share your changes, including when you run it as a network service; collections and storage adapters you build on it are yours to license however you choose. See [LICENSE](LICENSE) and [COLLECTION-EXCEPTION.md](COLLECTION-EXCEPTION.md). Releases made before the Agent Index 4.0 release (October 2026) remain under the license they were released with.
