@@ -1,7 +1,7 @@
 # Internal procedure: permission-changes
 
 **Added in:** agent-index-core 3.32.0. It replaced the `permission-change-helper` skill, which core 4.0.0 removed.
-**Normative model:** `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify"
+**Normative model:** `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify"
 **Used by:** every agent-index workflow that grants, removes or transfers access:
 - core: `invite-member`, `remove-member`, `publish-updates` (6e), `apply-updates` (Migration 4), `create-org`, `templates/regenerate-bootstrap`
 - marketplace: `install-collection` (5.5), `upgrade-collection`

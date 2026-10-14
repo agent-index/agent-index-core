@@ -13,7 +13,7 @@ upgrade_compatible: true
 
 `invite-member` is an admin-only runtime task with no setup-time configuration. The task collects all parameters at invocation time (new member's email and display name).
 
-This setup file exists to satisfy the standards.md requirement that every task have a corresponding `-setup.md` file. There is nothing for the admin to configure ahead of time.
+This setup file exists to satisfy the requirement that every task have a corresponding `-setup.md` file (the developer collection's `marketplace-eligibility.md` § "API Member Requirements"). There is nothing for the admin to configure ahead of time.
 
 ---
 

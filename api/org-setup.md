@@ -169,7 +169,7 @@ Get confirmation before beginning any installations.
 
 1. Check whether the collection ships bundled scripts: `aifs_exists("{base}/apps")`, `{base}` being the collection's read base (gdrive `id:{folder_id}`; see Remote Filesystem Access). If it does not, skip to the next collection — this is the common case and is not an error.
 2. Copy the collection's `apps/` directory to the member's LOCAL workspace at `members/{member_hash}/installed/{collection}/apps/`, preserving the directory structure beneath it (some collections nest scripts one level deep, e.g. `apps/gmail-labeler/label_emails.py`). Read each file with `aifs_read` and write it with the native file tools, the same remote-read → local-write pattern used for capability definitions in the loop below.
-3. Set the **core-injected** parameter `apps_path` for every capability in this collection. Two values, deliberately different (`standards.md`, "Core-Injected Parameters"):
+3. Set the **core-injected** parameter `apps_path` for every capability in this collection. Two values, deliberately different (the developer collection's `marketplace-eligibility.md` § "Core-Injected Parameters (core 3.29.0+)"):
 
    - **Store** the path **relative to `project_dir`**: `members/{member_hash}/installed/{collection}/apps`. No machine, user, drive or mount prefix.
    - **Consume** it absolute: resolve at invocation by joining the stored relative path onto the current runtime's `project_dir` (the directory containing `agent-index.json`). Workflows use `{apps_path}` unchanged — `python {apps_path}/forward-bug.py` still gets an absolute path and still works from any working directory.
@@ -178,10 +178,10 @@ Get confirmation before beginning any installations.
 
    **Recompute it, never trust the stored value.** Write it to `setup-responses.md` under `## Org-Mandated Parameters`, as a `### apps_path` block with the single-line `- **Value:**` shape (step 8's canonical format) — the same place and shape `apply-updates` step 5b writes it on the migration path, so a fresh install and an upgraded install are indistinguishable afterwards. Re-resolve at the start of every setup and upgrade run rather than carrying the stored literal forward. `project_dir` moves — a different machine, a re-mounted Cowork folder, a member who relocates their workspace — and a baked-in absolute path silently points at nothing after any of those. The stored value is a record of the last resolution, not an input to the next one.
 
-   This is a core-supplied value, not a collection-declared parameter: it is injected into the setup context in the same way as org-mandated values (step 4 of the loop) and is never asked for interactively. Collections MUST NOT declare `apps_path` in their setup templates — see `standards.md`, "Core-Injected Parameters."
+   This is a core-supplied value, not a collection-declared parameter: it is injected into the setup context in the same way as org-mandated values (step 4 of the loop) and is never asked for interactively. Collections MUST NOT declare `apps_path` in their setup templates — see the developer collection's `marketplace-eligibility.md` § "Core-Injected Parameters (core 3.29.0+)".
 4. **On failure, halt.** If any file in `apps/` cannot be read or written, stop the installation and surface which file failed. Do not warn-and-continue: a partially materialized `apps/` is worse than none at all, because setup templates commonly gate on "does this script exist" and a partial directory can pass that check while the collection is still broken.
 
-`apps/` is collection-owned and core-managed. Nothing else may write into it — member-specific data belongs at `members/{member_hash}/{collection}/`, outside the installer's territory (`standards.md`, "Member Data Placement"). That separation is what makes the wholesale replacement in the upgrade flow below safe.
+`apps/` is collection-owned and core-managed. Nothing else may write into it — member-specific data belongs at `members/{member_hash}/{collection}/`, outside the installer's territory (the developer collection's `marketplace-eligibility.md` § "Member Data Placement (normative)"). That separation is what makes the wholesale replacement in the upgrade flow below safe.
 
 **Phase 4b — Per-capability installation.** For each skill and task in the determined installation order:
 

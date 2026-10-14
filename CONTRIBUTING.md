@@ -12,7 +12,7 @@ It assumes you are an Agent Index Inc contributor. It does not assume your acces
 
 Contributors here are not necessarily engineers. **The agent never asks the contributor to compose, reason about, or improvise a git command.** The agent generates a complete, runnable script; the contributor runs it natively and pastes the output back.
 
-This is the same generator pattern the `release` and `clone-script-generator` tasks already use, and for the same reason. `standards.md` § Release procedure states it directly:
+This is the same generator pattern the `release` and `clone-script-generator` tasks already use, and for the same reason. `admin-distribution.md` § "Release procedure (admin-side)" states it directly:
 
 > The agent never pushes or tags. `git push`/`git tag` run natively on the admin's host, where credentials and a clean working tree are. Agent-side git over a synced/mounted filesystem produces torn commits.
 
@@ -272,7 +272,7 @@ bash ../agent-index-marketplace-developer/lib/preflight-cli.sh --collection .
 
 Exit codes: `0` pass, `1` errors, `2` invocation problem. Always name the repo when citing this file. An unqualified `lib/preflight-cli.sh` reads as a path in whichever repo the reader is standing in, and it does not exist in this one — which has already cost one contributor an hour.
 
-**The two are not interchangeable, whatever `standards.md` currently says.** The CLI is a strict subset: it will exit 0 on a tree where the agent task reports errors, because the checks that need agent reasoning are not in it. Treat a clean CLI run as a floor.
+**The two are not interchangeable, (developer collection, `marketplace-eligibility.md` § "Release Gate").** The CLI is a strict subset: it will exit 0 on a tree where the agent task reports errors, because the checks that need agent reasoning are not in it. Treat a clean CLI run as a floor.
 
 ---
 

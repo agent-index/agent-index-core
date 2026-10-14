@@ -1,7 +1,7 @@
 # lib/permission-changes -- committed plan/verify/record tooling (Level 3)
 
 The mechanical half of the core permission-changes procedure
-(`internal/permission-changes.md`; normative model: `standards.md` § "Permission changes: list,
+(`internal/permission-changes.md`; normative model: `runtime-reference.md` § "Permission changes: list,
 confirm, apply, verify"). Added in agent-index-core 3.32.0. It replaced `lib/permission-spec/`
 (the permission-change-helper spec builder), which core 4.0.0 removed along with the helper.
 

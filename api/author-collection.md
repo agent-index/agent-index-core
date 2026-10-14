@@ -43,7 +43,7 @@ A complete collection directory with all required files:
 - `/api/{name}-setup.md` for each skill and task (stub)
 - `/api/{name}-manifest.json` for each skill and task (stub)
 - `/upgrade/` directory (empty at v1.0.0)
-- `/apps/` directory, **only if** the collection bundles helper scripts — at the collection root, a sibling of `/api/`, `/setup/` and `/upgrade/`, never nested inside them (`standards.md`, "Required File Structure"). Scaffold `/apps/requirements.txt` alongside the scripts; if they use only the standard library, say so in the file rather than leaving it empty.
+- `/apps/` directory, **only if** the collection bundles helper scripts — at the collection root, a sibling of `/api/`, `/setup/` and `/upgrade/`, never nested inside them (the developer collection's `marketplace-eligibility.md` § "Required File Structure"). Scaffold `/apps/requirements.txt` alongside the scripts; if they use only the standard library, say so in the file rather than leaving it empty.
 
 ### Cadence & Triggers
 
@@ -181,7 +181,7 @@ Agent-index uses a two-tier filesystem. Design both tiers as applicable:
 
 **Local directory structure** — member-specific data stored on the member's machine under `members/{member_hash}/{collection-name}/`. This is accessed via native Read/Write/Edit tools and is private to each member. (Note the absence of a leading slash: local workspace paths are relative. A leading `/members/...` reads as the deprecated *remote* member space — see `preflight` Step 7.5.)
 
-This is normative, not merely conventional (`standards.md`, "Member Data Placement"). Member data must never be written inside `members/{member_hash}/installed/` — that subtree belongs to the installer, which replaces it on upgrade and archives it on uninstall without consulting the collection. In particular, `installed/{collection}/apps/` holds the collection's bundled scripts and is replaced **wholesale** by core on every collection upgrade, so a member config file parked alongside the scripts that read it is deleted at the next version bump. If a bundled script needs member-owned configuration, have it read from `members/{member_hash}/{collection-name}/` and pass the member hash in as a flag.
+This is normative, not merely conventional (the developer collection's `marketplace-eligibility.md` § "Member Data Placement (normative)"). Member data must never be written inside `members/{member_hash}/installed/` — that subtree belongs to the installer, which replaces it on upgrade and archives it on uninstall without consulting the collection. In particular, `installed/{collection}/apps/` holds the collection's bundled scripts and is replaced **wholesale** by core on every collection upgrade, so a member config file parked alongside the scripts that read it is deleted at the next version bump. If a bundled script needs member-owned configuration, have it read from `members/{member_hash}/{collection-name}/` and pass the member hash in as a flag.
 
 Common local patterns:
 

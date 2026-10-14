@@ -1,6 +1,6 @@
 # Collection Authoring Guide
 
-**Companion to:** `standards.md` (the formal specification)
+**Companion to:** the developer collection's `marketplace-eligibility.md` (the formal requirements) and `runtime-reference.md` (the runtime rules)
 **Version:** 1.8.0
 **Last Updated:** 2026-10-01
 
@@ -8,7 +8,7 @@
 
 ## Purpose
 
-`standards.md` defines what a collection must contain. This guide explains how to build one well. It covers design decisions, authoring patterns, and practical advice drawn from building the first-party collections (Projects, Strategy, Capture, Email Triage). Read `standards.md` first — this guide assumes you know the required file structure and schemas.
+`marketplace-eligibility.md` (developer collection) defines what a collection must contain. This guide explains how to build one well. It covers design decisions, authoring patterns, and practical advice drawn from building the first-party collections (Projects, Strategy, Capture, Email Triage). Read `marketplace-eligibility.md` first — this guide assumes you know the required file structure and schemas.
 
 ---
 
@@ -44,7 +44,7 @@ If two capabilities share the same state file (like `setup-responses.md`), that'
 
 ## Designing the Parameter Model
 
-`standards.md` requires that every parameter in a setup template be annotated with one of four provenance tiers. But the spec doesn't explain *when to use which tier* — that's a design decision. Here's the guidance.
+the developer collection's `marketplace-eligibility.md` § "Setup Template Requirements" requires that every parameter in a setup template be annotated with one of four provenance tiers. But the spec doesn't explain *when to use which tier* — that's a design decision. Here's the guidance.
 
 ### `org-mandated`
 
@@ -263,8 +263,8 @@ python {apps_path}/gmail-labeler/label_emails.py \
 Document every variable you use — with one exception. **Core-injected parameters are supplied by
 core and must not be declared in the setup template**, and `{apps_path}` is one of them: it resolves
 to your collection's materialized `apps/` directory on the member's machine without any declaration
-from you. See "Referring to your scripts: `{apps_path}`" below and `standards.md`, "Core-Injected
-Parameters."
+from you. See "Referring to your scripts: `{apps_path}`" below and the developer collection's `marketplace-eligibility.md` §
+"Core-Injected Parameters (core 3.29.0+)".
 
 (Before core 3.29.0 this guide told authors the opposite — that `{apps_path}` had to be declared like
 any other parameter. Collections that followed that instruction declared it four different ways, none
@@ -275,7 +275,7 @@ collection written against the old guidance, delete the declaration.)
 
 ## Specifying Storage Access in Workflows
 
-Agent-index's two-tier filesystem (see `standards.md`) means every data-access step in a task must answer two questions: **where** does the data live, and **how** does the agent access it? Getting either one wrong causes real problems — the Capture collection shipped v1.0 with paths like `/members/{member_hash}/capture/` in its workflows without specifying the tool family, and agents consistently used `aifs_*` (remote) instead of native file tools (local), storing personal capture items on the shared Google Drive.
+Agent-index's two-tier filesystem (see CLAUDE.md § "Two-Tier Filesystem") means every data-access step in a task must answer two questions: **where** does the data live, and **how** does the agent access it? Getting either one wrong causes real problems — the Capture collection shipped v1.0 with paths like `/members/{member_hash}/capture/` in its workflows without specifying the tool family, and agents consistently used `aifs_*` (remote) instead of native file tools (local), storing personal capture items on the shared Google Drive.
 
 ### Always state the tool family
 
@@ -300,7 +300,7 @@ The convention is: relative paths (`members/{hash}/...`) are local, absolute pat
 
 ### Local-first as a design default
 
-Unless a collection's data is inherently shared (like org config or cross-member project files), default to local storage. Member-specific working data — capture items, draft strategies, personal preferences — should live on the member's machine. This is faster (no remote round-trips), works offline, and respects the privacy boundary described in `standards.md`. If data needs to be shared later, provide an explicit "promote to shared" workflow rather than starting on the remote filesystem.
+Unless a collection's data is inherently shared (like org config or cross-member project files), default to local storage. Member-specific working data — capture items, draft strategies, personal preferences — should live on the member's machine. This is faster (no remote round-trips), works offline, and respects the privacy boundary described in CLAUDE.md § "Two-Tier Filesystem". If data needs to be shared later, provide an explicit "promote to shared" workflow rather than starting on the remote filesystem.
 
 ### The "bare Read" anti-pattern
 
@@ -352,7 +352,7 @@ The mixed pattern is the most complex and the most important to get right. State
 
 Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder access control via the backend's native ACL system (Drive Permissions, OneDrive permissions, S3 IAM). Every member operates as themselves through their own OAuth credentials — agent-index never elevates privilege. This affects how you design collections that touch shared resources.
 
-**Core 3.9 changed how grants happen.** Google Drive permits folder-sharing on a Shared Drive only to drive Managers (audit finding F12), so the original "task calls `aifs_share` on a `/shared` folder" pattern is impossible for ordinary members. The current model — proven across bug-reports, strategy, client-intelligence, and projects in the 2026-06 cross-collection audit — is documented normatively in `standards.md` (Collaborative Folder ACLs; member spaces; pointer index; soft-delete). Design your collection around one of three patterns:
+**Core 3.9 changed how grants happen.** Google Drive permits folder-sharing on a Shared Drive only to drive Managers (audit finding F12), so the original "task calls `aifs_share` on a `/shared` folder" pattern is impossible for ordinary members. The current model — proven across bug-reports, strategy, client-intelligence, and projects in the 2026-06 cross-collection audit — is documented normatively in the developer collection's `marketplace-eligibility.md` § "Collaborative Folder ACLs (`collaborative-acls.json`)" and `runtime-reference.md` § "Addressing: Owned Content and Sharing" (member spaces; pointer index; soft-delete). Design your collection around one of three patterns:
 
 ### Pick an access pattern first
 
@@ -367,7 +367,7 @@ Starting in agent-index-core v3.1.0, the remote filesystem enforces per-folder a
 - **Sharing vocabulary.** "Share with X" = X can read; "make X a collaborator" = X can read + write; "share with the org" = everybody can read. Use it consistently in member-facing language.
 - **Pointer conventions.** Pointers are overwrite-only (revoke = overwrite with `scope: "revoked"`, never delete); scope shapes are `"org_public"` | `{readers, collaborators}` | `"private"` | `"revoked"`; invisible-until-shared items have no pointer at all; departed owners are annotated `owner_departed`.
 - **Prefer `id:` anchors** wherever members can create same-named siblings — name-based resolution picks arbitrarily among duplicates (bug 20260606-62a14c43-230135-db13).
-- **`aifs_delete` is non-recursive** — hard-delete workflows delete contents first. On org-shared surfaces, prefer the soft-delete conventions in `standards.md` (members can't trash Shared-Drive files at all).
+- **`aifs_delete` is non-recursive** — hard-delete workflows delete contents first. On org-shared surfaces, prefer the soft-delete conventions in `runtime-reference.md` § "Addressing: Owned Content and Sharing" (members can't trash Shared-Drive files at all).
 
 Roles remain the AIFS-level abstraction (`reader` / `commenter` / `writer`); adapters map them to native roles. `inherit: false` remains available for shares that must be visible only to named subjects.
 
@@ -546,7 +546,7 @@ This says: "email-triage-train requires the email-triage task to have run at lea
 
 ## The Iterative Learning Pattern
 
-This is an optional design pattern (not required by `standards.md`) used by several first-party collections. If your collection involves classification, recommendations, or any decision the agent makes that the member might want to correct, consider this approach.
+This is an optional design pattern (not a marketplace requirement) used by several first-party collections. If your collection involves classification, recommendations, or any decision the agent makes that the member might want to correct, consider this approach.
 
 ### The pattern
 
@@ -636,7 +636,7 @@ For collections already built with inline mechanical logic, the Developer collec
 ### Where bundled scripts live
 
 Bundle scripts in an `/apps/` directory **at the collection root** — a sibling of `/api/`, `/setup/`
-and `/upgrade/`. This placement is normative (`standards.md`, "Required File Structure"), not a
+and `/upgrade/`. This placement is normative (the developer collection's `marketplace-eligibility.md` § "Required File Structure"), not a
 convention you can vary. Skills and tasks both live inside `/api/`, so `/apps/` is never nested
 under either, and never tucked under some other directory.
 
@@ -666,7 +666,7 @@ Use `{apps_path}` in workflow bash commands and in Pre-Setup existence gates:
 python {apps_path}/forward-bug.py --bug-id {bug_id}
 ```
 
-`apps_path` is a **core-injected parameter** (`standards.md`, "Core-Injected Parameters"). Core
+`apps_path` is a **core-injected parameter** (the developer collection's `marketplace-eligibility.md` § "Core-Injected Parameters (core 3.29.0+)"). Core
 computes it and supplies it to every capability in your collection. So:
 
 - **Do not declare it** in any `-setup.md`. No `### apps_path` block, at any provenance level.
@@ -754,7 +754,7 @@ So, in order of preference:
 
 1. **Write against the standard library.** `bug-reports` and `cx-studio` both do, and neither has an
    install story to get wrong. Remote filesystem access goes through the `aifs-exec.sh` wrapper by
-   subprocess anyway (`standards.md`, "Reads go through aifs only"), which removes the usual reason
+   subprocess anyway (CLAUDE.md § "Reads go through aifs only"), which removes the usual reason
    to reach for an HTTP client library.
 2. **If you genuinely need third-party packages**, say so in the capability's Prerequisites section
    with the exact command, and have the script's dependency check (convention 2 above) print that
@@ -768,7 +768,7 @@ the absence of an install step is deliberate rather than forgotten.
 
 ## The External Dependencies Model
 
-External dependencies are systems outside agent-index that your collection needs. `standards.md` requires the `external_dependencies` array in `collection.json`; the first-party collections use the following object schema for each entry:
+External dependencies are systems outside agent-index that your collection needs. the developer collection's `marketplace-eligibility.md` § "`collection.json` Required Fields" requires the `external_dependencies` array; the first-party collections use the following object schema for each entry:
 
 ```json
 {
@@ -844,7 +844,7 @@ appear if at least one communications provider is registered.
 
 **Progressive disclosure applies:** if only one provider is registered for a capability type, no binding question is asked — the single provider is auto-bound. Binding questions only appear when there are multiple providers and a genuine choice to make.
 
-Bindings are written to `capability-bindings.json` (not to `setup-responses.md`). See `standards.md` for the file schema. The setup completion section of your setup template should list this file:
+Bindings are written to `capability-bindings.json` (not to `setup-responses.md`). See the developer collection's `marketplace-eligibility.md` § "Capability Bindings" for the file schema. The setup completion section of your setup template should list this file:
 
 ```markdown
 ## Setup Completion
@@ -900,7 +900,7 @@ The Upgrade Behavior section in setup templates exists to guarantee that member 
 
 ### What triggers a MAJOR version
 
-Per `standards.md`: breaking changes to setup interfaces, parameter schemas, API member interfaces, or removal of API members. In practice, the most common trigger is restructuring the `setup-responses.md` format — if the YAML shape changes and old responses can't be read as-is, that's a MAJOR bump.
+Per the developer collection's `marketplace-eligibility.md` § "Versioning Requirements": breaking changes to setup interfaces, parameter schemas, API member interfaces, or removal of API members. In practice, the most common trigger is restructuring the `setup-responses.md` format — if the YAML shape changes and old responses can't be read as-is, that's a MAJOR bump.
 
 ---
 
@@ -1088,8 +1088,8 @@ This means your setup templates should work well in the context of a batch updat
 
 Use this checklist before submitting a collection to the marketplace:
 
-### Structure (see `standards.md` for authoritative field definitions)
-- [ ] `collection.json` has all required fields per `standards.md`
+### Structure (see `marketplace-eligibility.md` § "`collection.json` Required Fields", developer collection, for authoritative field definitions)
+- [ ] `collection.json` has all required fields per `marketplace-eligibility.md`
 - [ ] Every API member has `.md`, `-setup.md`, and `-manifest.json` in `/api/`
 - [ ] `README.md`, `CHANGELOG.md`, and `LICENSE` exist at root
 - [ ] `/setup/collection-setup.md` exists
@@ -1098,10 +1098,10 @@ Use this checklist before submitting a collection to the marketplace:
 
 ### Metadata
 - [ ] `author` field matches your marketplace identity
-- [ ] `license` is `open`, `commercial`, a valid SPDX identifier, or `proprietary` (see `standards.md`)
+- [ ] `license` is `open`, `commercial`, a valid SPDX identifier, or `proprietary` (see `marketplace-eligibility.md`)
 - [ ] `marketplace_url` points to a public, accessible repository
 - [ ] `support_url` resolves
-- [ ] `category` is from the Category Registry in `standards.md`
+- [ ] `category` is from `marketplace-eligibility.md` § "Category Registry"
 - [ ] Version is valid semantic versioning
 
 ### Content

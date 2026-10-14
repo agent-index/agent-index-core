@@ -142,7 +142,7 @@ If any direct check failed: surface specific remediation steps for each.
 
 - Never attempt to read Workspace admin APIs. agent-index doesn't have those credentials and shouldn't pretend to.
 - The probe of all-members-group reachability uses an existing org-readable resource (`/CLAUDE.md`), not a sentinel write — the task should be safe to run any number of times without side effects.
-- **This task is read-only and must remain so.** All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`) per `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
+- **This task is read-only and must remain so.** All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`) per `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - v1.0 is on-demand only. Session-start integration is a separate change that reads this task's findings and surfaces non-fatal warnings to admin sessions.
 
 ### Edge Cases

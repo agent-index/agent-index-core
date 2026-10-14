@@ -160,7 +160,7 @@ Compare the downloaded `adapter.json` version against the local version (**compa
 
 **3. Replace the local bundle:**
 
-Overwrite the three deployed files in `mcp-servers/filesystem/`. **Source the text files (`aifs-exec.sh`, `adapter.json`) from the git blob, never a working-tree/zip copy (M3, `adapterdeploydoc`, C.1.3.4 — standards.md "Host-deploy byte-exact files via `git cat-file`/`git show`").** A Windows working-tree copy CRLF-converts the shell wrapper and corrupts the executor — observed live in the ms_install_10 publish, where the deployed `aifs-exec.sh` came up CRLF and broke `bash` until it was re-deployed from the blob. So:
+Overwrite the three deployed files in `mcp-servers/filesystem/`. **Source the text files (`aifs-exec.sh`, `adapter.json`) from the git blob, never a working-tree/zip copy (M3, `adapterdeploydoc`, C.1.3.4 — `admin-distribution.md` § "Release procedure (admin-side)", "Host-deploy byte-exact files via `git cat-file`/`git show`").** A Windows working-tree copy CRLF-converts the shell wrapper and corrupts the executor — observed live in the ms_install_10 publish, where the deployed `aifs-exec.sh` came up CRLF and broke `bash` until it was re-deployed from the blob. So:
 
 - `aifs-exec.bundle.js` — copy **byte-exact** (it is checksum-gated against `exec_bundle_checksum`; preserve it exactly, do not normalize). If sourced from a clone, `git -C <adapter-clone> cat-file blob <ref>:dist/aifs-exec.bundle.js > mcp-servers/filesystem/aifs-exec.bundle.js` (`<ref>` = the adapter's resolved ref from `clone-resolution.json`).
 - `aifs-exec.sh` and `adapter.json` — deploy from the git blob (`git -C <adapter-clone> show <ref>:dist/aifs-exec.sh` / `<ref>:adapter.json`), which is LF-correct on every platform, **not** a `Copy-Item`/`cp` from the working tree.
@@ -205,7 +205,7 @@ After the subroutine completes, surface the member distribution instructions:
 
 ### Step 5.7: Distribution Channel (added in edit-org 3.5.0 / core 3.32.0)
 
-See standards.md § "Distribution channels". Show the current value and, if `.agent-index/clone-resolution.json` exists, each repo's resolved ref and short commit.
+See `admin-distribution.md` § "Distribution channels (core 3.32.0)". Show the current value and, if `.agent-index/clone-resolution.json` exists, each repo's resolved ref and short commit.
 
 1. **Choose:** set or change the channel (a name such as `dev-1`, validated against `^[a-z0-9][a-z0-9-]{0,39}$`), or clear it (back to released code).
 2. **Explain before writing:**
@@ -236,7 +236,7 @@ If the member asks about registering a provider, direct them to `@ai:install-col
 
 ### Step 5.9: Manage Marketplace Subscriptions (added in 3.3.0 / core 3.30.0)
 
-Normative model: `standards.md` § "Marketplaces: catalogs, subscriptions, provenance". Subscriptions are org policy — admin-only, verified in Step 1.
+Normative model: `admin-distribution.md` § "Marketplaces: catalogs, subscriptions, provenance (normative — core 3.30.0; collision rules revised in 3.31.0)". Subscriptions are org policy — admin-only, verified in Step 1.
 
 Read `org-config.json` → `marketplaces[]`. If absent, show the synthesised legacy subscription (`agent-index-public`) and note: "This will be recorded on your next publish." Present each subscription: display name, id, source kind + ref, namespace, enabled, `skip_if_unavailable`, and the count of `installed_collections[]` entries whose `marketplace_id` references it.
 
@@ -253,7 +253,7 @@ Actions:
 4. **Toggle `skip_if_unavailable`** — explain before enabling: "If this catalog can't be read, listings will continue without it and say so. Leave off unless the source is known to be flaky."
 5. **Set a local display name** — only `display_name`; the `id` is the catalog's and never changes.
 
-There is no priority or ordering setting, by design (`standards.md` § "Collisions"). If the admin asks for one, explain that names must be unique across subscribed catalogs, so a clash is always refused rather than resolved by ordering, and point to fork-and-rename for replacing a public collection.
+There is no priority or ordering setting, by design (`admin-distribution.md` § "Collisions"). If the admin asks for one, explain that names must be unique across subscribed catalogs, so a clash is always refused rather than resolved by ordering, and point to fork-and-rename for replacing a public collection.
 
 No publish is needed after a subscription change: the write above is the record, and subscription changes produce no member update operations — members never read catalogs.
 

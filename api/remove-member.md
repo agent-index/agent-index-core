@@ -184,7 +184,7 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 - Never write to `members-registry.json` outside this task, `invite-member`, and `member-bootstrap`.
 - **MAY revoke the two specific ACLs `invite-member` explicitly created** (writer on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`) per Step 2.5. These two grants are bounded, known, and symmetric with their creation; revoking them here closes a real correctness gap where a member who's been removed from the registry retains agent-index-issued Drive access until Workspace IT runs full account offboarding (which may never happen, e.g., for contractors).
 - **MUST NOT walk the broader ACL graph** looking for orphan grants the departing member may have accumulated through project membership, idea collaboration, shared-artifact creation, etc. Those remain Workspace IT's responsibility — either through full Workspace offboarding (which auto-revokes everything) or through project-scoped removal via `@ai:edit-project`.
-- **MUST use the core permission-changes procedure** for the Step 2.5 removals, per `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
+- **MUST use the core permission-changes procedure** for the Step 2.5 removals, per `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - Stale references render at the task layer as historical names. Never rewrite or scrub historical data.
 
 ### Edge Cases

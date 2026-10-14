@@ -117,7 +117,7 @@ The access grants go through the core permission-changes procedure as one table.
 
 **This task applies exactly ONE per-member grant: the member-directory writer.** The new member + admin each need **writer** on the member's shared-artifact directory `/shared/members/artifacts/{hash}/`, so the member can write its bootstrap handshake and shared outputs. On **gdrive** this is genuinely required — `create-org` Step 8 item 4.5 grants the all-members group `reader` on the three root files only, *not* write on the artifacts namespace — so without it the member cannot write its handshake. On **OneDrive** it is redundant (the all-members group is the site group, so members already hold library-wide writer); the procedure's no-op filter skips it there.
 
-**Members get read + enumeration from group membership — this task adds NO per-member reader shares.** A member reads and enumerates `/shared`, the collection roots, and the org-readable root files through the all-members group's **direct-on-folder** grants (`create-org` Step 8 item 4.5 + `install-collection` cr01 on gdrive; site/library membership on OneDrive), and reaches its own member space by **ID anchor** (standards.md "Addressing"). So **adding the member to the all-members group is the access mechanism** — surface it as the required onboarding step (M365-admin-center / Google Admin).
+**Members get read + enumeration from group membership — this task adds NO per-member reader shares.** A member reads and enumerates `/shared`, the collection roots, and the org-readable root files through the all-members group's **direct-on-folder** grants (`create-org` Step 8 item 4.5 + `install-collection` cr01 on gdrive; site/library membership on OneDrive), and reaches its own member space by **ID anchor** (`runtime-reference.md` § "Addressing: Owned Content and Sharing"). So **adding the member to the all-members group is the access mechanism** — surface it as the required onboarding step (M365-admin-center / Google Admin).
 
 (Historical note, do NOT re-implement: earlier versions also applied per-member *reader* shares on every org-readable root to work around an old enumeration bug where group **inheritance** returned 0 on `aifs_list`. That problem was solved by the direct-on-folder group grant + ID-anchoring; the per-member reader shares are obsolete and were removed. Re-creating them to fix a problem that no longer exists was the `catbredundant` bug.)
 
@@ -220,7 +220,7 @@ Parse, append the new member entry:
 
 `sharing_identity` (new in 1.8.0 — identitymap) is the backend-grantable identity resolved in Step 6: the member's UPN (or mail) on onedrive — never the objectId — and the email on gdrive. It is the canonical recipient for every later share/unshare/remove-member targeting this member — tasks read it from the registry rather than re-resolving or using the roster `email` (which often isn't grantable on M365). `member_hash` stays the canonical agent-index identity for everything else (ownership, capabilities).
 
-`member_folder_id` is `null` at invite time (changed in 1.6.0): the member's private space is created in their own My Drive during their first bootstrap, which writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconcile copies the ID into this registry entry. The registry remains the authoritative org-side record once reconciled (standards.md § "Addressing").
+`member_folder_id` is `null` at invite time (changed in 1.6.0): the member's private space is created in their own My Drive during their first bootstrap, which writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconcile copies the ID into this registry entry. The registry remains the authoritative org-side record once reconciled (`runtime-reference.md` § "Addressing: Owned Content and Sharing").
 
 Write back with the captured revision:
 
@@ -289,7 +289,7 @@ Append an activity event to a local audit hint file (no remote audit log — tha
 
 - Never invite an admin to add themselves as a member of their own org. The pre-flight check rejects the case where `email` matches an existing entry in `org-config.json admins[].email` (admin is implicitly already a member).
 - Never create `/members/{hash}/` on the Shared Drive (retired in 3.9.0 — legacy directories are archived by the admin after members migrate). Never read, write, or attempt permission changes on a member's My Drive space — the org has no access, by design.
-- **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` outside the permission-changes procedure.** Required by `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify"; preflight flags direct calls.
+- **Never call `aifs_share`, `aifs_unshare`, or `aifs_transfer_ownership` outside the permission-changes procedure.** Required by `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify"; preflight flags direct calls.
 - Never write to `members-registry.json` until the procedure returns `complete` for the Step 6 grants (the verified-outcome gate). The registry-after-shares ordering protects against the partial state where a registry entry exists but the new member can't actually access anything.
 
 ### Edge Cases

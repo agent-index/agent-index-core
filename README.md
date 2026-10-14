@@ -168,13 +168,13 @@ After installing or upgrading collections, updating the adapter bundle, or makin
 
 ### Building your own collections
 
-See `standards.md` in this directory for the full specification for building agent-index collections. Any collection that meets the standard can be submitted to the marketplace.
+See the developer collection's `marketplace-eligibility.md` for the full specification for building agent-index collections, and `runtime-reference.md` for the runtime rules they run under. Any collection that meets the standard can be submitted to the marketplace.
 
 ---
 
 ## For Collection Authors
 
-The agent-index collection standard is open. Anyone can build a marketplace-eligible collection. See `standards.md` for the full specification.
+The agent-index collection standard is open. Anyone can build a marketplace-eligible collection. See the developer collection's `marketplace-eligibility.md` for the full specification.
 
 To submit a collection to the marketplace, open an issue at: https://github.com/agent-index/agent-index-resource-listings
 
