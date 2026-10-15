@@ -1,5 +1,38 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.0.1] — <RELEASE_DATE> — OneDrive upgrade fixes and the post-4.0 backlog
+
+Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 member, findings 61–75) plus the items held back from the Google Drive round (findings 6, 8, 14, 20, 23, 44, 50, 53–56). Pairs with onedrive adapter 2.7.1, marketplace 2.22.2, projects 4.4.2, library 1.7.2, client-intelligence 2.4.2, bug-reports 1.4.3 and brand-book 1.2.1.
+
+### Fixed — OneDrive
+- **OneDrive reads org files by path (finding 63).** A bare `id:{item}` on OneDrive resolves against the caller's own drive, so `id:{org_config_id}` and the code-folder rows `id:{folder_id}` failed on ms_install_10. standards.md § Addressing now has one backend table (gdrive: id first, path fallback; OneDrive: path first, drive-qualified `id:{drive_id}:{item_id}` fallback), and the CLAUDE.md template, member-bootstrap 3.13.2, session-start 3.2.1, invite-member 1.13.3, remove-member 1.4.1, view-permissions 1.0.1, verify-workspace-policy 1.0.3, org-setup 3.12.1, apply-updates 4.2.2, publish-updates 3.20.1 (6e) and create-org 3.15.2 follow it. The permission-changes `resource` rule is backend-conditional.
+- **invite-member 1.13.3 resolves the person's identity before creating anything (finding 75).** A non-tenant address now stops with a plain message (add them to the Microsoft 365 tenant first — a guest counts — then invite by their tenant address) and leaves no orphan artifacts folder.
+- **permission-changes:** an external share refused by the tenant (`EXTERNAL_SHARE_BLOCKED` from onedrive adapter 2.7.1, also `EXTERNAL_SHARE_UNSUPPORTED` / `POLICY_DENIED`) reads "your Microsoft 365 / Google Workspace sharing settings don't allow sharing with people outside the org" plus the backend's reason, never "not a valid account" (finding 72); OneDrive outside-org rows say Microsoft emails an invitation.
+
+### Fixed — upgrades and publishing
+- **publish-updates 3.20.1 Step 0g enforces the 3.x → 4.x gate (findings 61, 64)** using the versions the org will be on after this publish (a marketplace or collection update in the same publish counts), and halts with the list of blockers. `upgrade/3-to-4.md` points to it.
+- **apply-updates 4.2.2 removes retired capabilities (finding 69).** Step 1.6 archives the old `permission-change-helper` entry and folders with the helper; Step 3 lists any capability core or the marketplace dropped and archives it in the confirmed plan; the manifest sync skips such orphans instead of failing the whole collection.
+- **apply-updates accepts several operations per update entry** (`collection-update` plus `provider-register` / `provider-deregister`; finding 62).
+- **Migration 7 says when a private space predates the org** (finding 68).
+- **regenerate-bootstrap builds the zip in a sandbox temp dir** (the Cowork mount refuses zip's temp files) and uploads raw bytes with a size + SHA read-back (finding 67); create-org Step 12 likewise.
+- **`/shared/dist/` is rewritten only by create-org Step 11 and publish-updates 6.5** (finding 74); install, download and upgrade defer to the next publish.
+- **Dotfiles are never uploaded or deleted by the sync** (`.git*`, `.github/`, `.vscode/`, `.idea/`, `.DS_Store`; `.claude/`, the cowork-plugin manifest files and `.gitkeep` are kept) — publish-updates Step 0, create-org Step 9, apps/ copies (finding 23).
+
+### Fixed — create-org
+- **No raw-GitHub fetch of the adapter directory before cloning** (finding 6): Step 3 uses the fixed backend list or an existing listings clone, and 3c checks the choice against the fresh clone.
+- **Resumable after Step 8** (finding 53): install-state records `phase3-in-progress` / `phase3_step`; a re-run resumes instead of routing to edit-org (edit-org 3.5.2 hands it back); `current-state.md` lives at `.agent-index/create-org-current-state.md` until the workspace exists.
+- **Uploads in ~10-file batches, safe to re-run** (finding 54); **Step 9.5 provisions one collection at a time and creates every collaborative-acls folder before its grants** (finding 55).
+
+### Fixed — members and sessions
+- **member-bootstrap re-reads org-config and the registry once (~30 s) when a first sign-in sees a stale copy** (finding 44).
+- **session-start tells a member when their access to a collection was removed** outside agent-index; `member_read_grant` is documented as a cache verified by publish-updates 6e / apply-updates M4 (finding 20).
+- **permission-changes notes access that is more than a row needs** ("already has writer — more than this needs") and verify-workspace-policy 1.0.3 reports member-writable collection code folders, with the SharePoint explanation (finding 65).
+- **standards `staletmpinject` covers every scratch file** — `mktemp` only, never a fixed `/tmp` name (finding 60).
+
+### Changed — wording
+- Install paths: `{type}` is the singular `skill` / `task`; an entry's `installed_path` wins, so 3.x installs that recorded `skills/` / `tasks/` keep them (finding 70). The upgrade flow writes the local manifest as `manifest.json` (finding 70). Core `*-setup.md` files name the collection-qualified install path (finding 14).
+- **`collection-authoring-guide.md` (v1.8.1)** — the normative setup-responses format is stated in org-setup Phase 4b and here (finding 14).
+
 ## [4.0.0] — 2026-10-13 — Permission helper removed
 
 **MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).

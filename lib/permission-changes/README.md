@@ -44,6 +44,16 @@ gdrive ownership transfer is possible.
 `applied`, `skipped_noop`, `declined`, `failed`, `verify_mismatch`, `not_attempted`, `unsupported`,
 `awaiting_recipient`. Only `applied` and `skipped_noop` satisfy a dependent step.
 
+A `task_spec` share row whose recipient already holds a **higher** role (not owner) stays
+`skipped_noop` but gets `excess_access: true` and a "more than this needs" note in the
+"Not changing" table (finding 65). The script never proposes removing it.
+
+`resource` may be a drive-qualified anchor `id:{driveId}:{itemId}` (OneDrive cross-drive items,
+finding 63). Failure codes `EXTERNAL_SHARE_BLOCKED` / `EXTERNAL_SHARE_UNSUPPORTED` / `POLICY_DENIED` read as "your Microsoft
+365 / Google Workspace sharing settings don't allow sharing with people outside the org" plus the
+backend's message; on onedrive an outside-org `INVALID_SUBJECT` says the person must be added to the
+tenant first (findings 72, 75).
+
 ## Tests
 
 `node --test lib/permission-changes/permission-changes.test.js` runs Phase U of `retire-permission-helper-test-plan.md`.

@@ -35,6 +35,8 @@ There is no `binaries/` folder since core 4.0.0 (the permission helper was remov
 
 **`collections[]` source (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`):** one entry per `org-config.json` → `installed_collections[]` entry with `status: "installed"`, carrying **that entry's `version`** — the version the org actually has on its backend. **Never** a catalog `current_version`: the catalog says what is *available*, the manifest says what the org *runs*. Before writing, assert every `collections[]` version equals the org-config version and the published-state version; abort on any mismatch. (Publish #076 took email-triage's catalog version 1.2.3 while the org ran 1.2.2, so members were told a version whose files were not on the backend.)
 
+**Who rewrites the manifest (finding 74).** Only `create-org` Step 11 and `publish-updates` Step 6.5 write `manifest.json`. In publish-updates, published-state is written in Step 5, before 6.5, so it matches org-config and the assert holds. create-org Step 11 runs before Step 11.6 seeds published-state from the same org-config, so there the assert compares against org-config only. Tasks that change installed collections outside a publish — `download-collection`, `install-collection`, `upgrade-collection` — **do not republish `/shared/dist/`**: a collection they just installed or upgraded isn't in published-state until the next publish, so the assert would abort, and the manifest says what has been *published to members*, which that collection hasn't been yet. They tell the admin to run `@ai:publish-updates`, whose Step 6.5 brings the manifest up to date along with the update-log entry that tells members about the change.
+
 `manifest.json` — not GitHub HEAD — is the answer to "what version is this org on, and is my copy correct." `check-updates` compares the member's installed state against it; `apply-updates`/`member-bootstrap` fetch artifacts by `path` and verify `sha256` before use.
 
 ## Canonical SHA-256 (MANDATORY — read this before computing any manifest SHA)
@@ -48,7 +50,7 @@ Concrete, deterministic recipe (no trailing-newline ambiguity):
 
 Both sides MUST follow this. A publish that computed the SHA any other way will be rejected by a correct member verifier.
 
-## Publish flow (admin side — create-org Phase 2, publish-updates)
+## Publish flow (admin side — create-org Phase 2, publish-updates; no other caller)
 Precondition (process-enforced): the admin's local clones are present and at the refs `.agent-index/clone-resolution.json` records (release tags; on a channel org, `channel/<name>` heads where the branch exists, release tags elsewhere, which is legitimate fallback). **Refuse to publish when the record's channel differs from org-config `distribution_channel`** (publish-updates Step 1's channel consistency check), and when a clone is missing. Don't silently push a stale or mixed set to members.
 1. For each directory file (from the local `resource-listings` clone): compute SHA-256 **per the Canonical SHA-256 rule above** (stored/git-blob LF bytes). Never hash `aifs_read` stdout.
 2. **Diff against the current backend `manifest.json`** — upload only artifacts whose SHA changed (or are new). For each upload, **read back and verify the stored SHA** using the canonical member-side recipe (stat `size` + `head -c` truncation) so the value written to the manifest is provably what a member will compute (catches the mount-truncation/torn-write class AND the trailing-newline class — `shell-first` + verify + retry).

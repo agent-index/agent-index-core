@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.5.1
+version: 3.5.2
 collection: agent-index-core
 description: Edit org configuration — update the admin list, manage marketplace subscriptions, set the org's distribution channel, or launch the marketplace to install or manage collections.
 stateful: false
@@ -46,6 +46,8 @@ If `org-config.json` does not exist or cannot be read (authentication failure, c
 Compute the current member's hash: SHA256(lowercase email from session context), take the first 16 hex characters. Check whether this hash matches any entry in `admins[].member_hash` in org-config.json.
 
 If not an admin: surface "Only org admins can edit org configuration. The current admins are: {admin list}. Contact one of them if you need changes made." Halt.
+
+**Unfinished create-org (finding 53).** If the local `.agent-index/install-state.json` has `task: "create-org"`, a `status` other than `"completed"`, and `collected.org_id` equal to this org-config's `org_id`, the org was never finished (no bootstrap zip, collections or admin workspace yet, depending on where it stopped). Say: "This org's setup didn't finish (last step done: {phase3_step, or the last entry of completed_steps}). I'll continue it." and run `create-org`, which resumes from its install state (create-org Step 0). Don't edit a half-created org.
 
 **On success:** Proceed to Step 2.
 
