@@ -51,7 +51,9 @@ A `task_spec` share row whose recipient already holds a **higher** role (not own
 `resource` may be a drive-qualified anchor `id:{driveId}:{itemId}` (OneDrive cross-drive items,
 finding 63). Failure codes `EXTERNAL_SHARE_BLOCKED` / `EXTERNAL_SHARE_UNSUPPORTED` / `POLICY_DENIED` read as "your Microsoft
 365 / Google Workspace sharing settings don't allow sharing with people outside the org" plus the
-backend's message; on onedrive an outside-org `INVALID_SUBJECT` says the person must be added to the
+backend's message when that message names a policy; when it doesn't (Graph's generic `sharingFailed`),
+"Microsoft/Google refused to share outside the org — usually the tenant's external-sharing setting
+(…)" plus the backend's code and text (finding 84); on onedrive an outside-org `INVALID_SUBJECT` says the person must be added to the
 tenant first (findings 72, 75).
 
 ## Tests

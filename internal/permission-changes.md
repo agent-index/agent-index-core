@@ -206,10 +206,15 @@ Never route around this with any other mechanism.
      on onedrive, for a recipient outside the org, it adds that the person must be added to the
      Microsoft 365 tenant first (a guest account counts), then shared with by their tenant address.
    - `EXTERNAL_SHARE_BLOCKED` (onedrive adapter 2.7.1; Graph's own text is in the error's `reason`),
-     `EXTERNAL_SHARE_UNSUPPORTED` or a sharing-policy refusal (`POLICY_DENIED`) → *"your Microsoft
-     365 / Google Workspace sharing settings don't allow sharing with people outside the org"* plus
-     the backend's own reason. Don't retry; the person (or their tenant admin) changes the sharing
-     settings or adds the person as a guest.
+     `EXTERNAL_SHARE_UNSUPPORTED` or a sharing-policy refusal (`POLICY_DENIED`) → when the backend's
+     own text names a policy, *"your Microsoft 365 / Google Workspace sharing settings don't allow
+     sharing with people outside the org"* plus that text. When it doesn't (Graph's generic 400
+     `sharingFailed` "There was a problem sharing, please try again later.", from which the adapter
+     infers the code), it's worded as likely, not as fact (finding 84): *"Microsoft/Google refused to
+     share outside the org — usually the tenant's external-sharing setting (SharePoint admin center →
+     Policies → Sharing / Google Admin → Drive sharing)"* plus the backend's code and text. Either way,
+     don't retry; the person (or their tenant admin) checks the sharing settings or adds the person as
+     a guest.
 5. If `revert_offer` is present (`all_or_nothing` stopped part-way), offer it as a **new** run of
    this procedure, with a new table and a new confirmation. Never revert on your own.
 

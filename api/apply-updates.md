@@ -48,12 +48,12 @@ Optionally:
 
 ### Step 1: Check for Interrupted Update
 
-Before anything else, check for a local `pending-update-plan.json` in `.agent-index/install-state/`. If it exists:
+Before anything else, check for a local `pending-update-plan.json` in `.agent-index/install-state/`. **A plan with `"status": "resolved"` is historical** — a finished run marks it so instead of deleting it (finding 83, Step 6); ignore it and treat it as no pending plan. If an unresolved plan exists:
 
 1. Read the file. It contains a partially completed update plan from a previous session that was interrupted (typically by an adapter bundle update requiring restart).
 2. Surface to the member: "You have a pending update that was interrupted last session. Want to pick up where you left off?"
 3. On confirmation: skip to Step 5 with the remaining operations from the pending plan. The merge has already been done — just execute what's left.
-4. If the member declines: delete the pending plan file and proceed with Step 2 to compute a fresh plan from the update log. This handles the case where the admin has published new updates since the interruption — the fresh plan will incorporate everything.
+4. If the member declines: set the pending plan's `status` to `"resolved"` (don't delete it — finding 83) and proceed with Step 2 to compute a fresh plan from the update log. This handles the case where the admin has published new updates since the interruption — the fresh plan will incorporate everything.
 
 If no pending plan exists: proceed to Step 1.5.
 
@@ -105,8 +105,9 @@ Post-3.9.0, non-admin members are not Drive members and reach a collection's cod
 `agent-index.json` `version` and `member-index.json` `agent_index_version` both record the installed core version and can drift apart (observed: 3.21.0 vs 3.20.0). It's informational, but drift confuses `check-updates`-style reporting. **The authoritative source is NOT either local field** — the 3.22.1 version of this migration copied `agent-index.json.version` → member-index, which is **backwards on a fresh org**: create-org sets member-index correctly from `collection.json` (e.g. 3.22.2) while `agent-index.json.version` was born stale at the template's 3.1.1 (the `createorgversionstale` bug, fixed in create-org 3.9.1 but still present on orgs created before that). Copying the stale field would have **downgraded the correct one**. So reconcile to the org's authority instead:
 
 0. **Remember the installed core version first (`m5beforemerge`, core 4.0.0 live test).** Migration 5 runs before the core files are updated, so after it the local field already shows the target and the plan would read "4.0.0 → 4.0.0". Before this migration raises either field, store the current local `agent-index.json` `version` in `member-index.json` as **`core_version_before_sync`** — only if that field is absent (a run that stopped before Phase 1 keeps the original value). Step 3 uses it as the core-update `from_version`; Phase 1 removes it once the core files are updated, and Step 6 removes it if the run had no core-update.
-1. Read **`org-config.json` `agent_index_version`** (the org's authoritative installed core version — set by create-org, advanced by publish-updates) via `aifs_read` (gdrive `id:{org_config_id}`, OneDrive `/org-config.json`; see "Remote addressing" under Directives). Also read local `agent-index.json` `version` and `member-index.json` `agent_index_version`.
-2. If `org-config.agent_index_version` is present and **either** local field differs from it, set **both** `agent-index.json.version` AND `member-index.json.agent_index_version` to the org-config value (verify-after-write each). Surface one line: "✓ Synced local version fields to org core version {version}." Otherwise silent.
+1. Read **`org-config.json` `agent_index_version`** (the org's authoritative installed core version — set by create-org, advanced by publish-updates) via `aifs_read` (gdrive `id:{org_config_id}`, OneDrive `/org-config.json`; see "Remote addressing" under Directives), staged in a fresh `mktemp` file and checked before use ("Scratch files" under Directives). Also read local `agent-index.json` `version` and `member-index.json` `agent_index_version`.
+2. **Never downgrade (bug `20260928-8d20ea22-140909-e0a9`).** If the org-config value is *lower* than either local field, don't write anything: a stale or foreign org-config read (e.g. a leftover `/tmp/oc.json` from another session) looks exactly like this. Re-read org-config into a fresh `mktemp` file, check its `org_id` is this org's and its size matches `aifs_stat`; if it is still lower, leave both fields as they are and surface "Your org's record says core {org value}, but this install shows {local value}; not lowering it. Tell your admin if this persists." Continue the update.
+   If `org-config.agent_index_version` is present, not lower than either local field, and **either** local field differs from it, set **both** `agent-index.json.version` AND `member-index.json.agent_index_version` to the org-config value (verify-after-write each). Surface one line: "✓ Synced local version fields to org core version {version}." Otherwise silent.
 3. If `org-config.json` can't be read (offline/transient), do **nothing** — never reconcile two local fields against each other (that's the `migration5wrongdir` footgun: it can't tell which is stale). Skip and retry next run.
 4. Idempotent no-op once all three agree. Never block the update on failure.
 5. **Channel mirror (core 3.32.0).** Also copy org-config `distribution_channel` (null if absent) into local `agent-index.json` `distribution_channel` when they differ. It's display-only for members (session-start's banner; members never clone). Surface "✓ This org runs distribution channel {name}" only when it changes.
@@ -158,7 +159,7 @@ Proceed to Step 2.
 
 Read the member's `member-index.json` from the local filesystem. Extract `last_applied_update`. This is the cursor — a string ID (e.g., `"004"`) representing the last update entry the member successfully applied. If `last_applied_update` is null or absent, the member has never applied an update.
 
-Read the update log via `aifs_read("id:{resource_ids.shared_root}/updates/update-log.json")` (path `/shared/updates/update-log.json` as the fallback; on OneDrive the path first; see "Remote addressing" under Directives).
+Read the update log via `aifs_read("id:{resource_ids.shared_root}/updates/update-log.json")` (path `/shared/updates/update-log.json` as the fallback; on OneDrive the path first; see "Remote addressing" under Directives). Stage it in a fresh `mktemp` file and check the read succeeded before parsing ("Scratch files" under Directives).
 
 If the file does not exist: surface "No update instructions have been published for your org yet. Your admin can publish updates by running '@ai:publish-updates'." Halt.
 
@@ -166,7 +167,7 @@ If the file exists: parse the `entries` array. Filter to entries whose `id` is g
 
 **Baseline entries:** create-org seeds entry `000` with `type: "baseline"` and no operations (core 3.32.0). It changes nothing; when it's pending, count it as applied and move the cursor past it. A member whose only pending entry is `000` is up to date.
 
-If no entries are pending (the member's cursor matches or exceeds the latest entry): surface "You're up to date. No pending updates." Halt.
+If no entries are pending (the member's cursor matches or exceeds the latest entry): **before saying so, cross-check the log against `/shared/updates/latest.json`** (same addressing as the log). If `latest_id` is higher than the log's last entry `id`, or higher than the cursor, the log read is stale or wrong — don't conclude "up to date": re-read the log into a fresh `mktemp` file and recheck; if it still disagrees, stop and say "The update log I read ends at #{last id} but your org's latest update is #{latest_id}; not applying anything. Try again in a moment." (bug `20260928-8d20ea22-140909-e0a9`: a stale `/tmp/ul.json` from another session ended at #076 while the real log ended at #079). Only when they agree: surface "You're up to date. No pending updates." Halt.
 
 Collect all pending entries in chronological order (by `id`). Proceed to Step 3.
 
@@ -336,7 +337,7 @@ If `adapter-bundle-update` is present:
 3. Extract and overwrite `mcp-servers/filesystem/aifs-exec.bundle.js` and `aifs-exec.sh` and `adapter.json`.
 4. **Sync `agent-index.json`'s `remote_filesystem.exec.adapter_version`** (added in core 3.7.2; closes idea `bundle-vs-config-adapter-drift`). After step 3 writes the new `adapter.json`, parse the freshly-installed `mcp-servers/filesystem/adapter.json` and read its `version` field. If `agent-index.json`'s `remote_filesystem.exec.adapter_version` differs from this value, rewrite `agent-index.json` to bring them into agreement. The `adapter.json` `version` is the authoritative source — it ships with the bundle and is what the bundle implementation actually exposes; `agent-index.json`'s field is denormalized metadata that historically wasn't kept in sync. Idempotent: same-value no-op. Without this step, the two files can drift indefinitely (the bundle gets updated by this phase but the config field stays at install-time value), which breaks downstream code that reads `agent-index.json` to gate behavior on the adapter version.
 5. **Post-install smoke test (required).** Run `aifs_auth_status` against the newly installed bundle to confirm it loads and authenticates. If it fails, surface the failure and stop before advancing the cursor (leave the pending plan in place for a retry) — do not report the bundle as installed.
-6. Write a pending plan file at `.agent-index/install-state/pending-update-plan.json` containing the remaining operations (collection upgrades, installs, etc.) and the `target_cursor`.
+6. Write a pending plan file at `.agent-index/install-state/pending-update-plan.json` containing the remaining operations (collection upgrades, installs, etc.), the `target_cursor` and `"status": "pending"` (overwriting any resolved plan from an earlier run).
 7. Surface: "Adapter bundle updated to {target_version} (checksum-verified). The new executor bundle is ready to use immediately. Say '@ai:update' and I'll continue with the remaining updates."
 8. Continue to Phase 4 in this session.
 
@@ -410,6 +411,8 @@ This phase runs **unconditionally** on every `apply-updates` invocation that rea
 
    > "Collection `{C}` bundles scripts that aren't on this machine yet (`installed/{C}/apps/`). Materializing them now."
 
+4.5. **Drop entries for collections the member no longer has capabilities from (finding 82).** For each key in `manifest_sync` or `manifest_sync_subroutine_revision` that isn't in the effective set from step 3 — e.g. `agent-index-core` once Step 1.6 item 8 or a retired-capability archive removed the member's last core capability — remove the key from both objects and write `member-index.json` (silent). Otherwise the entry stays frozen at the version of the last sync (3.22.4 / revision 4 on ms_prod_10) and reads as drift that nothing can repair. If the member later installs from that collection, the install records a fresh entry (Phase 6 step 3).
+
 5. After the loop, both `manifest_sync` and `manifest_sync_subroutine_revision` fields reflect the current synced state and the subroutine revision that last completed for every collection the member has installed.
 
 **First-run sweep behavior on pre-3.6.1 installs.** On the very first 3.6.1 apply-updates run, no collection has a `manifest_sync` entry, so every installed collection is detected as drifted. The subroutine runs for each — for a typical 7-collection / 45-capability install that's ~135 `aifs_read` calls plus writes. Bounded, acceptable, and idempotent (subsequent runs only sweep collections that actually changed). This is the same backfill behavior promised in the 3.6.0 CHANGELOG but couldn't deliver due to the spec bug; the 3.6.1 placement actually delivers it.
@@ -457,10 +460,10 @@ Given `(collection, targetVersion)`:
    **5a. Materialize the collection's bundled scripts (added in core 3.29.0).** Once per collection — not once per capability — after the per-capability writes above and before step 8 advances the sync fields:
 
    - If `aifs_exists("{base}/apps")` is false, skip. Most collections ship no scripts.
-   - Otherwise copy `{base}/apps` to `members/{member_hash}/installed/{collection}/apps/`, preserving nested structure, LF-normalizing text content per step 4. Re-resolve the core-injected `apps_path` for this collection's capabilities (`standards.md`, "Core-Injected Parameters"): stored **relative** as `members/{member_hash}/installed/{collection}/apps`, consumed absolute by joining onto the current runtime's `project_dir` at invocation. This is a **wholesale replacement**: remove the local directory first, then write. `apps/` is collection-owned and core-managed; nothing else writes there, so there is nothing to preserve and no merge to perform.
+   - Otherwise copy `{base}/apps` to `members/{member_hash}/installed/{collection}/apps/`, preserving nested structure, LF-normalizing text content per step 4. Re-resolve the core-injected `apps_path` for this collection's capabilities (`standards.md`, "Core-Injected Parameters"): stored **relative** as `members/{member_hash}/installed/{collection}/apps`, consumed absolute by joining onto the current runtime's `project_dir` at invocation. The local copy must end up matching `{base}/apps` exactly — `apps/` is collection-owned and core-managed; nothing else writes there, so there is nothing to preserve and no merge to perform. **Overwrite files in place; don't remove the directory and re-copy (finding 83).** On a Cowork member install the mount refuses deletes until the member grants folder-delete permission, so a remove-then-copy stalls an unattended update. Write every remote file over its local copy, then delete only local files under `apps/` that the remote no longer ships. If a delete is refused, say one line ("Couldn't remove the retired script `apps/{path}` (the folder doesn't allow deletes); it's unused and safe to leave.") and carry on — a refused delete of a retired file is not a failure for this step.
    - Skip dotfiles in the copy (`.gitignore`, `.DS_Store`, any `.`-prefixed path segment except `.gitkeep`; finding 23), as publish-updates Step 0's skip-list does.
    - `apps/` sits as a sibling of the `skill/` and `task/` folders (or `skills/`/`tasks/` where `installed_path` records them) under `installed/{collection}/`, never inside them, and never at the unqualified legacy paths — the old-unqualified and pre-3.6.x dual-write rules above do not apply to it. `apps/` is a 3.29.0 concept and has no legacy layout to reconcile.
-   - On any failure, treat the collection as failed for this run: do not advance `manifest_sync` (step 8), and let the next run retry. A partially materialized `apps/` is worse than none, because setup-time existence gates can pass against it.
+   - On any failure to read or write a file the remote ships, treat the collection as failed for this run: do not advance `manifest_sync` (step 8), and let the next run retry. A partially materialized `apps/` is worse than none, because setup-time existence gates can pass against it. (A refused delete of a retired file, above, is not such a failure.)
 
    **5b. Record `apps_path` in each affected capability's setup-responses (added in core 3.29.1 — closes `appspathnotbackfilled`).** Materializing the directory without recording the parameter that points at it leaves `{apps_path}` unresolved on every install that predates 3.29.0 — the scripts are present and still uncallable. `org-setup` Phase 4a/4b writes `apps_path` for a *fresh* install; 3.29.0 shipped no equivalent for the *migration* path, so existing members received the files and nothing else. This step is that equivalent.
 
@@ -583,7 +586,7 @@ If `org_config_updates` is non-empty: surface a brief summary of what changed:
 After all phases complete (or after the member has declined all optional items):
 
 1. Update `member-index.json` with `"last_applied_update": "{target_cursor}"` — the ID of the last entry in the pending batch
-2. Delete `pending-update-plan.json` if it exists (cleanup from a previous interrupted run), and remove `core_version_before_sync` from `member-index.json` if it's still there
+2. If `pending-update-plan.json` exists, set its `status` to `"resolved"` (with `resolved_at`) — don't delete it: on a Cowork member install the mount refuses deletes until the member grants folder-delete permission, and an unattended run would stall here (finding 83). Step 1 ignores resolved plans. Remove `core_version_before_sync` from `member-index.json` if it's still there
 3. Surface the completion summary:
 
 > "Updates applied successfully.
@@ -608,6 +611,8 @@ After all phases complete (or after the member has declined all optional items):
 | `/CLAUDE.md` | the copy inside the bootstrap zip, verified against the entry's hash |
 
 Everywhere this task says "read base" or names an `id:` form, apply this rule. If a read by path returns content whose identity doesn't match this org (an `org-config.json` with another `org_id`, a `collection.json` version that disagrees with org-config `installed_collections[]`), discard it and re-read by id. Never fall back to the storage connector.
+
+**Scratch files: `mktemp` only (bug `20260928-8d20ea22-140909-e0a9`, `staletmpinject`).** In Cowork, `/tmp` holds files left by other sessions that this session can neither overwrite nor delete, so a fixed name like `/tmp/ul.json` or `/tmp/oc.json` silently keeps another session's bytes. Stage every remote read (update log, `latest.json`, org-config, registry) in a directory this run creates with `mktemp -d`, never a fixed `/tmp/<name>`. Don't put `2>/dev/null` in front of the redirect (it hides the redirect's own error). After each staging read, check the exit status and that the file is non-empty and parses before using it; on any failure stop that step loudly, never fall through to what was already there.
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
@@ -649,7 +654,7 @@ Never modify org files on the remote filesystem (collections, org-config, regist
 
 Never skip the plan presentation (Step 4) unless resuming from a pending plan (Step 1), where the plan was already presented in the previous session.
 
-Never advance the cursor without completing or explicitly declining all operations in the merged plan. If the session must end mid-plan (adapter restart, interruption), write `pending-update-plan.json` with the remaining operations (Step 1's resume path) and leave the cursor unmoved — the cursor advances only when the plan is fully resolved.
+Never advance the cursor without completing or explicitly declining all operations in the merged plan. If the session must end mid-plan (adapter restart, interruption), write `pending-update-plan.json` with `"status": "pending"` and the remaining operations (Step 1's resume path) and leave the cursor unmoved — the cursor advances only when the plan is fully resolved.
 
 <!-- RECONSTRUCTED 2026-06-10: final-sentence completion of a tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); reviewed and approved by Bill. -->
 

@@ -16,7 +16,8 @@ invokes the committed script.
 | manifest `channel` set and the repo has branch `channel/<channel>` | that branch head (`ref_type: channel`) |
 | infra mode, the repo has `v*` tags | highest release tag by numeric semver; a pre-release sorts below its release (`ref_type: tag`) |
 | infra mode, zero tags | default-branch head, plus the phantom check against `version` (`ref_type: branch_head`) |
-| collections mode, no channel branch | default-branch head (`ref_type: branch_head`) |
+| collections mode, no channel branch, entry has `version` | tag `v<version>`; tag missing on a repo that has release tags = per-repo FAILED, no default-branch fallback; zero-tag repo = default-branch head + phantom check (`ref_type: tag`; bug `20260926-8d20ea22-133903-0ddf`) |
+| collections mode, no channel branch, no `version` | default-branch head (`ref_type: branch_head`) |
 
 Every run merges its decisions into `<install_root>/.agent-index/clone-resolution.json` (`clone-resolution/1`: `channel`, `resolved_at`, `repos{name: {ref_type, ref, commit, version}}`). Publishing, update detection and displays read this record. Channel names must match `^[a-z0-9][a-z0-9-]{0,39}$`. The branch is `channel/<name>`.
 
@@ -26,7 +27,9 @@ Tests: `node --test lib/clone/resolve-refs.test.js`.
 - `resolve-refs.js` (+ `resolve-refs.test.js`) -- the ref decision (channel / tag / default-branch head); no git writes.
 - `clone-repos.ps1` / `clone-repos.sh` -- the driver. Reads a manifest, clones/pins each repo with the
   three-way tag / branch-HEAD / phantom discrimination, `clonescriptdirty` resilience (clear index.lock,
-  reset --hard, continue-past-failure + per-repo summary). Core 4.0.0 removed the permission-helper
+  reset --hard, continue-past-failure + per-repo summary). A target folder that exists without `.git` is
+  cloned into when empty and refused (`exists but is not a git repo: <path>`) otherwise; failures carry
+  git's own error text (bug `20261010-8d20ea22-145943-72ef`). Core 4.0.0 removed the permission-helper
   binary install that infra mode used to run (the helper is retired; `lib/uninstall/` removes old copies).
 
 ## Manifest contract (the ONLY thing the agent produces -- pure data, no logic)
@@ -41,7 +44,7 @@ Tests: `node --test lib/clone/resolve-refs.test.js`.
   "repos": [ { "name": "agent-index-core", "git_url": "https://.../x.git", "version": "3.28.0" } ]
 }
 ```
-`version` is optional and only used to disambiguate a zero-tag branch-HEAD repo from a phantom.
+`version` is optional. Infra mode uses it only to disambiguate a zero-tag branch-HEAD repo from a phantom. Collections mode pins the repo to tag `v<version>` (a channel branch still wins on a channel org); omit it to take the default-branch head.
 
 ## Invocation (surfaced to the admin by the calling task)
 Windows: `powershell -ExecutionPolicy Bypass -File "<install_root>\agent-index-core\lib\clone\clone-repos.ps1" -Manifest "<install_root>\.agent-index\clone-manifest.json"`

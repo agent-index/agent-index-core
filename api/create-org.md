@@ -115,7 +115,7 @@ Read `agent-index.json` from the local project directory. Check if `remote_files
 
 If the remote filesystem is already configured, find out whether the org already exists. Run both checks; the org exists if **either** one finds `org-config.json`:
 
-1. **By id**, when the local `agent-index.json` has `remote_filesystem.connection.org_config_id`: `aifs_read("id:{org_config_id}")`. This is the check that works for an admin who is not a Shared Drive member, because a root-level bare path does not resolve for them.
+1. **By id**, when the local `agent-index.json` has `remote_filesystem.connection.org_config_id`: on gdrive `aifs_read("id:{org_config_id}")`; on OneDrive the drive-qualified `aifs_read("id:{drive_id}:{org_config_id}")` (`drive_id` from the same connection; a bare `id:` resolves against the admin's own drive there — standards § Addressing, finding 63). This is the check that works for an admin who is not a Shared Drive member, because a root-level bare path does not resolve for them.
 2. **By path**: `aifs_exists("/org-config.json")`, then `aifs_read("/org-config.json")` if it exists. Kept so the check works wherever it works today, including OneDrive site-drive members, without depending on the id form.
 
 Record each check's outcome as one of: **found**, **not found** (the id read returned `FILE_NOT_FOUND`, or the path probe returned `exists: false`), **couldn't check** (any other error: `NOT_AUTHENTICATED`, `ACCESS_DENIED`, `CONFIG_ERROR`, `BACKEND_ERROR`, a network failure), or **skipped** (no `org_config_id` locally, so the id check did not run). Then:
@@ -338,7 +338,7 @@ Now that `agent-index-resource-listings/marketplace-directory.json` is local, re
 
 **1c. Emit the collections clone manifest + surface the committed clone script (`clone-script-generator`, `mode: collections`) — only if collections were selected:**
 
-If the admin selected any collections, emit a second **manifest** with `mode: collections` for the selected repos and surface the same committed `clone-repos` invocation (pointing at that manifest); **pass the same `channel`**; the committed script resolves each repo itself (channel head, else default-branch head). Wait for confirmation it ran. If none were selected, skip this sub-step.
+If the admin selected any collections, emit a second **manifest** with `mode: collections` for the selected repos and surface the same committed `clone-repos` invocation (pointing at that manifest); **pass the same `channel`**, and each repo's `version` = the listings catalog `current_version`; the committed script resolves each repo itself (channel head, else tag `v<version>` — a missing tag fails that repo; bug `20260926-8d20ea22-133903-0ddf`). Wait for confirmation it ran. If none were selected, skip this sub-step.
 
 **1d. Stage the adapter bundle from the local clone:**
 
@@ -573,7 +573,7 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
 /shared/audit/.gitkeep
 ```
 
-2. Write `org-config.json` to the remote root:
+2. Write `org-config.json` to the remote root. **Refuse to overwrite an existing org (`createorgoverwrite`, core#19 follow-up).** Immediately before this write, check again with both Step 1 checks (by id when `org_config_id` is known, and by path). If either finds an `org-config.json` that isn't this task's own unfinished org (the Step 1 finding-53 test), halt: "An org configuration already exists here ('{org_name}'). I won't overwrite it — run '@ai:edit-org' to change it." A check that couldn't run also halts ("I couldn't confirm there's no existing org — fix the connection and run '@ai:create-org' again"). Only write when every check that ran came back not found, or found this task's own unfinished org:
 
 ```json
 {

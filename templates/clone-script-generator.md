@@ -13,7 +13,7 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 ## What the subroutine does now
 1. Detect `host_os`, `install_root`, and (infra) `backend`. (`host_arch` is optional and unused since core 4.0.0; the scripts still parse it, so older manifests stay valid.) Assemble the `repos[]` set for the mode:
    - **infra:** `agent-index-core`, `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`.
-   - **collections:** the selected collection repo(s), each `{ name, git_url }` (+ optional `version` from `marketplace-directory.json` `current_version`, used only to disambiguate a zero-tag branch-HEAD repo from a phantom).
+   - **collections:** the selected collection repo(s), each `{ name, git_url }` (+ `version`: the release to install, e.g. `marketplace-directory.json` `current_version` or the upgrade target — **always the catalog `current_version` or an explicit upgrade target, never the org's installed version**, or a refresh would pin to the installed tag and every check would say "up to date"). With `version` the repo is cloned at tag `v<version>` and a missing tag FAILS that repo (no default-branch fallback; a zero-tag repo gets default-branch head plus the phantom check; bug `20260926-8d20ea22-133903-0ddf`); without it, default-branch head. A channel branch still wins on a channel org.
    - **`channel` (core 3.32.0, REQUIRED field, may be null):** the org's distribution channel. Read org-config `distribution_channel`; before org-config exists (create-org Phase 1), read the admin's `agent-index.json` `distribution_channel`. **Always pass it.** A manifest without it makes a channel org silently fall back to released code, the revert the channels design exists to prevent. `null` = released code.
 2. Write the **manifest** to `<install_root>/.agent-index/clone-manifest.json` (torn-write discipline: read it back and confirm before surfacing). Shape:
    ```json
@@ -29,10 +29,10 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 The two-mode split (infra vs collections) is unchanged and is expressed by the manifest `mode`. The two-script split at create-org still exists because collection selection is interactive and the catalog only appears after the infra clone lands.
 
 ## Invariants preserved (now enforced in `lib/clone/`, not re-derived per run)
-- **Ref decision lives in `lib/clone/resolve-refs.js` (core 3.32.0), shared by both drivers.** A repo with branch `channel/<channel>` comes from that branch head. Otherwise infra repos are tag-pinned to the highest `v*` (numeric semver; this fixes the bash first-field sort bug) and collections are default-branch HEAD-pinned (`colltags`).
+- **Ref decision lives in `lib/clone/resolve-refs.js` (core 3.32.0), shared by both drivers.** A repo with branch `channel/<channel>` comes from that branch head. Otherwise infra repos are tag-pinned to the highest `v*` (numeric semver; this fixes the bash first-field sort bug); collections are pinned to tag `v<version>` when the manifest entry carries `version` (fail loud if missing), else default-branch HEAD-pinned (`colltags`).
 - Every run writes `<install_root>/.agent-index/clone-resolution.json` (`clone-resolution/1`: channel; per repo ref_type, ref, commit, version). Publishing, update detection and displays read it.
 - Three-way discrimination: tag exists -> checkout; zero tags AND cloned `collection.json`/`adapter.json` version == cataloged -> branch-HEAD SUCCESS; has tags but not this one (or zero tags + version mismatch) -> fail loud, no `main` fallback (`tagnofallback`).
-- `clonescriptdirty`: clear `index.lock`, `reset --hard`, continue-past-failure with a per-repo summary.
+- `clonescriptdirty`: clear `index.lock`, `reset --hard`, continue-past-failure with a per-repo summary. A target folder without `.git` is cloned into when empty, else that repo FAILS with `exists but is not a git repo: <path>`; FAILED lines carry git's own error text (bug `20261010-8d20ea22-145943-72ef`).
 - TLS 1.2 for every HTTPS call (`tls12`).
 - Scripts are committed ASCII, apostrophe-free (`ps1nonascii`, `clonescriptps1`) -- verified once at authoring, not re-risked each run.
 

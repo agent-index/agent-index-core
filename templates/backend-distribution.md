@@ -19,7 +19,7 @@ There is no `binaries/` folder since core 4.0.0 (the permission helper was remov
   "schema": "dist-manifest/2",
   "org_release_tag": "v3.18.0",            // headline (core version); per-repo versions in artifacts[]
   "channel": null,                         // core 3.32.0: null = released code; else the org's distribution channel
-  "channel_head": null,                    // channel orgs: "channel/dev-1@<short core commit>"
+  "channel_head": null,                    // channel orgs: a string "channel/<name>@<sha7>", e.g. "channel/dev-2@3f9c2ab"
   "sources": { "agent-index-core": { "ref_type": "tag", "ref": "v3.18.0", "commit": "…", "version": "3.18.0" } },  // from .agent-index/clone-resolution.json
   "generated_at": "<ISO>",
   "generated_by": "<admin member_hash>",
@@ -31,7 +31,7 @@ There is no `binaries/` folder since core 4.0.0 (the permission helper was remov
   "collections": [ { "name": "agent-index-core", "version": "3.18.0" }, { "name": "projects", "version": "4.0.0" } ]
 }
 ```
-**`dist-manifest/2` (core 3.32.0, distribution channels):** adds `channel`, `channel_head` and `sources{}` (one entry per published repo, copied from the admin's `.agent-index/clone-resolution.json`: `ref_type`, `ref`, `commit`, `version`). Readers MUST accept `/1` (no channel fields = released code). Since core 4.0.0 every `artifacts[]` entry is `type: "directory"`; readers ignore any leftover `type: "binary"` entry in an older manifest. Members' session-start banner reads `channel` (via the local mirror). `sources` serves audit and the live-test runbook's build check.
+**`dist-manifest/2` (core 3.32.0, distribution channels):** adds `channel`, `channel_head` and `sources{}` (one entry per published repo, copied from the admin's `.agent-index/clone-resolution.json`: `ref_type`, `ref`, `commit`, `version`). Readers MUST accept `/1` (no channel fields = released code). **`channel_head` is a single string, never an object (finding 77):** `"channel/<name>@<sha7>"` — the channel branch, `@`, and the first 7 hex characters of the core clone's `clone-resolution.json` `repos["agent-index-core"].commit` (e.g. `"channel/dev-2@3f9c2ab"`); `null` when `channel` is null. The per-repo ref/commit detail belongs in `sources`, not in `channel_head`. Since core 4.0.0 every `artifacts[]` entry is `type: "directory"`; readers ignore any leftover `type: "binary"` entry in an older manifest. Members' session-start banner reads `channel` (via the local mirror). `sources` serves audit and the live-test runbook's build check.
 
 **`collections[]` source (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`):** one entry per `org-config.json` → `installed_collections[]` entry with `status: "installed"`, carrying **that entry's `version`** — the version the org actually has on its backend. **Never** a catalog `current_version`: the catalog says what is *available*, the manifest says what the org *runs*. Before writing, assert every `collections[]` version equals the org-config version and the published-state version; abort on any mismatch. (Publish #076 took email-triage's catalog version 1.2.3 while the org ran 1.2.2, so members were told a version whose files were not on the backend.)
 

@@ -92,6 +92,8 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/org-
 
 > "The remote filesystem is authenticated but the org configuration could not be read. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until connectivity is restored. Say '@ai:member-bootstrap' if you'd like to troubleshoot."
 
+**If `authenticated: false` with `reason` `network_error`, `tls_or_proxy_error` or `credential_write_failed`** (gdrive adapter 2.11.5+, bug `20260822-8d20ea22-143449-a1c4`): this is not an expired sign-in, so do **not** start re-authentication. Say what failed in one line using the adapter's `detail` ("I couldn't reach Google Drive: {detail}" / "…your network's proxy or certificate blocked it…" / "…I couldn't save your refreshed sign-in locally…") and continue to Step 3 with the same queued notice as a failed re-auth. Any other reason (`expired`, `revoked`, `no_credential`, `refresh_failed`, or none):
+
 **If `authenticated: false`:** Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
 
 > "I wasn't able to restore your remote filesystem connection. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to try again."
@@ -160,7 +162,7 @@ If enabled, perform a lightweight update check. This step uses two mechanisms: t
 - If they match: the member is current. No notice needed.
 - If the file does not exist or cannot be read: fall through to the direct version checks below.
 
-Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists, the member has an interrupted update from a previous session. Queue a higher-priority notice:
+Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists **and its `status` is not `"resolved"`** (apply-updates marks finished plans resolved instead of deleting them — finding 83), the member has an interrupted update from a previous session. Queue a higher-priority notice:
   > "You have a pending update that was interrupted last session. Say '@ai:update' to finish applying it."
 
 **Direct version checks (fallback):** These checks run when the update instruction system has no data (no `latest.json`, or the admin has not yet published any updates). They provide backward-compatible update awareness for orgs that haven't adopted the publish-updates workflow.

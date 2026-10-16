@@ -82,7 +82,7 @@ This skill must maintain a structured install log during first-time setup and re
 When invoked, determine the context: first-time setup, reconnection, or re-authentication.
 
 - **First-time setup:** No `member-index.json` exists locally at `{project_dir}/members/{member_hash}/member-index.json`. The member has not been set up yet.
-- **Re-authentication:** `member-index.json` exists locally (member is set up) but `aifs_auth_status()` returns `authenticated: false`. The credential has expired or been revoked.
+- **Re-authentication:** `member-index.json` exists locally (member is set up) but `aifs_auth_status()` returns `authenticated: false`. The credential has expired or been revoked. (A `reason` of `network_error`, `tls_or_proxy_error` or `credential_write_failed` — gdrive 2.11.5+ — is a connection or local-storage problem, not an expired sign-in: report it from `detail` and don't restart the sign-in flow.)
 - **Reconnection:** `member-index.json` exists and auth is valid, but the member is explicitly invoking this skill to verify or repair connectivity.
 
 For re-authentication: skip directly to the authentication steps (Steps 2–3), verify connectivity (Step 4), then confirm and exit. Do not re-create the workspace or re-register.
