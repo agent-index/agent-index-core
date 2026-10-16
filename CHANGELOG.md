@@ -42,6 +42,11 @@ Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 m
 - **lib/clone:** a collections entry with `version` clones tag `v<version>` and fails loud if it's missing (bug `20260926-8d20ea22-133903-0ddf`); a target folder that isn't a git repo is cloned into when empty, otherwise reported plainly, and git's own error text is passed through (bug `20261010-8d20ea22-145943-72ef`).
 - **session-bootstrap hook finds the project dir from its own location** when `CLAUDE_PROJECT_DIR` is unset (bug `20260822-8d20ea22-143450-b7e2`).
 
+### Fixed — third round (Dev Two retest findings 85–90)
+- **publish-updates 6a records `source_ref` / `source_commit`** (and `source_tag` for tags) on the core and marketplace org-config entries from clone-resolution, so a channel org's org-config matches published-state (finding 89).
+- **apply-updates and org-setup add routing phrases only for capabilities the member has installed** (core and marketplace exempt); existing phrases are kept (finding 90).
+- **invite-member says when a Google Drive address may have no Google account** — detected only when the share fails; the halt message says so, and the cleanup leaves nothing (finding 87).
+
 ## [4.0.0] — 2026-10-13 — Permission helper removed
 
 **MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).

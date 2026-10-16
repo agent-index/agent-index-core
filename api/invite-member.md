@@ -116,7 +116,7 @@ If the admin says stop: surface "Stopped. Let me know how you'd like to proceed 
 - **`ACCESS_DENIED` / permission error** → the Entra app lacks the `User.Read.All` Graph permission, so it can't read the directory. The member most likely EXISTS — do not report them as missing. Halt and tell the admin to add `User.Read.All` to the app registration, **grant admin consent**, then **re-authenticate** (the agent's token must be reissued to carry the new scope), and retry. (adapter 2.2.1 surfaces this distinctly; pre-2.2.1 it masqueraded as "no matching user".)
 - **`INVALID_SUBJECT` / genuine no-match** → the resolved address truly doesn't exist in the tenant. **Halt — nothing has been created yet.** On OneDrive, SharePoint can only grant to people in the tenant, and a guest account counts; an address outside the tenant (e.g. a personal Gmail) is refused, so "outside the org: allowed and flagged" (the permission-changes procedure) does not reach this far. Tell the admin in plain words: *"{email} isn't in your Microsoft 365 tenant, so SharePoint can't give them access. Add them to the tenant first — as a guest is fine (Microsoft 365 admin center or Entra → Users → Invite external user) — then invite them again. If their address still doesn't resolve, give me their tenant sign-in address (UPN) as the grant identity."* If the address is a typo of a tenant user, ask for the correct tenant UPN/objectId (or for the account to be created + OneDrive-licensed first). Never attempt the share with an unresolvable address (that produces the misleading generic `sharingFailed`).
 
-On gdrive, `aifs_resolve_identity` is a passthrough (the email IS the grantable identity), so `sharing_identity == email`, the explicit-mapping path is unused, and this whole step is effectively a no-op.
+On gdrive, `aifs_resolve_identity` is a passthrough (the email IS the grantable identity), so `sharing_identity == email`, the explicit-mapping path is unused, and this whole step is effectively a no-op. So on gdrive an address with no Google account is not caught here: it is only detected when the Step 6 share fails (`INVALID_SUBJECT`), after Step 5 has created the artifacts folder. Step 6's finding-18 cleanup removes that folder (finding 87).
 
 ### Step 5: Create or refresh the member's shared-artifacts directory (structural only)
 
@@ -175,6 +175,7 @@ The access grants go through the core permission-changes procedure as one table.
   - The admin didn't confirm.
   - The new member's address is outside the Workspace's allowed sharing domains (`failed`: invalid recipient / access denied, or "your Google Workspace / Microsoft 365 sharing settings don't allow sharing with people outside the org" with the backend's reason). Fix the sharing policy first; agent-index does not bypass it.
   - A grant didn't verify (`verify_mismatch`).
+  - **gdrive: the address has no Google account** (the share fails `INVALID_SUBJECT`; Step 4.5 is a passthrough on gdrive, so this is the first point it can show up — finding 87). Say: *"{email} may not have a Google account — check it, or invite them by an address that does."* The cleanup below removes the folder Step 5 created.
 
   Offer to re-run Step 6. A re-run re-reads current access, so anything already applied shows as already in effect.
 
