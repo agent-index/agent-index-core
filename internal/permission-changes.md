@@ -1,7 +1,7 @@
 # Internal procedure: permission-changes
 
 **Added in:** agent-index-core 3.32.0. It replaced the `permission-change-helper` skill, which core 4.0.0 removed.
-**Normative model:** `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify"
+**Normative model:** `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify"
 **Used by:** every agent-index workflow that grants, removes or transfers access:
 - core: `invite-member`, `remove-member`, `publish-updates` (6e), `apply-updates` (Migration 4), `create-org`, `templates/regenerate-bootstrap`
 - marketplace: `install-collection` (5.5), `upgrade-collection`
@@ -36,8 +36,8 @@ Not an API member. Referenced from task files as: *"Follow `/agent-index-core/in
 | Field | Values |
 |---|---|
 | `op` | `share` · `unshare` · `transfer_ownership` |
-| `resource` | `id:{itemId}` (preferred) or an absolute path. Never the composite `id:{folder}/{name}`. |
-| `recipient` | An email or group address. On onedrive, the member's `sharing_identity` (UPN). Anyone outside the org is allowed and is flagged. |
+| `resource` | Address it the way the backend resolves it (finding 63). **gdrive:** `id:{itemId}` (preferred) or an absolute path. **onedrive:** the absolute path for org items (`/{collection}`, `/shared/...`), or the drive-qualified `id:{driveId}:{itemId}`; a bare `id:{itemId}` only for an item in the confirming person's own drive (their member space), because on OneDrive a bare id resolves against the caller's own drive. Never the composite `id:{folder}/{name}`. |
+| `recipient` | An email or group address. On onedrive, the member's `sharing_identity` (UPN). Anyone outside the org is allowed and is flagged. On onedrive (adapter 2.7.1+) an address outside the tenant gets Microsoft's invitation email; the tenant's external-sharing settings can refuse it (`EXTERNAL_SHARE_BLOCKED`, Step 7). |
 | `role` | `share` only: `reader` · `commenter` · `writer` |
 | `inherit` | `share` only. Default `true`. `false` removes inherited access on the item (gdrive only; on onedrive it is additive). |
 | `confirmer` | `admin` (org admin: install, upgrade, publish, invite/remove-member, create-org) · `owner` (sharing your own content) · `collection_admin` (a collection's backend-enforced admin role, e.g. client-intelligence add/remove-admin) |
@@ -77,9 +77,11 @@ might want, ask them in plain words. If they then ask for it themselves, it beco
    - `all_members_group` ← org-config `remote_filesystem.connection.all_members_group`
    - `backend` ← org-config `remote_filesystem.backend`
    - `member_identities` ← every member's `email` and `sharing_identity` from
-     `members-registry.json`. Read it by id anchor: org-config `resource_ids.members_registry`.
-     If that id is still `null` (only during `create-org`, before Step 11.5), read
-     `/members-registry.json` by path; the admin creating the org can resolve root paths.
+     `members-registry.json`. On gdrive read it by id anchor: org-config
+     `resource_ids.members_registry`. On onedrive read `/members-registry.json` by path (runtime-reference.md
+     § "Addressing: Owned Content and Sharing", `memberpathreads`). If the id is still `null` (only
+     during `create-org`, before Step 11.5), read it by path; the admin creating the org can
+     resolve root paths.
    - **Plus** any identities the caller declares as org members for this run that aren't in the
      registry yet. Example: `invite-member` passes the new member's `sharing_identity`, because the
      registry entry is written after the grants. These are not flagged outside your org.
@@ -90,7 +92,9 @@ For each distinct `resource`, call `aifs_get_permissions({path: resource, includ
 For a `transfer_ownership` on gdrive, also record `location` as `shared_drive` or `my_drive`
 (member spaces and `id:{member_folder_id}` items are `my_drive`; `/shared/**` is `shared_drive`).
 If a read fails with `ACCESS_DENIED` or `PATH_NOT_FOUND`, stop and tell the person in plain words.
-Don't guess at current access.
+Don't guess at current access. (On onedrive a `PATH_NOT_FOUND` on a bare `id:{itemId}` for an org
+item is an addressing error, not a missing item: the caller re-addresses it by path or as
+`id:{driveId}:{itemId}` — finding 63.)
 
 ## Step 3: Plan
 
@@ -114,6 +118,12 @@ write it to `<project_dir>/outputs/permission-changes.js`, and run that copy.
 Show `table_markdown`, then `consequence_lines` (in plain words, including what's inside a folder),
 then `confirmation_prompt`. Show it **exactly as the script produced it**. Don't add, drop or
 reword rows.
+
+A `task_spec` row whose recipient already holds a **higher** role (e.g. the all-members group is
+writer on a collection's code folder where the task wants reader) is listed under "Not changing"
+with *"already has writer — more than this needs"* (`excess_access: true`, finding 65). The
+procedure never removes access it wasn't asked to; the caller may point the person at the place to
+tighten it (see `verify-workspace-policy`).
 
 Rules:
 - **One table per task invocation and purpose.** Never merge changes from different tasks or
@@ -190,7 +200,21 @@ Never route around this with any other mechanism.
 3. If `needs_recheck` is true (Drive can take a few seconds to show a change), wait and re-read
    again, up to 3 times at about 2 s, 4 s and 8 s, re-running `verify` each time. Whatever is still
    `verify_mismatch` after that stays `verify_mismatch`.
-4. Tell the person what happened, using `summary_lines`.
+4. Tell the person what happened, using `summary_lines`. A `failed` row's `reason_text` comes from
+   the error code (findings 72, 75):
+   - `INVALID_SUBJECT` / `INVALID_RECIPIENT` → *"that address isn't a valid account or group"*;
+     on onedrive, for a recipient outside the org, it adds that the person must be added to the
+     Microsoft 365 tenant first (a guest account counts), then shared with by their tenant address.
+   - `EXTERNAL_SHARE_BLOCKED` (onedrive adapter 2.7.1; Graph's own text is in the error's `reason`),
+     `EXTERNAL_SHARE_UNSUPPORTED` or a sharing-policy refusal (`POLICY_DENIED`) → when the backend's
+     own text names a policy, *"your Microsoft 365 / Google Workspace sharing settings don't allow
+     sharing with people outside the org"* plus that text. When it doesn't (Graph's generic 400
+     `sharingFailed` "There was a problem sharing, please try again later.", from which the adapter
+     infers the code), it's worded as likely, not as fact (finding 84): *"Microsoft/Google refused to
+     share outside the org — usually the tenant's external-sharing setting (SharePoint admin center →
+     Policies → Sharing / Google Admin → Drive sharing)"* plus the backend's code and text. Either way,
+     don't retry; the person (or their tenant admin) checks the sharing settings or adds the person as
+     a guest.
 5. If `revert_offer` is present (`all_or_nothing` stopped part-way), offer it as a **new** run of
    this procedure, with a new table and a new confirmation. Never revert on your own.
 
@@ -247,9 +271,11 @@ Return `{run_result, rows}` (each row with its final `state`):
   `aifs_get_permissions` read rather than from the list you intended to remove.
 - **Recipients are anyone the person names.** A registry member → their `sharing_identity`; an
   unknown name → ask for an email, never guess; an address outside the registry is allowed and
-  flagged. Tell the person outside recipients open the item from their storage app's "Shared
-  with me", because agent-index discovery pointers are for org members. (Role-based grants such as
-  an admin role can still require an org member; that's the caller's rule, not a sharing limit.)
+  flagged (agent-index never blocks it; the backend may still refuse it under its own sharing
+  settings, and on onedrive the person must be in the tenant, guests included). Tell the person
+  outside recipients open the item from their storage app's "Shared with me", because
+  agent-index discovery pointers are for org members. (Role-based grants such as an admin role
+  can still require an org member; that's the caller's rule, not a sharing limit.)
 - **Ownership transfers resume on re-run.** After `awaiting_recipient`, tell the person to run the
   task again once the new owner accepts. The re-run sees the transfer already in effect
   (`skipped_noop`), and the caller completes its bookkeeping.
@@ -260,7 +286,8 @@ Return `{run_result, rows}` (each row with its final `state`):
 - Under the confirming person's own credentials only. No service accounts, no delegation, no admin
   applying grants on an owner's behalf.
 - Changes come only from declared sources. Recipients can be anyone the person asks for. People
-  outside the org are flagged, never blocked.
+  outside the org are flagged, never blocked by agent-index; a backend refusal under its own
+  sharing settings is reported plainly (Step 7), never worked around.
 - Exactly the table the script produced; one purpose per table; the next turn is the only
   confirmation; high-impact rows are confirmed one at a time.
 - No retries, no workarounds, no automatic reverts.

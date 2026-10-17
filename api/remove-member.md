@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.4.0
+version: 1.4.1
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Revokes the two member-directory grants invite-member created (through the core permission-changes procedure, each removal confirmed individually), removes their entry from members-registry.json, and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — it does not walk the broader ACL graph; Workspace IT handles identity offboarding.
 stateful: false
@@ -52,7 +52,7 @@ On demand, when a member leaves the team or org.
 
 ### Step 1: Pre-flight
 
-1. **Confirm caller is an admin.** Read `org-config.json`. Verify the calling member's `member_hash` is in the `admins` array. If not: surface "Only org admins can remove members." and stop.
+1. **Confirm caller is an admin.** Read `org-config.json` (gdrive `id:{org_config_id}`, OneDrive `/org-config.json` — runtime-reference.md § "Addressing: Owned Content and Sharing"). Verify the calling member's `member_hash` is in the `admins` array. If not: surface "Only org admins can remove members." and stop.
 
 2. **Refuse self-removal of the sole admin.** If the email being removed is in the `admins` array AND it's the only admin, surface "Cannot remove the only admin. Add another admin first via `@ai:edit-org`, then retry." and stop.
 
@@ -60,7 +60,7 @@ On demand, when a member leaves the team or org.
 
 ### Step 2: Find the member
 
-Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` (by id: `id:{resource_ids.members_registry}`) and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
+Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` (gdrive by id: `id:{resource_ids.members_registry}`; OneDrive by path: `/members-registry.json`) and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
 
 Confirm to the admin:
 
@@ -123,7 +123,7 @@ It does NOT walk the broader ACL graph looking for orphan grants on project reso
    }
    ```
 
-   - Include the legacy row only if `/members/{member_hash}/` exists. Use the `/shared/members/artifacts/{member_hash}/` path if the entry has no `artifacts_dir_id`.
+   - Include the legacy row only if `/members/{member_hash}/` exists. Use the `/shared/members/artifacts/{member_hash}/` path if the entry has no `artifacts_dir_id`, **and always on OneDrive** — there a bare `id:{artifacts_dir_id}` resolves against the admin's own drive and the permission read fails `PATH_NOT_FOUND` (finding 63).
    - Removals are high-impact, so the procedure asks the admin to confirm each one individually.
    - A path where the member has no explicit grant shows as "no access to remove" and is skipped (skip condition 1).
 3. **Act on the result.**
@@ -137,7 +137,7 @@ It does NOT walk the broader ACL graph looking for orphan grants on project reso
 ```
 { content, revision } = aifs_read("id:{resource_ids.members_registry}"), aifs_stat("id:{resource_ids.members_registry}")
 ```
-(Address the registry by id anchor; the root path is the fallback.)
+(On gdrive address the registry by id anchor; the root path is the fallback. On OneDrive use `/members-registry.json` for the read, stat and write — finding 63.)
 
 Parse, remove the entry whose `member_hash` matches, **and append a removal record** to the registry's top-level `removed_members[]` (create the array if absent): `{"member_hash", "email", "display_name", "removed": "{ISO 8601}", "removed_by": "{admin member_hash}"}` (`removalrecord`, core 4.0.0 live test finding 42 — without it a later re-invite saw only the leftover artifacts folder and called the person "an unfinished invite"). Write back with the captured revision:
 
@@ -184,7 +184,7 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 - Never write to `members-registry.json` outside this task, `invite-member`, and `member-bootstrap`.
 - **MAY revoke the two specific ACLs `invite-member` explicitly created** (writer on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`) per Step 2.5. These two grants are bounded, known, and symmetric with their creation; revoking them here closes a real correctness gap where a member who's been removed from the registry retains agent-index-issued Drive access until Workspace IT runs full account offboarding (which may never happen, e.g., for contractors).
 - **MUST NOT walk the broader ACL graph** looking for orphan grants the departing member may have accumulated through project membership, idea collaboration, shared-artifact creation, etc. Those remain Workspace IT's responsibility — either through full Workspace offboarding (which auto-revokes everything) or through project-scoped removal via `@ai:edit-project`.
-- **MUST use the core permission-changes procedure** for the Step 2.5 removals, per `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
+- **MUST use the core permission-changes procedure** for the Step 2.5 removals, per `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - Stale references render at the task layer as historical names. Never rewrite or scrub historical data.
 
 ### Edge Cases

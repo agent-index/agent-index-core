@@ -29,7 +29,7 @@ No member-configurable parameters.
 
 ## Setup Completion
 
-1. Write the installed instance to `/members/{member_hash}/skills/system-tutorial/`
+1. Write the installed instance to `members/{member_hash}/installed/agent-index-core/skill/system-tutorial/`
 2. Write `manifest.json`
 3. Write empty `setup-responses.md`
 4. Register entry in `member-index.json` with alias `@ai:tutorial`

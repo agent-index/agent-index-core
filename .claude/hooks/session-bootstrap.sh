@@ -16,7 +16,22 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+# CLAUDE_PROJECT_DIR is not guaranteed to be set (measured unset in Cowork, bug
+# `20260822-8d20ea22-143450-b7e2`). Derive the project dir from this script's own location
+# before falling back to '.'. The hook ships at <project>/agent-index-core/.claude/hooks/,
+# so ../.. is agent-index-core and its parent is the project root; take whichever holds
+# agent-index.json (project root first).
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+if [ -z "$PROJECT_DIR" ]; then
+  SCRIPT_ROOT=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd || true)
+  if [ -n "$SCRIPT_ROOT" ] && [ -f "$SCRIPT_ROOT/../agent-index.json" ]; then
+    PROJECT_DIR=$(cd "$SCRIPT_ROOT/.." && pwd)
+  elif [ -n "$SCRIPT_ROOT" ] && [ -f "$SCRIPT_ROOT/agent-index.json" ]; then
+    PROJECT_DIR="$SCRIPT_ROOT"
+  else
+    PROJECT_DIR="."
+  fi
+fi
 AGENT_INDEX_JSON="$PROJECT_DIR/agent-index.json"
 
 # In v2.0.0, agent-index.json lives at the project root (from the bootstrap zip),

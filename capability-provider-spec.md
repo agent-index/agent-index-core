@@ -863,6 +863,8 @@ New operation types for the update log (`/shared/updates/update-log.json`):
 | `provider_count` | integer | Total number of providers remaining for this capability type |
 | `affected_bindings` | array | List of `{ consumer_collection, binding_name }` objects for bindings that referenced this provider |
 
+Either operation may share an update-log entry with the collection operation that caused it — e.g. `upgrade-collection` writes one entry holding a `collection-update` and a `provider-register` (finding 62). `apply-updates` processes every operation in an entry's `operations[]`, whatever the count, and treats both provider operations as informational for members.
+
 ---
 
 ## Custom Capability Types
@@ -1075,8 +1077,8 @@ Lightweight consumers (like a collection that only needs to send alerts) declare
 
 This specification has been integrated into the following documents:
 
-1. **`standards.md`** (v2.1.0): `provides` and `requires` as optional `collection.json` fields, the two new update log operation types (`provider-register`, `provider-deregister`), and a "Capability Provider Requirements" section covering validation rules.
+1. **`standards.md`** (v2.1.0; retired, and this material now lives in the developer collection's `marketplace-eligibility.md` § "Capability Provider Requirements"): `provides` and `requires` as optional `collection.json` fields, the two new update log operation types (`provider-register`, `provider-deregister`), and a "Capability Provider Requirements" section covering validation rules.
 2. **`collection-authoring-guide.md`** (v1.5.2): a "Designing for Capability Providers" section covering when to consume vs. provide, writing capability bindings in setup templates, the resolution helper pattern, and migration guidance.
 3. **`collection.json` schema**: `provides` and `requires` are optional arrays (empty array or absent means "no capabilities provided/required"). Existing collections remain valid without them.
 
-*This specification is the authoritative reference for the capability provider system. Normative requirements are also captured in `standards.md` and practical guidance in `collection-authoring-guide.md`.*
+*This specification is the authoritative reference for the capability provider system. Normative requirements are also captured in the developer collection's `marketplace-eligibility.md` § "Capability Provider Requirements" and practical guidance in `collection-authoring-guide.md`.*

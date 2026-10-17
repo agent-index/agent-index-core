@@ -29,7 +29,7 @@ No pre-install parameters. All configuration is collected when the task is run.
 
 ## Setup Completion
 
-1. Write the installed instance to `/members/{member_hash}/tasks/create-org/`
+1. Write the installed instance to `members/{member_hash}/installed/agent-index-core/task/create-org/`
 2. Write `manifest.json`
 3. Write empty `setup-responses.md`
 4. Register entry in `member-index.json` with alias `@ai:create-org`
