@@ -256,3 +256,32 @@ CLAUDE.md § "Two-Tier Filesystem" holds the hot-path rule (re-authenticate auto
 
 - If the capability needs remote data and `aifs_auth_status()` returns `authenticated: false` with a `reason` of `network_error`, `tls_or_proxy_error` or `credential_write_failed`: don't re-authenticate — report the `detail` and stop the remote part (it is a connection or local-storage problem, bug `20260822-8d20ea22-143449-a1c4`). A `NOT_AUTHENTICATED` error from any other operation whose `refresh_reason` is one of those three (or whose `needs_auth` is `false`) is handled the same way.
 - **`member_read_grant` is a cached claim, not a live fact (finding 20).** org-config `installed_collections[].member_read_grant: "granted"` records that the all-members reader grant was verified when an admin last ran `publish-updates` 6e / `apply-updates` Migration 4 / `install-collection`. Access removed outside agent-index (in the Drive or SharePoint UI) leaves it stale until the next of those runs re-verifies it. So a member-side `ACCESS_DENIED` reading a collection is believed over the flag: tell the member their access to that collection was removed and that the admin's next publish (or `@ai:install-collection` → Apply access only) restores it. Don't retry in a loop and don't edit org-config from the member side.
+
+---
+
+## Default Natural-Language Mappings
+
+**Fallback only.** Use this table when the member's `routing.json` is absent or unreadable. When the file is present, its mappings take precedence. Moved here from CLAUDE.md (CI-013). The `daily-view` row is corrected: the capability is in `capture`, not `projects`.
+
+The table is not exhaustive. Use judgment to match new phrasings to the closest installed capability by checking `member-index.json`.
+
+| What the member says (examples) | Capability | Collection |
+|---|---|---|
+| "project pulse", "status of project X", "how's X going", "project update report" | project-pulse | projects |
+| "update project X", "I finished the API work", "log my progress" | update-project | projects |
+| "create a project", "start a new project", "new project called X" | create-project | projects |
+| "edit project X", "change the milestones", "add a member to X" | edit-project | projects |
+| "what are my action items", "what's assigned to me", "open tasks", "what's on my plate" | manage-action-items | projects |
+| "I have an idea", "new idea for project X", "idea for improving Y" | create-idea | projects |
+| "what decisions have we made", "decision log for X" | project-decide | projects |
+| "read the channel", "what happened in Slack for project X" | channel-digest | projects |
+| "archive project X", "close project X" | archive-project | projects |
+| "daily view", "what's on my plate today", "morning overview" | daily-view | capture |
+| "what bugs do we have", "show bugs", "open bugs for X" | view-bugs | bug-reports |
+| "report a bug", "found a bug", "log a bug" | report-bug | bug-reports |
+| "triage my email", "check my inbox", "what's important in my email" | email-triage | email-triage |
+| "triage my Slack", "what's important in Slack", "Slack summary" | slack-triage | slack-triage |
+| "capture this", "remember this", "note this down", "save this for later" | capture | capture |
+| "create a strategy", "strategy for X", "strategic plan for Y" | create-strategy | strategy |
+| "edit strategy", "update the strategy for X" | edit-strategy | strategy |
+| "run my briefing", "morning briefing", "daily briefing" | run-briefing | strategy |
