@@ -1,6 +1,6 @@
 ﻿# Agent-Index Core — Changelog
 
-## [4.0.1] — <RELEASE_DATE> — OneDrive upgrade fixes and the post-4.0 backlog
+## [4.0.1] — 2026-10-17 — OneDrive upgrade fixes and the post-4.0 backlog
 
 Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 member, findings 61–75) plus the items held back from the Google Drive round (findings 6, 8, 14, 20, 23, 44, 50, 53–56). Pairs with onedrive adapter 2.7.1, gdrive adapter 2.11.5, developer 1.14.1, marketplace 2.22.2, projects 4.4.2, library 1.7.2, client-intelligence 2.4.2, bug-reports 1.4.3 and brand-book 1.2.1.
 
