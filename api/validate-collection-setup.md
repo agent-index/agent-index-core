@@ -37,7 +37,7 @@ This setup configures the collection validation task. The task works with sensib
 
 1. Write all collected parameter values to `setup-responses.md`
 2. Generate the personalized installed instance
-3. Write the installed instance to `/members/{member_hash}/tasks/validate-collection/`
+3. Write the installed instance to `members/{member_hash}/installed/agent-index-core/task/validate-collection/`
 4. Write manifest.json
 5. Register entry in `member-index.json`
 6. Confirm completion to member

@@ -29,7 +29,7 @@ No member-configurable parameters. The Session Start task reads all configuratio
 
 ## Setup Completion
 
-1. Write the installed instance to `/members/{member_hash}/tasks/session-start/`
+1. Write the installed instance to `members/{member_hash}/installed/agent-index-core/task/session-start/`
 2. Write `manifest.json`
 3. Write empty `setup-responses.md` (no responses to record)
 4. Register entry in `member-index.json` with alias `@ai:session-start`
