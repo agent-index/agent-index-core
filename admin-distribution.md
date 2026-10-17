@@ -15,6 +15,34 @@ This document is for the **org admin**: publishing releases, distributing collec
 
 **What used to be here.** This document and two others replace `standards.md`, which is retired (Core Improvements decision `2026-09-22-retire-standards-md`). Runtime rules are in CLAUDE.md and `runtime-reference.md`; marketplace eligibility and authoring requirements are in the developer collection's `marketplace-eligibility.md`.
 
+
+---
+
+## Check for Updates Disambiguation
+
+Moved here from CLAUDE.md (CI-013), which keeps the trigger: an admin's natural-language "check for updates" reads this section before executing. Explicit aliases and non-admin members are routed directly from CLAUDE.md.
+
+The phrase "check for updates" (and near-paraphrases — "are there updates available", "what's new", "am I up to date", "check {something} for updates") maps to **distinct intents** that look identical from the surface:
+
+1. **Member-apply intent.** "Are there pending org updates I need to apply to my local workspace?" → `apply-updates` task. Source of truth: the org's `/shared/updates/` log. Answers in terms of *what's been published for me*.
+2. **Admin-available intent.** "Are there newer versions available upstream than what my org has installed?" → `check-updates` task (in `agent-index-marketplace`). Source of truth for a **self-distributing org** (this org — the admin publishes releases from local git clones): the **admin's local clones via git** (`git fetch --tags`; compare the clone working-tree `collection.json` `version` / highest tag against installed). **NOT** the resource-listings/public directory — for a self-distributing org that directory is the member-facing broadcast and is *by design behind* the org's internal versions, so comparing against it falsely reports "org is ahead / nothing to do." **NEVER `WebSearch` to answer this** — a web search returns a cached, weeks-stale snapshot (this is the `adminupstreamstale` bug, C.1.3.4). Answers in terms of *what's available for the org to publish*. **Channel orgs (core 3.32.0, org-config `distribution_channel` set):** "available" means newer commits on the `channel/<name>` branches (refresh clones with the channel; compare commits), never a downgrade to released tags.
+3. **Admin publish intent.** "Update our org [to the new release]", "publish the new release", "roll out the latest to the org" → **clone-script refresh (run the committed `lib/clone/clone-repos` script, which fetches **and checks out** the newest tag or channel head — a bare `git fetch --tags` is not a refresh, bug 7cb0; on a channel org the manifest carries the org's `distribution_channel`) → `publish-updates` from the refreshed clones**. This is an *action*, not a diagnostic: move the org to the latest release the clones hold. Do NOT route this to `check-updates`, and do NOT web-discover a version — refresh the clones (git) and publish what they hold. (Repairing a corrupt remote file likewise re-sources from the clone, `git show HEAD:<path>`, never a web fetch.)
+
+**Routing rule:**
+
+- If the request uses an **explicit alias** (`@ai:update` or `@ai:check-updates`), route directly — the alias is the unambiguous signal of intent.
+- If the request uses a **natural-language phrase**:
+  - **Non-admin member:** route to `apply-updates`. Members don't publish for the org, so the admin-available intent is not actionable for them.
+  - **Admin** (member_hash appears in `org-config.json` → `admins[]`): surface a one-question clarifying prompt before executing:
+    > "Two ways to interpret that:
+    > 1. **Apply pending updates to your local install** — pull anything your org has published that you haven't applied yet. (`@ai:update`)
+    > 2. **See what's available to publish for your org** — compare your org's installed versions against what's available upstream. (`@ai:check-updates`)
+    >
+    > Which one?"
+  - Route the response: "1" / "apply" / "apply pending" → `apply-updates`; "2" / "available" / "what's available" → `check-updates`.
+
+The prompt is suppressed for non-admins and for explicit `@ai:` invocations. This adds one round-trip for ambiguous admin requests but prevents the common failure mode where admins ask "are there updates?" and get a member-side "you're up to date" answer that doesn't reflect what they actually wanted to know.
+
 ---
 
 ## Distribution: backend-first (Release C — the current model)
