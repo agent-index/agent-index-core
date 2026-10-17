@@ -165,22 +165,7 @@ If enabled, perform a lightweight update check. This step uses two mechanisms: t
 Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists **and its `status` is not `"resolved"`** (apply-updates marks finished plans resolved instead of deleting them — finding 83), the member has an interrupted update from a previous session. Queue a higher-priority notice:
   > "You have a pending update that was interrupted last session. Say '@ai:update' to finish applying it."
 
-**Direct version checks (fallback):** These checks run when the update instruction system has no data (no `latest.json`, or the admin has not yet published any updates). They provide backward-compatible update awareness for orgs that haven't adopted the publish-updates workflow.
-
-**Infrastructure check:** If Step 2 confirmed remote connectivity, read the remote `agent-index-core/collection.json` and `agent-index-marketplace/collection.json` versions via `aifs_read` (gdrive `id:{folder_id}/collection.json`, OneDrive `/agent-index-core/collection.json`; an `ACCESS_DENIED` here → **Collection access removed** under Directives). If `check-updates` has been run before and cached its results in the remote marketplace cache at `/shared/marketplace-cache/last-update-check.json` (via `aifs_read`), compare against those cached results. If no cached results exist, skip infrastructure version comparison (a full `check-updates` will establish the baseline). If remote connectivity failed in Step 2, skip this check entirely.
-
-**Collection check:** If the marketplace cache is fresh (not expired per `marketplace_cache_ttl_hours`), compare installed collection versions from `org-config.json` (the copy read in Step 2) against the cached marketplace directory. If the cache is expired, do not trigger a refresh — session-start should not make remote requests that could delay startup. Use the existing cache regardless of staleness. If remote connectivity failed in Step 2, skip this check entirely.
-
-**Capability check: none.** Capabilities have their own version numbers, independent of their collection's version (core 3.7.0), so comparing a capability's version with its collection's `collection.json` version reports almost every capability as upgradable (`capversionfallback`, 3.32.0 live test: "62 of 68" on a minutes-old install). Capability upgrades reach members through org updates (`@ai:update`) and `@ai:setup`; don't queue a capability-upgrade notice from a version comparison.
-
-Queue notices for Step 8 based on fallback results (only if the update instruction check did not already produce a notice):
-
-- If infrastructure updates are available (from cached check-updates results):
-  > "Agent-index infrastructure updates are available. Say '@ai:check-updates' for details."
-
-- If collection updates are available (from marketplace cache comparison):
-  > "{N} installed collection(s) have updates available. Say '@ai:check-updates' for details."
-
+**Direct version checks (fallback): none.** When there is no `latest.json` (the admin hasn't published updates yet), session-start has nothing to compare against and queues no update notice. The infrastructure and collection checks that used to sit here compared against `/shared/marketplace-cache/`, which is decommissioned (no writer since marketplace 2.17.0), so they could only skip. They were removed in CI-017. Capability versions aren't compared either. Capabilities have their own version numbers, independent of their collection's version (core 3.7.0), so comparing a capability's version with its collection's `collection.json` version reports almost every capability as upgradable (`capversionfallback`, 3.32.0 live test: "62 of 68" on a minutes-old install). Capability upgrades reach members through org updates (`@ai:update`) and `@ai:setup`; don't queue a capability-upgrade notice from a version comparison.
 
 **Distribution channel banner (core 3.32.0):** read the local `agent-index.json` `distribution_channel` (falling back to `/shared/dist/manifest.json` `channel` if the local field is absent and Step 2 confirmed connectivity). If set, queue an **advisory** notice, shown on every session in every verbosity except `silent`: *"This org runs distribution channel **{name}** (unreleased code for testing)."* On a channel org, skip the adapter bundle check below. It compares against the public released directory, which a channel org intentionally doesn't follow. Use `@ai:check-updates` instead.
 
@@ -192,7 +177,7 @@ If the member is not an admin, skip this notice — only admins can act on it.
 
 These notices are advisory. They surface at the same priority level as role-based collection suggestions — below deprecation warnings and hard failures.
 
-If any check encounters an error (file unreadable, missing cache): skip silently. Update notices are informational and must never delay or disrupt session start.
+If any check encounters an error (for example, a file that can't be read): skip silently. Update notices are informational and must never delay or disrupt session start.
 
 **On success:** Notices queued as applicable. Proceed to Step 6.
 
@@ -250,7 +235,7 @@ Collect all queued notices from Steps 2–7. Surface them to the member in this 
 1. **Hard failures** (anything that blocks a capability — missing always-on skill, connectivity failure)
 2. **Deprecation warnings** (always shown, regardless of verbosity)
 3. **Advisory notices** (remote connectivity warning, preference file issues)
-4. **Update-available notices** (infrastructure, collection, or capability updates — from Step 5)
+4. **Update-available notices** (pending org updates and, for admins, a newer adapter bundle — from Step 5)
 5. **Role-based collection suggestions** (recommended collections not yet installed)
 
 Then confirm session readiness at the member's configured `session_summary_verbosity` level:
