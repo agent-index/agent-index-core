@@ -1,7 +1,7 @@
 # Agent-Index Runtime Reference
 
 **Maintained by:** agent-index
-**Last Updated:** 2026-10-01
+**Last Updated:** 2026-10-17
 
 ---
 
@@ -256,6 +256,13 @@ CLAUDE.md § "Two-Tier Filesystem" holds the hot-path rule (re-authenticate auto
 
 - If the capability needs remote data and `aifs_auth_status()` returns `authenticated: false` with a `reason` of `network_error`, `tls_or_proxy_error` or `credential_write_failed`: don't re-authenticate — report the `detail` and stop the remote part (it is a connection or local-storage problem, bug `20260822-8d20ea22-143449-a1c4`). A `NOT_AUTHENTICATED` error from any other operation whose `refresh_reason` is one of those three (or whose `needs_auth` is `false`) is handled the same way.
 - **`member_read_grant` is a cached claim, not a live fact (finding 20).** org-config `installed_collections[].member_read_grant: "granted"` records that the all-members reader grant was verified when an admin last ran `publish-updates` 6e / `apply-updates` Migration 4 / `install-collection`. Access removed outside agent-index (in the Drive or SharePoint UI) leaves it stale until the next of those runs re-verifies it. So a member-side `ACCESS_DENIED` reading a collection is believed over the flag: tell the member their access to that collection was removed and that the admin's next publish (or `@ai:install-collection` → Apply access only) restores it. Don't retry in a loop and don't edit org-config from the member side.
+
+### Remote write constraints
+
+- Never write to collection directories (`/{collection}/`) from a member session — those are managed by org admins via `create-org` and the marketplace install/upgrade tasks.
+- Never write to `org-config.json` or `members-registry.json` except through the specific admin workflows (`edit-org`, `create-org`, `member-bootstrap`, `org-setup`).
+- Always confirm destructive shared writes (overwrite, delete) with the member before executing.
+- Use `aifs_delete` with caution — shared deletions affect all members.
 
 ---
 

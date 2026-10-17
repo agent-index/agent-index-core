@@ -1,7 +1,7 @@
 # Agent-Index Admin and Distribution
 
 **Maintained by:** agent-index
-**Last Updated:** 2026-10-01
+**Last Updated:** 2026-10-17
 
 ---
 
