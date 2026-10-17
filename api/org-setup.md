@@ -1,7 +1,7 @@
 ---
 name: org-setup
 type: skill
-version: 3.12.1
+version: 3.12.2
 collection: agent-index-core
 description: Orchestrates member onboarding and ongoing capability management — guiding members through role determination, installing and configuring skills and tasks from installed collections, and keeping installed capabilities current.
 stateful: true

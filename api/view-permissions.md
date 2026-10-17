@@ -1,7 +1,7 @@
 ---
 name: view-permissions
 type: task
-version: 1.0.1
+version: 1.0.2
 collection: agent-index-core
 description: Show who has access to a resource on the remote filesystem. Calls aifs_get_permissions and formats the result conversationally. Member-facing — any member can run it on any path they have read access to.
 stateful: false

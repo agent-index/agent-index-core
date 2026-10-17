@@ -1,7 +1,7 @@
 ---
 name: author-collection
 type: task
-version: 3.1.2
+version: 3.1.3
 collection: agent-index-core
 description: Guided workflow for creating a new agent-index collection from scratch — scaffolds directory structure, generates all required files, and ensures standards compliance.
 stateful: false

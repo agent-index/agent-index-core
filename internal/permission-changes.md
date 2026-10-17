@@ -200,6 +200,12 @@ Never route around this with any other mechanism.
 3. If `needs_recheck` is true (Drive can take a few seconds to show a change), wait and re-read
    again, up to 3 times at about 2 s, 4 s and 8 s, re-running `verify` each time. Whatever is still
    `verify_mismatch` after that stays `verify_mismatch`.
+   A share also counts as applied when the re-read shows the person's access only as inherited, if
+   an earlier row of the same run gave them at least that role on a parent folder, that row was
+   applied, and the run removes none of their access. Google Drive folds a child folder's grant into
+   the same grant the parent just received, so the child shows no separate entry (finding 93). The
+   summary line says where the access comes from, and the record marks the row `via_inheritance`.
+   This never applies to `inherit:false` shares, whose purpose is that the item stops inheriting.
 4. Tell the person what happened, using `summary_lines`. A `failed` row's `reason_text` comes from
    the error code (findings 72, 75):
    - `INVALID_SUBJECT` / `INVALID_RECIPIENT` → *"that address isn't a valid account or group"*;
