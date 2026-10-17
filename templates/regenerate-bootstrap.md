@@ -97,9 +97,10 @@ If any check fails, surface the specific issue and halt. Do not produce an inval
 
 If `<allow-skip>` is true:
 
-1. List staging files in sorted order (deterministic).
-2. Concatenate each file's SHA-256 into a manifest string.
-3. Compute SHA-256 of the manifest. This is the "content hash" of the zip's logical contents.
+1. **Hash the inputs, never an archive (finding 91).** The `.plugin` file is itself a zip and embeds file timestamps, so its bytes change on every build. Take the content files: every staged file except the `.plugin`, plus every file **inside** the `.plugin` (listed as `{plugin name}!{inner path}`).
+2. For each, compute SHA-256 of its LF-normalized bytes (binary files as-is). Build the manifest string as one line per file, `"{relative path}\t{sha256 hex}\n"`, sorted by path (byte order).
+3. Compute SHA-256 of that manifest string (UTF-8). This is the "content hash" of the zip's logical contents — the same inputs always give the same value, on any machine.
+   Example: `printf '%s\t%s\n' "$path" "$sha" … | sort | sha256sum` (with the inner `.plugin` entries listed via `unzip -p`).
 4. Read the current remote `published-state.json` → `bootstrap_content_hash`. If equal to the new content hash, skip Step 6 and Step 7. Surface "Bootstrap content unchanged; existing zip retained." and return.
 
 ### Step 6: Create the zip and upload

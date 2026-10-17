@@ -45,6 +45,7 @@ Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 m
 ### Fixed — third round (Dev Two retest findings 85–90)
 - **publish-updates 6a records `source_ref` / `source_commit`** (and `source_tag` for tags) on the core and marketplace org-config entries from clone-resolution, so a channel org's org-config matches published-state (finding 89).
 - **apply-updates and org-setup add routing phrases only for capabilities the member has installed** (core and marketplace exempt); existing phrases are kept (finding 90).
+- **The bootstrap-zip content hash is reproducible** — computed over the input files (the `.plugin`'s inner files, never the archive, which embeds timestamps) as sorted `path<TAB>sha256` lines, so publish-updates Step 0b's check can recompute it (finding 91; the first publish after upgrading regenerates the zip once).
 - **invite-member says when a Google Drive address may have no Google account** — detected only when the share fails; the halt message says so, and the cleanup leaves nothing (finding 87).
 
 ## [4.0.0] — 2026-10-13 — Permission helper removed
