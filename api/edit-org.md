@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.5.1
+version: 3.5.2
 collection: agent-index-core
 description: Edit org configuration — update the admin list, manage marketplace subscriptions, set the org's distribution channel, or launch the marketplace to install or manage collections.
 stateful: false
@@ -39,13 +39,15 @@ The org admin describes what they want to change, or invokes the marketplace flo
 
 ### Step 1: Read Org Configuration and Verify Admin
 
-Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`.
+Read `org-config.json` by backend (standards § Addressing, finding 63): gdrive `aifs_read("id:{org_config_id}")` (`org_config_id` from the local `agent-index.json`), with the path `/org-config.json` as the fallback; OneDrive `/org-config.json` first, then `id:{drive_id}:{org_config_id}`. Treat it as missing only if every form returns not-found — an admin off the Shared Drive gets FILE_NOT_FOUND on the bare path, and create-org Step 1 hands exactly that admin to this task (bug `20261011-8d20ea22-183003-2dea`).
 
-If `org-config.json` does not exist or cannot be read (authentication failure, connectivity issue): check `aifs_auth_status()`. If `authenticated: false`, attempt automatic re-authentication via `aifs_authenticate` and retry the read. If re-auth succeeds and the file exists, proceed normally. If the file does not exist: surface "Your org configuration couldn't be loaded. This could mean the org hasn't been configured yet — say '@ai:create-org' to get started." Halt. If re-auth fails: surface "Your org configuration couldn't be loaded and I wasn't able to restore your remote connection. Try '@ai:member-bootstrap' to troubleshoot." Halt.
+If `org-config.json` does not exist or cannot be read (authentication failure, connectivity issue): check `aifs_auth_status()`. If `authenticated: false` with `reason` `network_error`, `tls_or_proxy_error` or `credential_write_failed`, report the `detail` and halt (a connection or local-storage problem, not an expired sign-in). Otherwise, if `authenticated: false`, attempt automatic re-authentication via `aifs_authenticate` and retry the read. If re-auth succeeds and the file exists, proceed normally. If the file does not exist: surface "Your org configuration couldn't be loaded. This could mean the org hasn't been configured yet — say '@ai:create-org' to get started." Halt. If re-auth fails: surface "Your org configuration couldn't be loaded and I wasn't able to restore your remote connection. Try '@ai:member-bootstrap' to troubleshoot." Halt.
 
 Compute the current member's hash: SHA256(lowercase email from session context), take the first 16 hex characters. Check whether this hash matches any entry in `admins[].member_hash` in org-config.json.
 
 If not an admin: surface "Only org admins can edit org configuration. The current admins are: {admin list}. Contact one of them if you need changes made." Halt.
+
+**Unfinished create-org (finding 53).** If the local `.agent-index/install-state.json` has `task: "create-org"`, a `status` other than `"completed"`, and `collected.org_id` equal to this org-config's `org_id`, the org was never finished (no bootstrap zip, collections or admin workspace yet, depending on where it stopped). Say: "This org's setup didn't finish (last step done: {phase3_step, or the last entry of completed_steps}). I'll continue it." and run `create-org`, which resumes from its install state (create-org Step 0). Don't edit a half-created org.
 
 **On success:** Proceed to Step 2.
 

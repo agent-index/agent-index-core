@@ -1,7 +1,7 @@
 ---
 name: preferences-management
 type: skill
-version: 3.0.1
+version: 3.0.2
 collection: agent-index-core
 description: Enables members to configure, review, and update their agent-index session preferences and invocation aliases through natural language without editing configuration files directly.
 stateful: true

@@ -1,7 +1,7 @@
 ---
 name: system-tutorial
 type: skill
-version: 3.0.0
+version: 3.0.1
 collection: agent-index-core
 description: Explains the agent-index system to members — its concepts, structure, invocation model, and how to get the most out of it — through a guided tour or targeted answers to specific questions.
 stateful: false

@@ -50,6 +50,13 @@ for r in m.get('repos',[]):
     base={'name':n,'git_url':u,'mode':mode,'want_version':r.get('version')}
     rel=sorted([t for t in tags if key(t)],key=key)
     if mode=='infra' and rel: out['repos'].append(dict(base,ref_type='tag',ref=rel[-1],commit=tags[rel[-1]])); continue
+    if mode=='collections' and r.get('version'):
+        t='v'+str(r['version']).lstrip('v')
+        if t in tags: out['repos'].append(dict(base,ref_type='tag',ref=t,commit=tags[t]))
+        elif not rel and (dflt or 'main' in heads or 'master' in heads):
+            dflt=dflt or ('main' if 'main' in heads else 'master'); out['repos'].append(dict(base,ref_type='branch_head',ref=dflt,commit=heads.get(dflt)))
+        else: out['errors'].append({'name':n,'error':'release tag %s not found on the remote (manifest version %s); refusing to fall back to the default branch (tagnofallback)'%(t,r['version'])})
+        continue
     dflt=dflt or ('main' if 'main' in heads else ('master' if 'master' in heads else None))
     if not dflt: out['errors'].append({'name':n,'error':'remote has no default branch and no usable tag'}); continue
     out['repos'].append(dict(base,ref_type='branch_head',ref=dflt,commit=heads.get(dflt)))
@@ -75,20 +82,34 @@ json_version() { # $1=dir ; version from collection.json or adapter.json
     fi
   done
 }
+# Each checkout sets ERR (git's own stderr, one line) on failure. A target folder that exists but has
+# no .git is cloned into when empty, else refused (bug 20261010-8d20ea22-145943-72ef).
+ERR=""
+gitq() { # run git, keep its output for ERR on failure
+  local out sub="$1"; [ "$1" = "-C" ] && sub="$3"
+  out=$(git "$@" 2>&1) && return 0
+  ERR="git $sub failed: $(echo "$out" | tr '\n' ' ' | sed 's/  */ /g;s/ $//')"; return 1
+}
+fresh_clone() { # $1=dir $2=url $3=ref -> 0 = cloned, 1 = failed (ERR set), 2 = dir is an existing repo
+  if [ -d "$1" ] && [ ! -e "$1/.git" ]; then
+    if [ -n "$(ls -A "$1" 2>/dev/null)" ]; then ERR="exists but is not a git repo: $1 (move or delete it, then re-run)"; return 1; fi
+  elif [ -d "$1" ]; then return 2; fi
+  gitq clone --depth=1 --branch "$3" "$2" "$1"
+}
 checkout_branch() { # $1=dir $2=url $3=branch  -> clone or refresh to the branch head (fixes stale detached shallow clones)
-  if [ ! -d "$1" ]; then git clone --depth=1 --branch "$3" "$2" "$1" >/dev/null 2>&1; return; fi
+  ERR=""; fresh_clone "$1" "$2" "$3"; local rc=$?; [ $rc -ne 2 ] && return $rc
   rm -f "$1/.git/index.lock" 2>/dev/null
-  git -C "$1" fetch --depth=1 origin "+refs/heads/$3:refs/remotes/origin/$3" >/dev/null 2>&1 || return 1
+  gitq -C "$1" fetch --depth=1 origin "+refs/heads/$3:refs/remotes/origin/$3" || return 1
   git -C "$1" reset --hard >/dev/null 2>&1
-  git -C "$1" checkout -f -B "$3" "origin/$3" >/dev/null 2>&1 || return 1
-  git -C "$1" reset --hard "origin/$3" >/dev/null 2>&1
+  gitq -C "$1" checkout -f -B "$3" "origin/$3" || return 1
+  gitq -C "$1" reset --hard "origin/$3"
 }
 checkout_tag() { # $1=dir $2=url $3=tag
-  if [ ! -d "$1" ]; then git clone --depth=1 --branch "$3" "$2" "$1" >/dev/null 2>&1; return; fi
+  ERR=""; fresh_clone "$1" "$2" "$3"; local rc=$?; [ $rc -ne 2 ] && return $rc
   rm -f "$1/.git/index.lock" 2>/dev/null
-  git -C "$1" fetch --depth=1 origin "+refs/tags/$3:refs/tags/$3" >/dev/null 2>&1 || return 1
+  gitq -C "$1" fetch --depth=1 origin "+refs/tags/$3:refs/tags/$3" || return 1
   git -C "$1" reset --hard >/dev/null 2>&1
-  git -C "$1" checkout -f "$3" >/dev/null 2>&1
+  gitq -C "$1" checkout -f "$3"
 }
 
 OK=0; FAILED=""; RECORDS=""
@@ -98,16 +119,16 @@ while IFS=$'\t' read -r NAME URL TYPE REF WANT; do
   if [ "$NAME" = "ERR" ]; then echo "FAILED $URL -- $TYPE"; FAILED="$FAILED $URL"; continue; fi
   DIR="$ROOT/$NAME"
   if [ "$TYPE" = "tag" ]; then checkout_tag "$DIR" "$URL" "$REF"; else checkout_branch "$DIR" "$URL" "$REF"; fi \
-    || { echo "FAILED $NAME -- could not check out $REF"; FAILED="$FAILED $NAME"; continue; }
+    || { echo "FAILED $NAME -- could not check out $REF${ERR:+ -- $ERR}"; FAILED="$FAILED $NAME"; continue; }
   if [ "$MODE" = "collections" ] && [ ! -f "$DIR/collection.json" ]; then echo "FAILED $NAME -- collection.json missing"; FAILED="$FAILED $NAME"; continue; fi
   VER=$(json_version "$DIR"); SHA=$(git -C "$DIR" rev-parse HEAD 2>/dev/null)
-  if [ "$TYPE" = "branch_head" ] && [ "$MODE" = "infra" ] && { [ -z "$VER" ] || { [ -n "$WANT" ] && [ "$VER" != "$WANT" ]; }; }; then
+  if [ "$TYPE" = "branch_head" ] && { [ "$MODE" = "infra" ] || [ -n "$WANT" ]; } && { [ -z "$VER" ] || { [ -n "$WANT" ] && [ "$VER" != "$WANT" ]; }; }; then
     echo "FAILED $NAME -- ERROR: no release tag found and version mismatch (want=$WANT got=$VER) -- phantom (tagnofallback)"; FAILED="$FAILED $NAME"; continue
   fi
   case "$TYPE" in
     channel) LABEL="(channel)";;
-    tag) LABEL="(release tag)";;
-    *) LABEL=$([ "$MODE" = "collections" ] && echo "(collection, default-branch head)" || echo "(branch-HEAD distribution, no release tags)");;
+    tag) LABEL=$([ "$MODE" = "collections" ] && echo "(collection, release tag from manifest version)" || echo "(release tag)");;
+    *) if [ "$MODE" = "collections" ] && [ -z "$WANT" ]; then LABEL="(collection, default-branch head -- no version in manifest)"; else LABEL="(branch-HEAD distribution, no release tags)"; fi;;
   esac
   echo "OK    $NAME -- $REF@${SHA:0:7} $LABEL"; OK=$((OK+1))
   RECORDS="$RECORDS$NAME	$TYPE	$REF	$SHA	$VER"$'\n'

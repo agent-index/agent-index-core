@@ -863,6 +863,8 @@ New operation types for the update log (`/shared/updates/update-log.json`):
 | `provider_count` | integer | Total number of providers remaining for this capability type |
 | `affected_bindings` | array | List of `{ consumer_collection, binding_name }` objects for bindings that referenced this provider |
 
+Either operation may share an update-log entry with the collection operation that caused it — e.g. `upgrade-collection` writes one entry holding a `collection-update` and a `provider-register` (finding 62). `apply-updates` processes every operation in an entry's `operations[]`, whatever the count, and treats both provider operations as informational for members.
+
 ---
 
 ## Custom Capability Types
