@@ -1,7 +1,7 @@
 # Internal procedure: permission-changes
 
 **Added in:** agent-index-core 3.32.0. It replaced the `permission-change-helper` skill, which core 4.0.0 removed.
-**Normative model:** `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify"
+**Normative model:** `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify"
 **Used by:** every agent-index workflow that grants, removes or transfers access:
 - core: `invite-member`, `remove-member`, `publish-updates` (6e), `apply-updates` (Migration 4), `create-org`, `templates/regenerate-bootstrap`
 - marketplace: `install-collection` (5.5), `upgrade-collection`
@@ -78,8 +78,8 @@ might want, ask them in plain words. If they then ask for it themselves, it beco
    - `backend` ← org-config `remote_filesystem.backend`
    - `member_identities` ← every member's `email` and `sharing_identity` from
      `members-registry.json`. On gdrive read it by id anchor: org-config
-     `resource_ids.members_registry`. On onedrive read `/members-registry.json` by path (standards
-     § "Addressing: paths vs. ID anchors", `memberpathreads`). If the id is still `null` (only
+     `resource_ids.members_registry`. On onedrive read `/members-registry.json` by path (runtime-reference.md
+     § "Addressing: Owned Content and Sharing", `memberpathreads`). If the id is still `null` (only
      during `create-org`, before Step 11.5), read it by path; the admin creating the org can
      resolve root paths.
    - **Plus** any identities the caller declares as org members for this run that aren't in the

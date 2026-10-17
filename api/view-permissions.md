@@ -63,7 +63,7 @@ Resolve a friendly description (e.g., "the pricing-refresh project") to a path v
 result = aifs_get_permissions(path=<path>, include_inherited=true)
 ```
 
-Address the resource the way the backend resolves it (standards § "Addressing: paths vs. ID anchors", finding 63): org items by path on OneDrive (a bare `id:{itemId}` there resolves against the member's own drive) or by `id:{drive_id}:{item_id}`; on gdrive a path or `id:{itemId}`. A bare `id:` is right on OneDrive only for the member's own space.
+Address the resource the way the backend resolves it (runtime-reference.md § "Addressing: Owned Content and Sharing", finding 63): org items by path on OneDrive (a bare `id:{itemId}` there resolves against the member's own drive) or by `id:{drive_id}:{item_id}`; on gdrive a path or `id:{itemId}`. A bare `id:` is right on OneDrive only for the member's own space.
 
 Default `include_inherited` to `true` so the member sees the full picture (explicit + inherited grants). They can ask to filter to explicit-only ("show me just the explicit grants") and the task re-runs with `include_inherited: false`.
 

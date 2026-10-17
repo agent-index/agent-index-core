@@ -13,7 +13,7 @@ upgrade_compatible: true
 
 `remove-member` is an admin-only runtime task with no setup-time configuration. The task collects the email of the departing member at invocation.
 
-This setup file exists to satisfy the standards.md requirement that every task have a corresponding `-setup.md` file.
+This setup file exists to satisfy the requirement that every task have a corresponding `-setup.md` file (the developer collection's `marketplace-eligibility.md` § "API Member Requirements").
 
 ---
 

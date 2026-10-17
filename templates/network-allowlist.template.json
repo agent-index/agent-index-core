@@ -27,7 +27,7 @@
     },
     {
       "host": "api.github.com",
-      "purpose": "Collection directory lookup via GitHub API; branch-head SHA resolution for the Distribution fetch protocol (SHA-pinned fetches, core 3.11.0 — standards.md)",
+      "purpose": "Collection directory lookup via GitHub API; branch-head SHA resolution for the Distribution fetch protocol (SHA-pinned fetches, core 3.11.0 — admin-distribution.md \u00a7 'Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback')",
       "required": true,
       "tested_by": "setup-time-reachability-check"
     },
@@ -39,7 +39,7 @@
     },
     {
       "host": "cdn.jsdelivr.net",
-      "purpose": "Fallback origin for directory fetches when GitHub API SHA resolution is unavailable (Distribution fetch protocol Fallback A, core 3.11.0). Advisory-quality results; see standards.md.",
+      "purpose": "Fallback origin for directory fetches when GitHub API SHA resolution is unavailable (Distribution fetch protocol Fallback A, core 3.11.0). Advisory-quality results; see admin-distribution.md.",
       "required": true,
       "tested_by": "setup-time-reachability-check"
     }

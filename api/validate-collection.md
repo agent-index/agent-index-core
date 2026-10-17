@@ -113,7 +113,7 @@ For each missing required file, record an error.
 
 **Bundled-script placement check (core 3.29.0+).** `/apps/` is optional, but if the collection ships
 scripts at all, that is the only place they may live — at the collection root, a sibling of `/api/`,
-`/setup/` and `/upgrade/` (`standards.md`, "Required File Structure"). Record an **error** for any
+`/setup/` and `/upgrade/` (the developer collection's `marketplace-eligibility.md` § "Required File Structure"). Record an **error** for any
 `apps/` directory found anywhere other than the collection root — `api/apps/`, `setup/apps/`,
 `api/{name}/apps/` and the like. Core materializes `/apps/` and nothing else, so a misplaced one
 never reaches a member's machine and every `{apps_path}` reference in the collection silently
@@ -195,13 +195,13 @@ declares one has created a second source of truth that drifts silently. For each
   **Error**, same reasoning.
 
 Using `{apps_path}` in a workflow or Pre-Setup gate is correct and must not be flagged. See
-`standards.md`, "Core-Injected Parameters."
+the developer collection's `marketplace-eligibility.md` § "Core-Injected Parameters (core 3.29.0+)".
 
 **Member data placement check (core 3.29.0+).** Scan each setup template's `## Setup Completion`
 section and each workflow's declared writes for local paths matching
 `members/{member_hash}/installed/` → **Error**. That subtree belongs to the installer and is replaced
 wholesale on upgrade; member data belongs at `members/{member_hash}/{collection-name}/`
-(`standards.md`, "Member Data Placement"). This check exists because the mistake is a natural one —
+(the developer collection's `marketplace-eligibility.md` § "Member Data Placement (normative)"). This check exists because the mistake is a natural one —
 a collection stores config next to the scripts that read it — and because the data loss only shows up
 at the *next* upgrade, long after the change that caused it.
 
