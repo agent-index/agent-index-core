@@ -1,5 +1,53 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.0.1] — 2026-10-17 — OneDrive upgrade fixes and the post-4.0 backlog
+
+Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 member, findings 61–75) plus the items held back from the Google Drive round (findings 6, 8, 14, 20, 23, 44, 50, 53–56). Pairs with onedrive adapter 2.7.1, gdrive adapter 2.11.5, developer 1.14.1, marketplace 2.22.2, projects 4.4.2, library 1.7.2, client-intelligence 2.4.2, bug-reports 1.4.3 and brand-book 1.2.1.
+
+### Fixed — OneDrive
+- **OneDrive reads org files by path (finding 63).** A bare `id:{item}` on OneDrive resolves against the caller's own drive, so `id:{org_config_id}` and the code-folder rows `id:{folder_id}` failed on ms_install_10. standards.md § Addressing now has one backend table (gdrive: id first, path fallback; OneDrive: path first, drive-qualified `id:{drive_id}:{item_id}` fallback), and the CLAUDE.md template, member-bootstrap 3.13.2, session-start 3.2.1, invite-member 1.13.3, remove-member 1.4.1, view-permissions 1.0.1, verify-workspace-policy 1.0.3, org-setup 3.12.1, apply-updates 4.2.2, publish-updates 3.20.1 (6e) and create-org 3.15.2 follow it. The permission-changes `resource` rule is backend-conditional.
+- **invite-member 1.13.3 resolves the person's identity before creating anything (finding 75).** A non-tenant address now stops with a plain message (add them to the Microsoft 365 tenant first — a guest counts — then invite by their tenant address) and leaves no orphan artifacts folder.
+- **permission-changes:** an external share refused by the tenant (`EXTERNAL_SHARE_BLOCKED` from onedrive adapter 2.7.1, also `EXTERNAL_SHARE_UNSUPPORTED` / `POLICY_DENIED`) reads "your Microsoft 365 / Google Workspace sharing settings don't allow sharing with people outside the org" plus the backend's reason, never "not a valid account" (finding 72); OneDrive outside-org rows say Microsoft emails an invitation.
+
+### Fixed — upgrades and publishing
+- **publish-updates 3.20.1 Step 0g enforces the 3.x → 4.x gate (findings 61, 64)** using the versions the org will be on after this publish (a marketplace or collection update in the same publish counts), and halts with the list of blockers. `upgrade/3-to-4.md` points to it.
+- **apply-updates 4.2.2 removes retired capabilities (finding 69).** Step 1.6 archives the old `permission-change-helper` entry and folders with the helper; Step 3 lists any capability core or the marketplace dropped and archives it in the confirmed plan; the manifest sync skips such orphans instead of failing the whole collection.
+- **apply-updates accepts several operations per update entry** (`collection-update` plus `provider-register` / `provider-deregister`; finding 62).
+- **Migration 7 says when a private space predates the org** (finding 68).
+- **regenerate-bootstrap builds the zip in a sandbox temp dir** (the Cowork mount refuses zip's temp files) and uploads raw bytes with a size + SHA read-back (finding 67); create-org Step 12 likewise.
+- **`/shared/dist/` is rewritten only by create-org Step 11 and publish-updates 6.5** (finding 74); install, download and upgrade defer to the next publish.
+- **Dotfiles are never uploaded or deleted by the sync** (`.git*`, `.github/`, `.vscode/`, `.idea/`, `.DS_Store`; `.claude/`, the cowork-plugin manifest files and `.gitkeep` are kept) — publish-updates Step 0, create-org Step 9, apps/ copies (finding 23).
+
+### Fixed — create-org
+- **No raw-GitHub fetch of the adapter directory before cloning** (finding 6): Step 3 uses the fixed backend list or an existing listings clone, and 3c checks the choice against the fresh clone.
+- **Resumable after Step 8** (finding 53): install-state records `phase3-in-progress` / `phase3_step`; a re-run resumes instead of routing to edit-org (edit-org 3.5.2 hands it back); `current-state.md` lives at `.agent-index/create-org-current-state.md` until the workspace exists.
+- **Uploads in ~10-file batches, safe to re-run** (finding 54); **Step 9.5 provisions one collection at a time and creates every collaborative-acls folder before its grants** (finding 55).
+
+### Fixed — members and sessions
+- **member-bootstrap re-reads org-config and the registry once (~30 s) when a first sign-in sees a stale copy** (finding 44).
+- **session-start tells a member when their access to a collection was removed** outside agent-index; `member_read_grant` is documented as a cache verified by publish-updates 6e / apply-updates M4 (finding 20).
+- **permission-changes notes access that is more than a row needs** ("already has writer — more than this needs") and verify-workspace-policy 1.0.3 reports member-writable collection code folders, with the SharePoint explanation (finding 65).
+- **standards `staletmpinject` covers every scratch file** — `mktemp` only, never a fixed `/tmp` name (finding 60).
+
+### Changed — wording
+- Install paths: `{type}` is the singular `skill` / `task`; an entry's `installed_path` wins, so 3.x installs that recorded `skills/` / `tasks/` keep them (finding 70). The upgrade flow writes the local manifest as `manifest.json` (finding 70). Core `*-setup.md` files name the collection-qualified install path (finding 14).
+- **`collection-authoring-guide.md` (v1.8.1)** — the normative setup-responses format is stated in org-setup Phase 4b and here (finding 14).
+
+### Fixed — second round (OneDrive retest findings 76–84, bug review 2026-10-15)
+- **create-org Step 1 detects an existing org for admins off the Shared Drive** (bug `20261011-8d20ea22-183003-2dea`; Kallista Salak, core#19). The org counts as configured if either the id check or the path check finds `org-config.json`; a decline, a check that couldn't run, or local evidence of an earlier org all halt instead of starting a fresh install. Merged with two adjustments: the finding-53 "this task's own unfinished org → resume" test runs first, and on OneDrive the id check uses the drive-qualified `id:{drive_id}:{org_config_id}`. **Step 8 refuses to overwrite an existing `org-config.json`** (her recommended follow-up, `createorgoverwrite`).
+- **publish-updates lists remote leftovers** — skip-listed files, anything under a directory the clone no longer has, empty folders — on every run and offers them for deletion as a separate confirmed list (finding 76, bug `20260824-68dff8bf-021702-b49a`); `channel_head` is the string `"channel/<name>@<sha7>"` (finding 77); 6e also repairs the all-members reader grant on `/shared` (bug `20260803-8d20ea22-231012-b7c2`); Step 0a uses the commits-LIST endpoint for the head SHA (bug `20260617-8d20ea22-165359-6715`); Step 0b regenerates a stale bootstrap zip even on a no-diff publish (bug `20260803-8d20ea22-230939-a1f3`).
+- **apply-updates:** scratch files via `mktemp` only, "up to date" cross-checked against `latest.json`, Migration 5 never lowers a version (bug `20260928-8d20ea22-140909-e0a9`); `manifest_sync` entries for collections with nothing installed are dropped (finding 82); `apps/` is overwritten in place and `pending-update-plan.json` is marked resolved, so the Cowork mount's delete block can't stall an update (finding 83).
+- **standards:** durable read-back waits ~5 s and re-reads once before declaring a mismatch (finding 78); an `authenticated: false` with `network_error` / `tls_or_proxy_error` / `credential_write_failed` (gdrive 2.11.5) is reported, not re-authenticated — session-start and member-bootstrap too (bug `20260822-8d20ea22-143449-a1c4`).
+- **permission-changes:** an outside-org share refused with no policy-specific reason reads "refused to share outside the org — usually the tenant's external-sharing setting" plus the backend's text (finding 84).
+- **lib/clone:** a collections entry with `version` clones tag `v<version>` and fails loud if it's missing (bug `20260926-8d20ea22-133903-0ddf`); a target folder that isn't a git repo is cloned into when empty, otherwise reported plainly, and git's own error text is passed through (bug `20261010-8d20ea22-145943-72ef`).
+- **session-bootstrap hook finds the project dir from its own location** when `CLAUDE_PROJECT_DIR` is unset (bug `20260822-8d20ea22-143450-b7e2`).
+
+### Fixed — third round (Dev Two retest findings 85–90)
+- **publish-updates 6a records `source_ref` / `source_commit`** (and `source_tag` for tags) on the core and marketplace org-config entries from clone-resolution, so a channel org's org-config matches published-state (finding 89).
+- **apply-updates and org-setup add routing phrases only for capabilities the member has installed** (core and marketplace exempt); existing phrases are kept (finding 90).
+- **The bootstrap-zip content hash is reproducible** — computed over the input files (the `.plugin`'s inner files, never the archive, which embeds timestamps) as sorted `path<TAB>sha256` lines, so publish-updates Step 0b's check can recompute it (finding 91; the first publish after upgrading regenerates the zip once).
+- **invite-member says when a Google Drive address may have no Google account** — detected only when the share fails; the halt message says so, and the cleanup leaves nothing (finding 87).
+
 ## [4.0.0] — 2026-10-13 — Permission helper removed
 
 **MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).
@@ -843,6 +891,7 @@ helper-go 0.4.0 bare-ID specs already work on My Drive unchanged (verified live 
 ### Added
 
 - **`standards.md` § "Cache-busting directory/version fetches"** — normative rule that any task fetching a `raw.githubusercontent.com` directory/version URL must append a unique cache-buster, so future authored tasks don't reintroduce the silent-staleness footgun.
+  > **Correction (2026-10-01).** This section no longer exists. It was replaced in [3.11.0] by `standards.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback", which supersedes the cache-buster rule.
 
 ### Notes
 

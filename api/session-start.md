@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.2.0
+version: 3.2.1
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -80,14 +80,19 @@ Parse the JSON response.
 **If `authenticated: true`:** Confirm connectivity by calling `aifs_exists`:
 
 ```bash
+# gdrive
 bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"id:{org_config_id}"}'
+# onedrive
+bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/org-config.json"}'
 ```
 
-`{org_config_id}` is local `agent-index.json` → `remote_filesystem.connection.org_config_id`. **On Google Drive, read org-config by id, not by path** (`memberpathreads`, core 4.0.0 live test): a member who isn't a Shared Drive member can't resolve `/org-config.json` reliably, and before gdrive adapter 2.11.3 that lookup could return another org's file. **On OneDrive keep the path** (`aifs_read("/org-config.json")`; a bare `id:` there resolves against the member's own drive). If the read succeeds and its `remote_filesystem.connection.drive_id` (OneDrive: `site_id`) equals the local `agent-index.json` value, remote connectivity is confirmed; keep the parsed org-config for the later steps. Proceed to Step 3.
+`{org_config_id}` is local `agent-index.json` → `remote_filesystem.connection.org_config_id`. **On Google Drive, read org-config by id, not by path** (`memberpathreads`, core 4.0.0 live test): a member who isn't a Shared Drive member can't resolve `/org-config.json` reliably, and before gdrive adapter 2.11.3 that lookup could return another org's file. **On OneDrive keep the path** (`aifs_read("/org-config.json")`; a bare `id:` there resolves against the member's own drive and returns `FILE_NOT_FOUND` — finding 63; the only id fallback there is `id:{drive_id}:{org_config_id}`). Rule: runtime-reference.md § "Addressing: Owned Content and Sharing". If the read succeeds and its `remote_filesystem.connection.drive_id` (OneDrive: `site_id`) equals the local `agent-index.json` value, remote connectivity is confirmed; keep the parsed org-config for the later steps. Proceed to Step 3.
 
 **If `authenticated: true` but the org-config read fails (or belongs to another drive):** Proceed to Step 3 with a connectivity warning queued for Step 8. The member can still use locally installed capabilities.
 
 > "The remote filesystem is authenticated but the org configuration could not be read. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until connectivity is restored. Say '@ai:member-bootstrap' if you'd like to troubleshoot."
+
+**If `authenticated: false` with `reason` `network_error`, `tls_or_proxy_error` or `credential_write_failed`** (gdrive adapter 2.11.5+, bug `20260822-8d20ea22-143449-a1c4`): this is not an expired sign-in, so do **not** start re-authentication. Say what failed in one line using the adapter's `detail` ("I couldn't reach Google Drive: {detail}" / "…your network's proxy or certificate blocked it…" / "…I couldn't save your refreshed sign-in locally…") and continue to Step 3 with the same queued notice as a failed re-auth. Any other reason (`expired`, `revoked`, `no_credential`, `refresh_failed`, or none):
 
 **If `authenticated: false`:** Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
 
@@ -106,7 +111,7 @@ Read `preferences.md` from the member's local workspace at `members/{member_hash
 Extract the `always_on_skills` list. For each skill listed:
 
 1. Look up the skill in the registered member index from Step 1
-2. If found: read the skill definition file from its `installed_path`
+2. If found: read the skill definition file from its local `installed_path` (a value starting `members/` is project-relative, otherwise relative to `members/{member_hash}/`). If the local file is missing and you fall back to the collection's remote copy (gdrive `id:{folder_id}/...`, OneDrive the path) and that read fails with `ACCESS_DENIED`, see **Collection access removed** under Directives
 3. Load the skill's `Directives` section into active session context
 4. Mark the skill as loaded
 
@@ -157,7 +162,7 @@ If enabled, perform a lightweight update check. This step uses two mechanisms: t
 - If they match: the member is current. No notice needed.
 - If the file does not exist or cannot be read: fall through to the direct version checks below.
 
-Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists, the member has an interrupted update from a previous session. Queue a higher-priority notice:
+Also check for a pending update plan at `.agent-index/install-state/pending-update-plan.json`. If it exists **and its `status` is not `"resolved"`** (apply-updates marks finished plans resolved instead of deleting them — finding 83), the member has an interrupted update from a previous session. Queue a higher-priority notice:
   > "You have a pending update that was interrupted last session. Say '@ai:update' to finish applying it."
 
 **Direct version checks (fallback): none.** When there is no `latest.json` (the admin hasn't published updates yet), session-start has nothing to compare against and queues no update notice. The infrastructure and collection checks that used to sit here compared against `/shared/marketplace-cache/`, which is decommissioned (no writer since marketplace 2.17.0), so they could only skip. They were removed in CI-017. Capability versions aren't compared either. Capabilities have their own version numbers, independent of their collection's version (core 3.7.0), so comparing a capability's version with its collection's `collection.json` version reports almost every capability as upgradable (`capversionfallback`, 3.32.0 live test: "62 of 68" on a minutes-old install). Capability upgrades reach members through org updates (`@ai:update`) and `@ai:setup`; don't queue a capability-upgrade notice from a version comparison.
@@ -209,7 +214,7 @@ If no task is indicated and `task_state_loading` is `lazy` (default):
 If Step 2 confirmed remote connectivity: read the member's `org_role` from `members-registry.json` — on gdrive `aifs_read("id:{resource_ids.members_registry}")`, on OneDrive `aifs_read("/members-registry.json")` (look up by `member_hash`). If remote connectivity is unavailable, skip this step entirely — role-based suggestions require remote access.
 
 If the member has an `org_role` set (not null):
-1. Use the org-config read by id in Step 2 and find the matching role in `org_roles`
+1. Use the org-config read in Step 2 and find the matching role in `org_roles`
 2. Get the role's `default_collections` list
 3. Compare against the member's installed capabilities in the local `member-index.json` — specifically, check which collections the member has at least one skill or task installed from
 4. For each collection in `default_collections` that the member has NO installed skills or tasks from: queue a notice for the final step
@@ -274,6 +279,8 @@ Available tools: `aifs_read`, `aifs_write`, `aifs_list`, `aifs_exists`, `aifs_st
 The exec approach uses a persistent path cache on disk (path-cache.json in the credential store) to avoid redundant Google Drive API calls between invocations. The first call to a new path may be slower while the cache warms up; subsequent calls benefit from cached path→ID resolution.
 
 If the shell wrapper is missing, the exec bundle was not included in the bootstrap zip. See Step 2 for the specific notices.
+
+**Collection access removed (finding 20).** org-config `installed_collections[].member_read_grant: "granted"` is a cached claim (runtime-reference.md § "Remote access failures (detail)"); access removed in the Drive or SharePoint UI leaves it stale. If a member's read of a collection (`/{collection}/...` or `id:{folder_id}/...`) returns `ACCESS_DENIED` while org-config reads fine, believe the failure, not the flag: don't retry in a loop, and queue one notice for Step 8 per collection: *"Your access to {collection} was removed outside agent-index, so its skills and tasks won't load. Your admin's next publish (`@ai:publish-updates`), or `@ai:install-collection {collection}` → Apply access only, restores it."* Continue with the rest of session start. (A `FILE_NOT_FOUND` / `PATH_NOT_FOUND` is not this case — that's an addressing form to retry the other way first.)
 
 ### Behavior
 

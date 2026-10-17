@@ -6,7 +6,8 @@
 # Which ref each repo gets is decided by resolve-refs.js (core 3.32.0), shared with the bash twin
 # so the two platforms cannot disagree about "the highest tag". Distribution channels: a manifest
 # "channel" makes every repo that has a "channel/<channel>" branch come from that branch head; the
-# rest fall back to the normal rule (infra: highest v* tag; collections: default-branch head).
+# rest fall back to the normal rule (infra: highest v* tag; collections: tag v<version> when the
+# entry has a "version", fail loud if that tag is missing -- else default-branch head).
 # Every run records its decisions in <install_root>/.agent-index/clone-resolution.json.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File clone-repos.ps1 -Manifest <path-to-manifest.json>
@@ -69,6 +70,19 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
     if ($mode -eq "infra" -and $rel.Count -gt 0) {
       $t = $rel[-1]; $planRepos += [pscustomobject]@{ name=$n; git_url=$u; mode=$mode; ref_type="tag"; ref=$t; commit=$tags[$t]; want_version="$($repo.version)" }; continue
     }
+    if ($mode -eq "collections" -and "$($repo.version)") {
+      # bug 20260926-8d20ea22-133903-0ddf: pin to the manifest release, no default-branch fallback (tagnofallback)
+      $t = "v" + ("$($repo.version)" -replace '^v','')
+      if ($tags.ContainsKey($t)) { $planRepos += [pscustomobject]@{ name=$n; git_url=$u; mode=$mode; ref_type="tag"; ref=$t; commit=$tags[$t]; want_version="$($repo.version)" }; continue }
+      if ($rel.Count -eq 0) {
+        # zero release tags: branch-HEAD distribution, phantom-checked below against want_version
+        if (-not $dflt) { if ($heads.ContainsKey("main")) { $dflt = "main" } elseif ($heads.ContainsKey("master")) { $dflt = "master" } }
+        if ($dflt) { $planRepos += [pscustomobject]@{ name=$n; git_url=$u; mode=$mode; ref_type="branch_head"; ref=$dflt; commit=$heads[$dflt]; want_version="$($repo.version)" }; continue }
+        $planErrors += [pscustomobject]@{ name = $n; error = "remote has no default branch and no usable tag" }; continue
+      }
+      $planErrors += [pscustomobject]@{ name = $n; error = ("release tag " + $t + " not found on the remote (manifest version " + $repo.version + "); refusing to fall back to the default branch (tagnofallback)") }
+      continue
+    }
     if (-not $dflt) { if ($heads.ContainsKey("main")) { $dflt = "main" } elseif ($heads.ContainsKey("master")) { $dflt = "master" } }
     if (-not $dflt) { $planErrors += [pscustomobject]@{ name = $n; error = "remote has no default branch and no usable tag" }; continue }
     $planRepos += [pscustomobject]@{ name=$n; git_url=$u; mode=$mode; ref_type="branch_head"; ref=$dflt; commit=$heads[$dflt]; want_version="$($repo.version)" }
@@ -92,27 +106,50 @@ function Clear-Lock([string]$dir) {
   if (Test-Path $lock) { Remove-Item -Force $lock -ErrorAction SilentlyContinue }
 }
 
+# Run git; return "" on success, else "git <subcommand> failed: <git's own output>" (one line).
+function Invoke-Git([string[]]$GitArgs) {
+  $out = & git @GitArgs 2>&1 | ForEach-Object { "$_" }
+  if ($LASTEXITCODE -eq 0) { return "" }
+  $sub = if ($GitArgs[0] -eq "-C") { $GitArgs[2] } else { $GitArgs[0] }
+  $txt = (@($out) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() }) -join " "
+  if (-not $txt) { $txt = "exit code $LASTEXITCODE" }
+  return ("git " + $sub + " failed: " + $txt)
+}
+
+# Bug 20261010-8d20ea22-145943-72ef: a target folder that exists but has no .git used to be treated
+# as a clone (fetch/reset against a non-repo, errors discarded). Now: empty -> clone into it;
+# not empty -> refuse. Returns "clone" | "repo" | an error string.
+function Get-CloneTarget([string]$dir) {
+  if (-not (Test-Path -LiteralPath $dir)) { return "clone" }
+  if (Test-Path -LiteralPath (Join-Path $dir ".git")) { return "repo" }
+  if (@(Get-ChildItem -Force -LiteralPath $dir).Count -eq 0) { return "clone" }
+  return ("exists but is not a git repo: " + $dir + " (move or delete it, then re-run)")
+}
+
+# Both checkouts return "" on success, else the failure detail.
 function Checkout-Branch([string]$dir, [string]$url, [string]$branch) {
   # clone or refresh to the branch head; the explicit refspec also fixes stale detached shallow clones
-  if (-not (Test-Path $dir)) { & git clone --depth=1 --branch $branch $url $dir 2>$null | Out-Null; return ($LASTEXITCODE -eq 0) }
+  $tgt = Get-CloneTarget $dir
+  if ($tgt -eq "clone") { return (Invoke-Git @("clone", "--depth=1", "--branch", $branch, $url, $dir)) }
+  if ($tgt -ne "repo") { return $tgt }
   Clear-Lock $dir
-  & git -C $dir fetch --depth=1 origin ("+refs/heads/" + $branch + ":refs/remotes/origin/" + $branch) 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) { return $false }
+  $e = Invoke-Git @("-C", $dir, "fetch", "--depth=1", "origin", ("+refs/heads/" + $branch + ":refs/remotes/origin/" + $branch))
+  if ($e) { return $e }
   & git -C $dir reset --hard 2>$null | Out-Null
-  & git -C $dir checkout -f -B $branch ("origin/" + $branch) 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) { return $false }
-  & git -C $dir reset --hard ("origin/" + $branch) 2>$null | Out-Null
-  return ($LASTEXITCODE -eq 0)
+  $e = Invoke-Git @("-C", $dir, "checkout", "-f", "-B", $branch, ("origin/" + $branch))
+  if ($e) { return $e }
+  return (Invoke-Git @("-C", $dir, "reset", "--hard", ("origin/" + $branch)))
 }
 
 function Checkout-Tag([string]$dir, [string]$url, [string]$tag) {
-  if (-not (Test-Path $dir)) { & git clone --depth=1 --branch $tag $url $dir 2>$null | Out-Null; return ($LASTEXITCODE -eq 0) }
+  $tgt = Get-CloneTarget $dir
+  if ($tgt -eq "clone") { return (Invoke-Git @("clone", "--depth=1", "--branch", $tag, $url, $dir)) }
+  if ($tgt -ne "repo") { return $tgt }
   Clear-Lock $dir
-  & git -C $dir fetch --depth=1 origin ("+refs/tags/" + $tag + ":refs/tags/" + $tag) 2>$null | Out-Null
-  if ($LASTEXITCODE -ne 0) { return $false }
+  $e = Invoke-Git @("-C", $dir, "fetch", "--depth=1", "origin", ("+refs/tags/" + $tag + ":refs/tags/" + $tag))
+  if ($e) { return $e }
   & git -C $dir reset --hard 2>$null | Out-Null
-  & git -C $dir checkout -f $tag 2>$null | Out-Null
-  return ($LASTEXITCODE -eq 0)
+  return (Invoke-Git @("-C", $dir, "checkout", "-f", $tag))
 }
 
 $results = @()   # each: @{ name; ok; detail }
@@ -124,19 +161,19 @@ foreach ($r in @($plan.repos)) {
   $name = "$($r.name)"; $url = "$($r.git_url)"; $type = "$($r.ref_type)"; $ref = "$($r.ref)"; $want = "$($r.want_version)"
   $dir = Join-Path $installRoot $name
   try {
-    $okCheckout = if ($type -eq "tag") { Checkout-Tag $dir $url $ref } else { Checkout-Branch $dir $url $ref }
-    if (-not $okCheckout) { $results += @{ name=$name; ok=$false; detail="could not check out $ref" }; continue }
+    $coErr = if ($type -eq "tag") { Checkout-Tag $dir $url $ref } else { Checkout-Branch $dir $url $ref }
+    if ($coErr) { $results += @{ name=$name; ok=$false; detail=("could not check out " + $ref + " -- " + $coErr) }; continue }
     if ($mode -eq "collections" -and -not (Test-Path (Join-Path $dir "collection.json"))) { $results += @{ name=$name; ok=$false; detail="collection.json missing after clone" }; continue }
     $ver = Read-JsonVersion $dir
     $sha = "$(& git -C $dir rev-parse HEAD 2>$null)".Trim()
-    if ($type -eq "branch_head" -and $mode -eq "infra" -and ((-not $ver) -or ($want -and ($ver -ne $want)))) {
+    if ($type -eq "branch_head" -and ($mode -eq "infra" -or $want) -and ((-not $ver) -or ($want -and ($ver -ne $want)))) {
       $results += @{ name=$name; ok=$false; detail="ERROR: no release tag found for $name and version does not match (want=$want got=$ver) -- phantom/never-released (tagnofallback)" }
       continue
     }
     $label = switch ($type) {
       "channel" { "(channel)" }
-      "tag"     { "(release tag)" }
-      default   { if ($mode -eq "collections") { "(collection, default-branch head)" } else { "(branch-HEAD distribution, no release tags)" } }
+      "tag"     { if ($mode -eq "collections") { "(collection, release tag from manifest version)" } else { "(release tag)" } }
+      default   { if ($mode -eq "collections" -and -not $want) { "(collection, default-branch head -- no version in manifest)" } else { "(branch-HEAD distribution, no release tags)" } }
     }
     $short = if ($sha.Length -ge 7) { $sha.Substring(0,7) } else { $sha }
     $results += @{ name=$name; ok=$true; detail="$ref@$short $label" }

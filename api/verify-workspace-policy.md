@@ -1,7 +1,7 @@
 ---
 name: verify-workspace-policy
 type: task
-version: 1.0.2
+version: 1.0.3
 collection: agent-index-core
 description: Admin diagnostic task. Verifies the Workspace-level policies that the access-control model depends on (per-folder ACLs allowed, per-file sharing with non-drive-members allowed, all-members Google Group exists and is reachable, drive base role is sane). Reports findings; does not modify policy.
 stateful: false
@@ -27,6 +27,7 @@ writes_to: null
 - `agent-index-filesystem-gdrive`'s `contract_version` is at v2.0.0.
 - The org's shared drive (if applicable) is reachable and the calling admin has access.
 - An ad-hoc sharing test against a sentinel resource succeeds (validates that per-folder sharing with non-drive-members works in this Workspace).
+- Collection code folders are not writable by the all-members group (informational; finding 65).
 
 **What this task cannot directly verify** (Workspace admin queries require Admin SDK credentials agent-index does not have):
 - Whether "Allow people who aren't shared drive members to access files" is enabled at the Workspace level.
@@ -56,7 +57,7 @@ For the second list, the task surfaces a checklist with direct links to the rele
 
 ### Step 1: Confirm caller is an admin
 
-Read `org-config.json`. Verify the calling member is in the `admins` array. If not: surface "verify-workspace-policy is admin-only — its results would be uninformative for non-admins anyway, since some checks require admin-level Drive access." Stop.
+Read `org-config.json` (gdrive `id:{org_config_id}`, OneDrive `/org-config.json` — runtime-reference.md § "Addressing: Owned Content and Sharing"). Verify the calling member is in the `admins` array. If not: surface "verify-workspace-policy is admin-only — its results would be uninformative for non-admins anyway, since some checks require admin-level Drive access." Stop.
 
 ### Step 2: Check `all_members_group` field is set
 
@@ -99,6 +100,15 @@ If this returns results: drive is reachable. OK.
 
 If it returns `ACCESS_DENIED` or `INVALID_SCOPE`: WARN. The admin doesn't have Shared Drive access in their current OAuth session, which means even Workspace-level admin actions wouldn't be able to fix things from this session.
 
+### Step 5.5: Check that collection code folders are read-only for members (finding 65)
+
+For each `installed_collections[]` entry in org-config (core, marketplace and every installed collection), read the code folder's access: on gdrive `aifs_get_permissions("id:{folder_id}", include_inherited=true)`, on OneDrive `aifs_get_permissions("/{name}", include_inherited=true)` (a bare `id:` there resolves against your own drive — finding 63). If the `all_members_group` (or a broader site group) holds `writer` there, directly or inherited, record **INFO: member-writable code** for that collection. Members only need `reader`; a member could edit a capability definition every other member then runs.
+
+This check is informational. It never changes access, and the permission-changes procedure never removes access it wasn't asked to (it reports such rows as "already has writer — more than this needs").
+
+- **OneDrive explanation:** on a SharePoint site, the site's Members group is an editor of the whole document library, and the adapter deliberately never breaks inheritance (decision O5), so collection folders inherit member write. To make code read-only, a SharePoint admin restricts those folders in SharePoint (folder → Manage access → Advanced settings → Stop Inheriting Permissions, then set the members group to Read), or keeps members as site Visitors and grants write only where collections need it. Weigh that against the collections' own writable areas under `/shared/`.
+- **gdrive explanation:** the group's writer grant came from a manual share or an older install. Remove it in Google Drive (folder → Share), keeping the group as Viewer.
+
 ### Step 6: Surface the findings + manual-check checklist
 
 ```
@@ -109,6 +119,7 @@ Direct checks:
   ✓ Adapter contract version: {value}
   ✓ All-members group has access to /CLAUDE.md: {Yes / No / Not found}
   ✓ Shared Drive reachable: {Yes / N/A — personal Drive / No}
+  ℹ Collection code read-only for members: {Yes / member-writable: {collections} — see note}
 
 Manual checks (Workspace admin needs to confirm in admin.google.com):
   □ "Allow people who aren't shared drive members to access files" enabled
@@ -142,7 +153,7 @@ If any direct check failed: surface specific remediation steps for each.
 
 - Never attempt to read Workspace admin APIs. agent-index doesn't have those credentials and shouldn't pretend to.
 - The probe of all-members-group reachability uses an existing org-readable resource (`/CLAUDE.md`), not a sentinel write — the task should be safe to run any number of times without side effects.
-- **This task is read-only and must remain so.** All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`) per `agent-index-core/standards.md` § "Permission changes: list, confirm, apply, verify" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
+- **This task is read-only and must remain so.** The Step 5.5 member-writable finding is reported, never fixed here. All probes use `aifs_get_permissions` and `aifs_search` (the read-only ops in the v2.0 adapter contract). If a future enhancement requires a permission-modifying remediation step (e.g., auto-fixing a misconfigured share), the change MUST go through the core permission-changes procedure (`/agent-index-core/internal/permission-changes.md`) per `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify" — never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - v1.0 is on-demand only. Session-start integration is a separate change that reads this task's findings and surfaces non-fatal warnings to admin sessions.
 
 ### Edge Cases
