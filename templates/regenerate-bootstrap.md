@@ -117,7 +117,7 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_write '{"path":"/sha
 
 **`content_file` points at the RAW zip bytes** (`"encoding":"base64"` tells the executor to read the file as bytes). Never base64-encode the zip yourself and pass that text as the file: the executor would store the base64 text as the zip and publish a corrupt archive (seen on ms_install_10, finding 67).
 
-**Read back before going on.** `aifs_stat` the uploaded zip and compare its `size` with the local zip's byte count, then read it back to a file, `head -c <size>`, and compare SHA-256 with the local zip (the Canonical SHA-256 rule in `backend-distribution.md`). On a mismatch, re-upload once from `<build>` and re-check; if it still differs, halt naming the file.
+**Read back before going on.** `aifs_stat` the uploaded zip and compare its `size` with the local zip's byte count, then read it back to a file, `head -c <size>`, and compare SHA-256 with the local zip. `aifs_read` returns a binary file as text, `base64:` followed by the base64 data, so strip that prefix and decode it to bytes first (finding 94); the decoded byte count is what equals `size` (the Canonical SHA-256 rule in `backend-distribution.md`). On a mismatch, re-upload once from `<build>` and re-check; if it still differs, halt naming the file.
 
 ### Step 7: Re-share with all-members group
 
