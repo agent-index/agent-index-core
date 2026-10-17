@@ -3,7 +3,7 @@ name: preferences-management
 type: skill
 version: 3.0.2
 collection: agent-index-core
-description: Enables members to configure, review, and update their agent-index session preferences and invocation aliases through natural language without editing configuration files directly.
+description: Enables members to configure, review, and update their agent-index session preferences, invocation aliases, and natural-language routing phrases through natural language without editing configuration files directly.
 stateful: true
 always_on_eligible: false
 dependencies:
@@ -18,7 +18,7 @@ Every member's agent-index session is shaped by a small set of preferences — w
 
 This skill serves two distinct moments in a member's lifecycle. The first is onboarding, where it runs a guided setup interview that establishes baseline preferences before any skills or tasks are installed. The second is ongoing maintenance, where it responds to natural language requests to view, update, or reset any preference at any time.
 
-The skill owns two files in the member's profile: `preferences.md` and the `alias` and `alias_override` fields within `member-index.json`. It reads both, interprets natural language requests against them, makes targeted updates, and confirms what changed. Members never need to know the file structure — they interact with their preferences the same way they interact with everything else in agent-index: by telling Claude what they want.
+The skill owns the member's `preferences.md`, the `alias` and `alias_override` fields within `member-index.json`, and the member's routing phrases in `routing.json`. It reads them, interprets natural language requests against them, makes targeted updates, and confirms what changed. Members never need to know the file structure — they interact with their preferences the same way they interact with everything else in agent-index: by telling Claude what they want.
 
 ### When This Skill Is Active
 
@@ -28,7 +28,7 @@ Outside of explicit invocation, this skill is not active. It does not monitor or
 
 ### What This Skill Does Not Cover
 
-This skill manages session behavior preferences and invocation aliases only. It does not install or uninstall skills and tasks — that is the Org Setup Skill. It does not configure task-specific parameters — those are managed by each task's own setup. It does not manage org-level or collection-level configuration — that is the marketplace and collection setup flow.
+This skill manages session behavior preferences, invocation aliases, and routing phrases only. It does not install or uninstall skills and tasks — that is the Org Setup Skill. It does not configure task-specific parameters — those are managed by each task's own setup. It does not manage org-level or collection-level configuration — that is the marketplace and collection setup flow.
 
 ---
 
@@ -36,7 +36,7 @@ This skill manages session behavior preferences and invocation aliases only. It 
 
 ### Behavior
 
-When invoked, read the current state of both `preferences.md` and the alias fields in `member-index.json` before responding to any request. Always operate from the current state of these files — never from a cached or assumed state.
+When invoked, read the current state of `preferences.md` and the alias fields in `member-index.json` before responding to any request — and `routing.json` as well when the request is about routing phrases. Always operate from the current state of these files — never from a cached or assumed state.
 
 Interpret natural language requests for preference changes broadly and charitably. Members will not use field names or technical syntax. "Make the startup message shorter" maps to `session_summary_verbosity: brief`. "Load my email task automatically" maps to adding `email-manager` to `eager_loading_exceptions`. Translate intent to the correct field and value, show the member what you're about to change, confirm, then write.
 
@@ -105,6 +105,51 @@ If the member attempts to set an alias that is already in use by another entry (
 > "That alias is already used by {other-skill-or-task-name}. If you assign it here, the previous assignment will be ambiguous. Would you like to reassign it, choose a different alias, or leave things as they are?"
 Do not write until the collision is resolved.
 
+### Routing Phrase Management
+
+The member's routing phrases live in `members/{member_hash}/profile/routing.json`. Each mapping is `{phrase, capability, collection, description, source, active}`. `source` is `collection-default` (placed by `apply-updates` from a collection's declared triggers) or `member-custom` (set or changed by the member through this skill). `active: false` is a recorded choice: the phrase never routes.
+
+How routing *uses* these mappings (precedence, matching, collisions) belongs to the session-start routing step, not to this skill. This section covers how this skill **changes** them so that each change survives the next update.
+
+The rule that matters: **`apply-updates` merges collection defaults by exact phrase.** A default phrase that is missing from the file is added back on the next update. A default phrase marked `member-custom` is left alone. Every operation below follows from that.
+
+**"Show my phrases" / "edit my routing"**
+List active mappings grouped by collection and capability, showing the phrases for each. Mark the ones the member has customized. Mention how many phrases are switched off, and show them only if asked. Use capability names and descriptions, not file fields.
+
+**"Add a phrase"** (e.g. "make 'what's on deck' open my daily view")
+1. Resolve the target to an installed capability in `member-index.json`. If it isn't installed, say so and stop. (`agent-index-core` and `agent-index-marketplace` capabilities are always available and aren't listed in `member-index.json` — finding 90; they count as installed.)
+2. **Check switched-off mappings first.** If a mapping with the same phrase exists with `active: false`, do not add a second row. Switch that row back on and point it at the target: set `active: true`, `source: member-custom`, and its `capability` and `collection`. Confirm with the member as for any change ("'{phrase}' is switched off at the moment. I'll switch it back on and point it at {capability}."), then go to Writing. Compare case-insensitively and ignoring punctuation, as below.
+3. Check the phrase against existing active mappings, comparing case-insensitively and ignoring punctuation:
+   - **Same phrase, different capability:** surface it. "That phrase already opens {capability}. Change it to {new}, or pick a different phrase?" Do not write until resolved.
+   - **Overlap** (the new phrase is contained in, or contains, an active phrase for a different capability): say so. Routing picks the more specific phrase, so both keep working, but the member should know.
+4. Write a new mapping with `source: member-custom`, `active: true`.
+
+**"Change where a phrase goes"**
+Update `capability` and `collection` on the mapping, and set `source: member-custom`. A changed default must be marked custom, or the next update could set it back.
+
+**"Change a phrase's wording"**
+- For a `member-custom` mapping: edit `phrase` in place.
+- For a `collection-default` mapping: **do not edit the text.** Set the original to `active: false` and `source: member-custom`, then add the new wording as a new `member-custom` mapping to the same capability. If the default's text were edited, the next update would find the original wording missing and add it back.
+
+**"Delete a phrase" / "stop using this phrase"**
+First decide whether the phrase is one of a collection's defaults. `source` alone can't tell you: a default whose target or wording the member changed is marked `member-custom` too.
+- `source: collection-default`: it is a default.
+- `source: member-custom`: check the phrase against the declared triggers of every collection the member has installed (from `member-index.json`, plus `agent-index-core` and `agent-index-marketplace`), read from each `collection.json` the same way Reset does. Start with the collection the mapping names, and stop at the first match. It is a default if any collection declares it. Checking only the named collection is not enough: "change where a phrase goes" can move a default to a capability in another collection, so a phrase that now names capture may be one of projects' defaults, and the next projects update would add it back. If any collection's triggers can't be read and no match was found in the ones that could, treat it as a default.
+
+Then:
+- **A default:** set `active: false` and `source: member-custom`. **Never remove the row.** A removed default comes back with the next update, so a deletion that isn't recorded doesn't last.
+- **Not a default** (the member added it, and the collection's triggers were read and don't include it): remove the row.
+
+When the triggers can't be read, switching off is the safe choice. A switched-off row that turns out not to be a default does no harm. A removed row that turns out to be a default comes back on the next update.
+
+**"Reset"** (one phrase, one collection, or all)
+Read the collection's current declared triggers from its `collection.json`. Read it the way CLAUDE.md § "How to execute a skill or task" reads collection files: by id anchor (`id:{folder_id}/collection.json`) on Google Drive, by path (`/{collection}/collection.json`) on OneDrive, where a bare `id:` resolves against the member's own drive (finding 63). Then:
+- For each default phrase in scope whose capability the member has installed (core and marketplace exempt, as in `apply-updates` Phase 4 step 4 — finding 90): restore it with the collection's current `capability`, set `source: collection-default` and `active: true`.
+- Remove `member-custom` rows in scope that are not collection defaults. Before resetting, list exactly what will be removed and what will be restored.
+- If the collection's `collection.json` can't be read, say so and do not reset. Never guess defaults.
+
+**Writing.** Confirm the specific change before writing. Change only the mappings in question; never rewrite unrelated mappings. Update `last_updated`. Read the file back and confirm the change before reporting success. Same discipline as `preferences.md`.
+
 ### Ongoing Preference Updates
 
 For any preference update request outside of the initial interview:
@@ -126,6 +171,7 @@ Common natural language patterns and their mappings:
 | "Warn me earlier about expiring skills" | `deprecation_warning_threshold` | Increase value |
 | "Show me my preferences" | — | Read and display all fields in plain language |
 | "Reset my preferences to defaults" | — | Full reset flow (see Constraints) |
+| "Show my phrases" / "edit my routing" / "add / change / delete / reset a phrase" | `routing.json` | See Routing Phrase Management |
 
 ### Reviewing Preferences
 
@@ -147,9 +193,11 @@ For alias management, be precise. Aliases have exact values — show them exactl
 
 ### Constraints
 
-Never write to `preferences.md` or `member-index.json` without explicit member confirmation of the specific proposed change.
+Never write to `preferences.md`, `member-index.json` or `routing.json` without explicit member confirmation of the specific proposed change.
 
 Never rewrite the entire `preferences.md` file for a single-field update. Write targeted field updates only. This prevents accidentally overwriting fields the member has not touched.
+
+Never remove a routing mapping that is one of a collection's defaults — switch it off (`active: false`, `source: member-custom`) instead. Never mark a mapping `collection-default` unless it was restored from the collection's current triggers by a reset.
 
 Never modify the `alias` field in a `member-index.json` entry — that is the org-assigned default and is set by the installer. Only `alias_override` is member-editable.
 
@@ -170,5 +218,9 @@ If a member asks to set an alias to the full `run agent-index` syntax (e.g., "ma
 If the member's requested alias value contains spaces, path separators, or quotes: explain that aliases must be single tokens without spaces or special characters (other than `:` and `~` which are conventional). Suggest a corrected form.
 
 If `member-index.json` cannot be read during alias management: check `aifs_auth_status()`. If `authenticated: false`, attempt automatic re-authentication via `aifs_authenticate` and retry. If re-auth fails or the file is still unreadable: surface the error, explain that alias management is unavailable until the file is accessible, and suggest '@ai:member-bootstrap' to troubleshoot if this appears to be a workspace or connectivity issue.
+
+If `routing.json` does not exist: **do not create it.** `apply-updates` populates collection defaults only when it initializes a file that doesn't exist yet. A file created here with only the member's custom phrase would stop the defaults from ever being added. Tell the member: "Your routing phrases haven't been set up yet — say '@ai:update' and they will be. Then I can add yours."
+
+If `routing.json` exists but cannot be parsed: do not write to it. Surface the problem and suggest reporting it with '@ai:report-bug'. Never overwrite an unreadable file with a fresh one; that would discard the member's customizations.
 
 If a member asks to manage preferences for another member: this skill manages the current member's preferences only. Org-wide defaults are managed through collection setup, not through this skill.
