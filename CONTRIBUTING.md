@@ -272,7 +272,7 @@ bash ../agent-index-marketplace-developer/lib/preflight-cli.sh --collection .
 
 Exit codes: `0` pass, `1` errors, `2` invocation problem. Always name the repo when citing this file. An unqualified `lib/preflight-cli.sh` reads as a path in whichever repo the reader is standing in, and it does not exist in this one — which has already cost one contributor an hour.
 
-**The two are not interchangeable** (developer collection, `marketplace-eligibility.md` § "Release Gate"). The CLI is a strict subset: it will exit 0 on a tree where the agent task reports errors, because the checks that need agent reasoning are not in it. Treat a clean CLI run as a floor.
+**The two are not interchangeable** (developer collection, `marketplace-eligibility.md` § "Release Gate"). Neither contains the other: the CLI can exit 0 on a tree where the agent task reports errors, because the checks that need agent reasoning are not in it — and the CLI runs a few mechanical checks the agent task doesn't (the Release Gate lists both). Treat a clean CLI run as a floor, not a pass.
 
 ---
 
