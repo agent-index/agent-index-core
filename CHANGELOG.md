@@ -1,6 +1,6 @@
 ﻿# Agent-Index Core — Changelog
 
-## [4.1.0] — <RELEASE_DATE> — Natural-language routing, and standards.md retired
+## [4.1.0] — 2026-10-17 — Natural-language routing, and standards.md retired
 
 Ships the Core Improvements work merged since 4.0.1 (Kallista Salak: CI-009, CI-013, CI-017; core#15, #16, #17, #18, #20, #21, with follow-up #24) plus one permission-changes fix. Pairs with marketplace 2.22.3, developer 1.15.0, projects 4.4.3, strategy 1.3.1, client-intelligence 2.4.3, library 1.7.3, brand-book 1.2.2, bug-reports 1.4.4 and gdrive adapter 2.11.6.
 
