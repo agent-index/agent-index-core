@@ -1,7 +1,7 @@
 ---
 name: verify-workspace-policy
 type: task
-version: 1.0.3
+version: 1.0.4
 collection: agent-index-core
 description: Admin diagnostic task. Verifies the Workspace-level policies that the access-control model depends on (per-folder ACLs allowed, per-file sharing with non-drive-members allowed, all-members Google Group exists and is reachable, drive base role is sane). Reports findings; does not modify policy.
 stateful: false

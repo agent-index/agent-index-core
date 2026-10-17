@@ -1,7 +1,7 @@
 ---
 name: invite-member
 type: task
-version: 1.13.3
+version: 1.13.4
 collection: agent-index-core
 description: Admin-only task that onboards a new agent-index member. Computes the member hash, creates the member's private and shared-artifact directories, applies the member-directory grants through the core permission-changes procedure (admin confirms the exact changes in chat), verifies the member is in the all-members group (M365 group on onedrive, Google Group on gdrive), registers them in members-registry.json, and emails backend-neutral install instructions with a real bootstrap download link.
 stateful: false

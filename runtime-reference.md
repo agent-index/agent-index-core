@@ -98,6 +98,7 @@ What actually changed is recorded by the backend's own activity log (Drive Activ
 | Ownership transfer | My Drive only. Drive emails the new owner, who must accept → `awaiting_recipient` until they do. Shared Drive → `unsupported` | `unsupported` (`NOT_IMPLEMENTED`) |
 | Owner in `aifs_get_permissions` | My Drive owner reported with role `owner` (adapter fix `getpermsownerwriter`) | n/a |
 | Propagation | Changes can take a few seconds to appear; the procedure rechecks before declaring `verify_mismatch` | Same |
+| Inherited result | A child folder's grant can show only as inherited from a parent granted earlier in the same run; an inherited role at or above the requested one counts as applied (finding 93) | Same |
 
 ### Share recipients are the resolved `sharing_identity`, not the roster email
 

@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 4.2.2
+version: 4.2.3
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true

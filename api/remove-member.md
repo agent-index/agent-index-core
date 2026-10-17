@@ -1,7 +1,7 @@
 ---
 name: remove-member
 type: task
-version: 1.4.1
+version: 1.4.2
 collection: agent-index-core
 description: Admin-only task that removes a member from the agent-index roster. Revokes the two member-directory grants invite-member created (through the core permission-changes procedure, each removal confirmed individually), removes their entry from members-registry.json, and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — it does not walk the broader ACL graph; Workspace IT handles identity offboarding.
 stateful: false

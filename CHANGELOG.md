@@ -1,5 +1,28 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.1.0] — <RELEASE_DATE> — Natural-language routing, and standards.md retired
+
+Ships the Core Improvements work merged since 4.0.1 (Kallista Salak: CI-009, CI-013, CI-017; core#15, #16, #17, #18, #20, #21, with follow-up #24) plus one permission-changes fix. Pairs with marketplace 2.22.3, developer 1.15.0, projects 4.4.3, strategy 1.3.1, client-intelligence 2.4.3, library 1.7.3, brand-book 1.2.2, bug-reports 1.4.4 and gdrive adapter 2.11.6.
+
+### Added — natural-language routing (CI-009; bugs 0fa7, 7c3a)
+- **session-start 3.3.0 loads the member's routing phrases (Step 1.5).** It reads `members/{member_hash}/profile/routing.json` locally, keeps the active phrases, and holds a compact table (about 8 KB instead of the ~60 KB file) for the session; custom phrases are marked and win over collection defaults. A missing or unreadable file falls back to the default mappings with one advisory notice and never blocks session start. This is the read path `[3.0.5]` recorded as shipped but never built: apply-updates and org-setup already wrote the file, and nothing read it.
+- **preferences-management 3.1.0 adds Routing Phrase Management:** "show my phrases" / "edit my routing", add, change where a phrase goes, delete and reset. Deleting a collection default switches it off rather than removing it (so the next update doesn't add it back); adding a phrase that is switched off switches it back on.
+- **CLAUDE.md template § "Routing rules"** states the order (explicit alias, member-custom phrase, collection default, default mappings only when `routing.json` is absent or unreadable) and replaces the three claims that described routing behaviour that didn't exist.
+
+### Changed — standards.md retired (CI-013, decision `2026-09-22-retire-standards-md`)
+- **`standards.md` is removed.** Its content moved to three documents: the rendered **CLAUDE.md** (the hot-path rules every session needs; about 23 KB), **`runtime-reference.md`** (permission changes, addressing, members registry, shared artifacts, adapter contract, remote access failures and write constraints, default mappings) and **`admin-distribution.md`** (update-disambiguation, distribution, marketplaces, release procedure, channels, update log, org roles). Marketplace eligibility and authoring requirements moved to the developer collection's `marketplace-eligibility.md` (developer 1.15.0).
+- **Every citation is re-pointed** across core tasks, `collection-authoring-guide.md`, `capability-provider-spec.md`, `org-config-schema.json` and the network-allowlist template; the same pass ran in marketplace, developer, projects, strategy, client-intelligence, and (for citations 4.0.1 added after those PRs) library, brand-book, bug-reports and the gdrive adapter.
+- **Remote write constraints** (dropped with standards.md) are restored in `runtime-reference.md` § "Remote write constraints" (#24).
+
+### Fixed
+- **permission-changes verify accepts access the item inherits from an earlier row in the same run (finding 93).** Installing cx-studio granted all members writer on `/shared/cx-studio` and then on `/shared/cx-studio/public-index`; Google Drive folded the child grant into the parent's, so the re-read showed no separate grant and the run was recorded as partial (`collaborative_acls: pending`) although members had writer. A share now counts as applied when the recipient ends up with at least the requested role, even if only inherited, and the summary line says where the access comes from. Not for `inherit:false` shares. `internal/permission-changes.md` Step 7 and `runtime-reference.md` backend notes say so; test V13.
+- **session-start drops the decommissioned marketplace-cache version checks** (CI-017, core#17). The fallback compared against `/shared/marketplace-cache/`, retired in core 3.30.0; with no `latest.json` there is now no update notice rather than a stale one.
+- **`upgrade/3-to-4.md` §1 no longer says cx-studio 5.1.0 is unreleased** (released 2026-10-17).
+- Capability versions bumped for re-pointed citations: apply-updates 4.2.3, author-collection 3.1.3, create-org 3.15.3, edit-org 3.5.3, invite-member 1.13.4, member-bootstrap 3.13.3, publish-updates 3.20.2, remove-member 1.4.2, validate-collection 3.1.3, verify-workspace-policy 1.0.4, view-permissions 1.0.2.
+
+### Upgrade
+No admin step beyond the usual publish. Members get the routing load and the new CLAUDE.md on `@ai:update`; a member without `routing.json` keeps routing on the defaults until an update creates it.
+
 ## [4.0.1] — 2026-10-17 — OneDrive upgrade fixes and the post-4.0 backlog
 
 Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 member, findings 61–75) plus the items held back from the Google Drive round (findings 6, 8, 14, 20, 23, 44, 50, 53–56). Pairs with onedrive adapter 2.7.1, gdrive adapter 2.11.5, developer 1.14.1, marketplace 2.22.2, projects 4.4.2, library 1.7.2, client-intelligence 2.4.2, bug-reports 1.4.3 and brand-book 1.2.1.
