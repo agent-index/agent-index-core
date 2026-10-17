@@ -1,8 +1,8 @@
 # Collection Authoring Guide
 
 **Companion to:** the developer collection's `marketplace-eligibility.md` (the formal requirements) and `runtime-reference.md` (the runtime rules)
-**Version:** 1.8.0
-**Last Updated:** 2026-10-01
+**Version:** 1.8.1
+**Last Updated:** 2026-10-14
 
 ---
 
@@ -145,7 +145,7 @@ The numbered steps in Setup Completion tell the agent exactly what to write and 
 ```markdown
 ## Setup Completion
 
-1. Write `setup-responses.md` to the member's task directory with all configured parameters in YAML format
+1. Write `setup-responses.md` to the member's task directory with all configured parameters, in the canonical setup-responses format
 2. Write `manifest.json` to the member's task directory
 3. Create empty `triage-corrections.json` with the base schema
 4. Create empty `triage-run-log.json` placeholder
@@ -155,6 +155,13 @@ The numbered steps in Setup Completion tell the agent exactly what to write and 
 ```
 
 Every file the setup creates must be listed here. If a future skill or task depends on a file existing, setup must create it (even as an empty placeholder).
+
+**Setup-responses format is fixed by core, not by your template (finding 14).** Don't describe a format of your own ("in YAML format", flat `key: value` lines). Both responses files use the canonical format defined in `org-setup` Phase 4b step 8, which `apply-updates` machine-parses:
+
+- **Member `setup-responses.md`:** frontmatter `capability`, `collection`, `capability_version`, `completed` (date or `partial`); then the three sections `## Org-Mandated Parameters (from collection setup)`, `## Role-Suggested Parameters`, `## Member Parameters`, all present even when empty; one `### {param_name}` block per parameter with a single-line `- **Value:** {value}` (JSON-encode structured values) and, under Member Parameters, `- **Provenance:** member-overridable | member-defined`.
+- **Org-level `/{collection}/setup/collection-setup-responses.md`:** frontmatter `collection`, `collection_version`, `setup_status` (`complete` | `incomplete`), `completed` (date); then one `## Org-Mandated Parameters` section with the same `### {param_name}` + `- **Value:**` blocks.
+
+Write "in the canonical setup-responses format" in your Setup Completion steps and leave the shape to core.
 
 ---
 
@@ -900,7 +907,7 @@ The Upgrade Behavior section in setup templates exists to guarantee that member 
 
 ### What triggers a MAJOR version
 
-Per the developer collection's `marketplace-eligibility.md` § "Versioning Requirements": breaking changes to setup interfaces, parameter schemas, API member interfaces, or removal of API members. In practice, the most common trigger is restructuring the `setup-responses.md` format — if the YAML shape changes and old responses can't be read as-is, that's a MAJOR bump.
+Per the developer collection's `marketplace-eligibility.md` § "Versioning Requirements": breaking changes to setup interfaces, parameter schemas, API member interfaces, or removal of API members. In practice, the most common trigger is restructuring the `setup-responses.md` contents — if parameters are renamed or reshaped and old responses can't be read as-is, that's a MAJOR bump.
 
 ---
 

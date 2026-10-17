@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.20.0
+version: 3.20.1
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -50,13 +50,13 @@ Optionally, the admin can provide:
 
 ### Step 0a: Pull Upstream Updates (added in core 3.5.0; only when `--check-upstream` flag is passed)
 
-If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` flag, skip this step entirely and proceed to Step 0.
+If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` flag, skip this step entirely and proceed to Step 0g (then Step 0).
 
 **Refused on channel orgs (core 3.32.0).** If org-config `distribution_channel` is set, do not run this step. It overwrites working trees from GitHub default-branch ZIPs, which would silently revert the org to `main`. Say: *"This org runs distribution channel {name}. Refresh its clones with the committed clone script instead (the clone-manifest emitter passes the channel), then publish."* Then continue from Step 0 without pulling.
 
 When `--check-upstream` is present, fetch the latest infrastructure source from GitHub before scanning local. This closes the manual `git pull` step from the admin's mental model — they say one verb and the task pulls upstream + syncs to remote + publishes.
 
-1. Read `agent-index.json` → `infrastructure_directory_url`. Fetch the JSON (30s timeout) **using the Distribution fetch protocol (SHA-pinned) — `admin-distribution.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback"**: resolve the repo's branch head SHA via `api.github.com/repos/{owner}/{repo}/commits/{branch}`, then GET `raw.githubusercontent.com/{owner}/{repo}/{SHA}/{path}`. **Required:** bare branch-form raw URLs are served from a stale fetch-layer cache and `?t=` cache-busters are **stripped on the raw redirect** (bug `20260601-8d20ea22-2`) — an unpinned fetch here reads pre-release versions, concludes "all infrastructure already at upstream," and silently fails to pull a release you just made. If SHA resolution fails, follow the protocol's fallback ladder (jsdelivr → bare URL); a fallback-sourced result is advisory and is **never sufficient** to conclude "already at upstream." Parse.
+1. Read `agent-index.json` → `infrastructure_directory_url`. Fetch the JSON (30s timeout) **using the Distribution fetch protocol (SHA-pinned) — `admin-distribution.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback"**: resolve the repo's branch head SHA via the commits **LIST** endpoint, `api.github.com/repos/{owner}/{repo}/commits?sha={branch}&per_page=1&nonce={epoch}` → `[0].sha` — never the single-commit `commits/{branch}` form, which the fetch layer serves stale (bug `20260617-8d20ea22-165359-6715`) — then GET `raw.githubusercontent.com/{owner}/{repo}/{SHA}/{path}`. **Required:** bare branch-form raw URLs are served from a stale fetch-layer cache and `?t=` cache-busters are **stripped on the raw redirect** (bug `20260601-8d20ea22-2`) — an unpinned fetch here reads pre-release versions, concludes "all infrastructure already at upstream," and silently fails to pull a release you just made. If SHA resolution fails, follow the protocol's fallback ladder (jsdelivr → bare URL); a fallback-sourced result is advisory and is **never sufficient** to conclude "already at upstream." Parse.
 2. For each entry in `infrastructure[]` (currently: `agent-index-core`, `agent-index-marketplace`):
    - Read the local `<project_dir>/<entry-name>/collection.json` → `version` field. If the directory or file is missing locally, treat the local version as "absent."
    - Compare against the directory's `current_version`.
@@ -90,6 +90,21 @@ Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> →
 
 ---
 
+### Step 0g: Core 3.x → 4.x gate (core 4.0.1 — findings 61, 64)
+
+Runs before Step 0 on every invocation, **including `--no-sync` and `--dry-run`**, because Step 0 is what puts the new core files on the backend, where members read capability definitions from. Before 4.0.1 this gate lived only as admin reading in `upgrade/3-to-4.md` §1 and publish-updates never checked it, so a 3.x org could publish core 4.0.0 with helper-calling collections still installed (finding 64).
+
+1. **Does this publish cross 3.x → 4.x?** Target = the local clone's `agent-index-core/collection.json` `version`. Current = org-config `agent_index_version` (read `/org-config.json` as Step 1 does; the admin reads it by path on both backends, with `id:{org_config_id}` as the gdrive fallback), and `published-state.json` `infrastructure["agent-index-core"]` when that file exists; if either is below 4.0.0, the org is on 3.x. The gate applies only when the org is on 3.x and the target is ≥ 4.0.0. Otherwise skip this step silently.
+2. **Work out the version each collection will be on after this publish (finding 61).** Start from org-config `installed_collections[]` (every entry whose `status` is `installed` or `downloaded`), then override with what this same publish carries:
+   - `agent-index-marketplace` — the local clone's `agent-index-marketplace/collection.json` `version` (Step 0 uploads it and Step 6a records it as the `marketplace-update`); under `--no-sync`, use the `collection.json` version already on the backend instead.
+   - every other collection — the `version` in its `collection.json` on the backend (its read base: gdrive `id:{folder_id}`, OneDrive `/{name}`), when that is higher than org-config's: `upgrade-collection` has already uploaded it, and this publish's `collection-update` (Step 3) and 6a writeback record it.
+   Never gate on org-config alone: on an org upgrading from 3.x it still says marketplace 2.15.0 until Step 6a of this publish, although the same publish carries marketplace 2.22.1.
+3. **Evaluate every row** of the minimum-version table in the local clone's `agent-index-core/upgrade/3-to-4.md` §1 against those effective versions, plus that section's live-helper-call search for collections not in the table (third-party or org-authored).
+4. **If anything fails, halt before Step 0** (nothing uploaded, nothing written) with the full list of blockers, in the shape `upgrade/3-to-4.md` §1 shows: "Core 4.0.0 can't be published yet. These collections still use the removed permission helper: `projects` 4.3.1 (needs 4.4.0), … Upgrade them first with `@ai:upgrade-collection`, then publish again." There is no override.
+5. If every row passes, say one line ("✓ 3.x → 4.x gate: every installed collection is ready for core {target}.") and continue to Step 0.
+
+---
+
 ### Step 0: Sync Local Infrastructure to Remote (added in core 3.4.0)
 
 Before computing the diff, walk the admin's local `agent-index-core/` and `agent-index-marketplace/` directories and reconcile against what's at remote. The admin's typical flow is `git pull` to update their local source, then `@ai:publish-updates` to broadcast the change. Pre-3.4.0 publish-updates did not push the new local files to remote — admins had to do that manually before running this task. As of 3.4.0 this step does it for them.
@@ -98,18 +113,18 @@ Before computing the diff, walk the admin's local `agent-index-core/` and `agent
 
 **Pre-publish version-mismatch guard (M3, core 3.22.4 / C.1.3.4).** Before uploading anything, cross-check that the pieces about to be published are version-consistent, and surface any drift for the admin to resolve up front rather than discover mid-publish: (a) the local `agent-index-core/collection.json` `version` and the version the core CHANGELOG's top entry claims (the entry's date may be the `<RELEASE_DATE>` placeholder on a channel org — channel code is unreleased and the date is stamped at release; that's expected, not drift, so don't report it — `channeldateplaceholder`, finding 29); (b) the deployed adapter (`mcp-servers/filesystem/adapter.json` `version`) against the adapter version the core release notes pair with — if core's notes say "pairs with onedrive adapter X.Y.Z" and the deployed bundle is behind, flag it ("deploy the adapter via `@ai:edit-org` first, then publish, or the baseline records the older adapter"); (c) each installed collection's local `collection.json` `version` against its `api/*-manifest.json` `collection_version` (restamp drift). Report drift as a checklist with the resolving action; proceed only on the admin's confirmation. This makes the adapter/core mismatch the ms_install_10 publish caught *by hand* an explicit gate.
 
-**Durable read-back verify on every uploaded file (M2, `collectionjson-tornwrite`, core 3.22.4 / C.1.3.4 — HIGH).** Every file this step uploads (and every file `create-org` Step 9 uploads) MUST be verified by **reading the committed bytes back from the backend and comparing byte count + canonical SHA-256 against the local source** — NOT by trusting `aifs_write`'s response-size check alone. The response size is write-time metadata; a OneDrive simple-PUT can report a full size while durably committing a truncated object, and the adapter's only re-read is gated to sentinel-bearing files, so a non-sentinel `collection.json`/manifest can ship truncated and undetected (this is exactly how ms_install_10's core `collection.json` shipped at 31030/32402 bytes). Use the **Canonical SHA-256 rule** (`templates/backend-distribution.md`: `aifs_stat` `size` → `head -c <size>` → `sha256sum`; never hash `aifs_read` stdout). On mismatch, re-upload from source and re-verify (retry up to 2×); if still mismatched, halt naming the file. This is the `/shared/dist/` round-trip self-check extended to the source-sync uploads.
+**Durable read-back verify on every uploaded file (M2, `collectionjson-tornwrite`, core 3.22.4 / C.1.3.4 — HIGH).** Every file this step uploads (and every file `create-org` Step 9 uploads) MUST be verified by **reading the committed bytes back from the backend and comparing byte count + canonical SHA-256 against the local source** — NOT by trusting `aifs_write`'s response-size check alone. The response size is write-time metadata; a OneDrive simple-PUT can report a full size while durably committing a truncated object, and the adapter's only re-read is gated to sentinel-bearing files, so a non-sentinel `collection.json`/manifest can ship truncated and undetected (this is exactly how ms_install_10's core `collection.json` shipped at 31030/32402 bytes). Use the **Canonical SHA-256 rule** (`templates/backend-distribution.md`: `aifs_stat` `size` → `head -c <size>` → `sha256sum`; never hash `aifs_read` stdout). On a mismatch right after the write, wait ~5 s and re-read once before treating it as a mismatch (OneDrive read-after-write lag — runtime-reference.md § "Adapter Operations Contract", durable read-back, finding 78); if it still differs, re-upload from source and re-verify (retry up to 2×); if still mismatched, halt naming the file. This is the `/shared/dist/` round-trip self-check extended to the source-sync uploads.
 
-**Source-tree skip-list (applied symmetrically to upload AND delete decisions; revised in core 3.6.0).** The following paths are filtered out of the diff entirely — neither uploaded nor proposed for deletion. Step 0 is a **source-tree** sync; non-source files are out of scope in both directions:
+**Source-tree skip-list (applied symmetrically to upload AND delete decisions; revised in core 3.6.0).** The following paths are filtered out of the diff entirely — neither uploaded nor proposed for deletion in the normal diff (they appear only in item 4.5's separate, confirmed leftovers list — finding 76). Step 0 is a **source-tree** sync; non-source files are out of scope in both directions:
 
 - `.git/`, `node_modules/`, `dist/` (build output)
-- Any path containing `/.` (hidden files except for explicitly-shipped ones — `.claude/`, `.gitkeep`)
+- Dotfiles and dot-folders at **any depth, including the repo root** (`dotfileupload`, finding 23 — the old "path containing `/.`" pattern missed root-level files, so `.gitignore` and `.gitattributes` shipped): every path segment starting with `.` — `.gitignore`, `.gitattributes`, `.gitmodules`, `.github/`, `.DS_Store`, `.vscode/`, `.idea/`, `.editorconfig` — **except** the explicitly-shipped ones: `.claude/` (core's `CLAUDE.md.template` and hooks), `cowork-plugin/.claude-plugin/` and `cowork-plugin/.mcp.json`, and `.gitkeep`. create-org Step 9 uses the same list; marketplace `download-collection` / `upgrade-collection` use a collection-source list that also skips `node_modules/`, `Thumbs.db` and editor temp files.
 - Editor and temp files: `*.swp`, `*.swo`, `*.bak`, `*.tmp`
 - Compiled binaries: `*.exe`, `*.dll`, `*.so`, `*.dylib` — never uploaded
 - OS metadata: `.DS_Store`, `Thumbs.db`
 - Ephemeral scratch files: `test_*.{txt,md,json}`, `tmp_*` — these are common scratch/test artifacts; the friction is intentional. Authors who DO want to ship a file matching one of these patterns can rename it.
 
-The principle: **Step 0 only manages files it would itself upload. If a file's path pattern means Step 0 wouldn't upload it, Step 0 won't delete it either.** Pre-3.6.0 the skip-list was applied only on the upload side, which produced spurious "delete this remote .exe?" prompts when leftover binaries lingered at remote. Post-3.6.0 the filter is symmetric — those files are filtered out of both walks.
+The principle: **Step 0 only manages files it would itself upload. If a file's path pattern means Step 0 wouldn't upload it, Step 0 won't delete it either.** Pre-3.6.0 the skip-list was applied only on the upload side, which produced spurious "delete this remote .exe?" prompts when leftover binaries lingered at remote. Post-3.6.0 the filter is symmetric — those files are filtered out of both walks. Since core 4.0.1 they are not silently ignored either: item 5 below lists skip-listed files already on the remote as leftovers and offers them for deletion as a separate list the admin confirms (finding 76).
 
 For each of the two infrastructure roots (`agent-index-core/`, `agent-index-marketplace/`):
 
@@ -120,6 +135,11 @@ For each of the two infrastructure roots (`agent-index-core/`, `agent-index-mark
    - `differs` — local exists, remote exists, hashes differ → upload (overwrite)
    - `synced` — hashes match → no-op
 4. **Detect remote files that no longer exist locally.** List the remote directory recursively via `aifs_list`. **Apply the skip-list above to the remote walk as well** — a remote file matching any skip-list pattern is filtered out (not flagged as `remote_only`, not proposed for deletion). For each remaining remote file with no local counterpart, mark `remote_only`. These are candidates for deletion (e.g., a file that was renamed or removed on a `git pull`).
+5. **Collect remote leftovers the walks above don't manage (finding 76, bug `20260824-68dff8bf-021702-b49a`).** From the same remote listing, list separately as `leftover`:
+   - remote files that match the skip-list (dotfiles such as `/agent-index-core/.gitignore` and `.gitattributes`, binaries such as `bin/agent-index-show-plan.exe`, temp files) and have no local counterpart that would ship;
+   - every remote file or folder under a directory the local clone no longer has at all (e.g. `/agent-index-core/lib/permission-helper-go/` after core 4.0.0), whatever its name;
+   - empty remote folders the local clone doesn't have, and folders left empty once the deletions above are applied.
+   The shipped exceptions (`.claude/`, `cowork-plugin/.claude-plugin/`, `cowork-plugin/.mcp.json`, `.gitkeep`) are never leftovers. Leftovers are **reported on every run** (so publish never silently skips remote files), never auto-deleted, and never mixed into the `remote_only` delete list.
 
 Aggregate counts for both roots:
 
@@ -138,7 +158,17 @@ Files to delete from remote:
   /agent-index-core/agent-index.json   (Phase 2 of template-disambiguation)
 
 Proceed with sync? [Y/N]
+
+Leftovers on the remote that Step 0 doesn't ship (not part of the sync above):
+  /agent-index-core/.gitignore                                  (skip-listed)
+  /agent-index-core/lib/permission-helper-go/.goreleaser.yaml   (folder gone from the clone)
+  /agent-index-core/lib/permission-helper-go/cmd/               (empty folder)
+  ...
+
+Delete these leftovers too? [Y/N]
 ```
+
+The leftover list is a **separate confirmed list** with its own question (finding 76): the admin can sync without deleting them. On `Y`, delete each leftover file with `aifs_delete`, then the folders deepest-first (a folder is deleted only once it is empty), with a `✓ delete {path}` line each; a failed delete is reported and the rest continue. On `N`, leave them and say so; the next publish lists them again. If there are none, omit the section. Under `--dry-run`, list them and delete nothing.
 
 On `N`: abort, no changes written. Surface "Sync cancelled. Re-run @ai:publish-updates when ready."
 
@@ -151,9 +181,9 @@ On `Y`:
 
 After sync completes, the remote `/agent-index-core/` and `/agent-index-marketplace/` directories match the admin's local copy. Proceed to Step 1.
 
-**Idempotent re-runs:** If everything is already synced, the summary shows `upload: 0   delete: 0   synced: N` and asks "Nothing to sync. Continue to publish-updates diff phase? [Y/N]". On Y, proceed to Step 1; on N, halt.
+**Idempotent re-runs:** If everything is already synced, the summary shows `upload: 0   delete: 0   synced: N` (plus the leftover list and its own question, if any) and asks "Nothing to sync. Continue to publish-updates diff phase? [Y/N]". On Y, proceed to Step 1; on N, halt.
 
-**Optional `--no-sync` flag:** for power users or recovery scenarios where the admin wants to skip this step entirely (e.g., if files were already pushed via a script). When passed, Step 0 is skipped and the task starts at Step 1.
+**Optional `--no-sync` flag:** for power users or recovery scenarios where the admin wants to skip this step entirely (e.g., if files were already pushed via a script). When passed, Step 0 is skipped and the task continues at Step 1 after Step 0g (the 3.x → 4.x gate still runs).
 
 **Why limited to `agent-index-core/` and `agent-index-marketplace/`:** Marketplace collections (`projects`, `strategy`, etc.) are managed via `download-collection`/`install-collection`/`upgrade-collection` and have their own update flow. Adapter bundles ship via `edit-org` Step 2. Step 0 here only covers the two infrastructure collections that don't have any other shipping path.
 
@@ -186,7 +216,8 @@ Walk the file paths from Step 0's `upload` + `delete` sets. For each path, apply
 - **Template vs root CLAUDE.md.** Render the current local `agent-index-core/.claude/CLAUDE.md.template` in memory (the same substitution `render_root_claude_md` uses) and compare it with the remote root `/CLAUDE.md`, ignoring the preserve-marker regions. If they differ, add `render_root_claude_md`.
 - **CLAUDE.md vs last publish.** If the LF-normalized SHA-256 of the local project `CLAUDE.md` (the same source and bytes as Step 1.3) differs from `published-state.json` `claude_md_hash`, add `bootstrap_regen` and a `claude-md-update`.
 - **Adapter vs last publish.** If the local `mcp-servers/filesystem/adapter.json` `exec_bundle_checksum` differs from `published-state.json` `commits.adapter.checksum`, add `bootstrap_regen` and an `adapter-bundle-update`. If the snapshot has no `commits.adapter` (written before core 3.32.0), skip this check; Step 3's comparison handles it.
-(No `published-state.json` yet — an org's first publish — means the CLAUDE.md and template checks count as changed.)
+- **Bootstrap zip vs last publish (bug `20260803-8d20ea22-230939-a1f3`).** Compute the bootstrap content hash for the current inputs exactly as `templates/regenerate-bootstrap.md` Steps 1–5 do (assemble the layout and build the `.plugin` in a `mktemp -d` dir, then the Step 5 content hash — the sorted `path<TAB>sha256` lines of the input files, the `.plugin` archive's inner files included and the archive itself excluded, finding 91), with the local `agent-index.json` as it will be after Step 0c's `org_config_id` re-stamp (current `aifs_stat("/org-config.json")` id; compute in memory, don't write). Upload nothing. If it differs from `published-state.json` `bootstrap_content_hash`, or that field is absent, add `bootstrap_regen` (the first publish after 4.0.1 regenerates once, because older hashes were computed differently) — even when Step 0 uploaded nothing. A zip built by an older core (e.g. no `org_config_id`, stale CLAUDE.md) is then repaired on the next publish instead of never.
+(No `published-state.json` yet — an org's first publish — means the CLAUDE.md, template and bootstrap checks count as changed.)
 
 Aggregate the results:
 
@@ -526,6 +557,7 @@ Read `aifs_read("/org-config.json")`. For each operation in the new update-log e
 
 - **`core-update`:** Find the `installed_collections[]` entry with `name: "agent-index-core"`. Update its `version` to the operation's `target_version`. Update its `upgraded_date` to today (`YYYY-MM-DD`). If the entry doesn't exist (corrupt or hand-edited org-config), surface a notice and skip.
 - **`marketplace-update`:** Same for the `name: "agent-index-marketplace"` entry.
+- **Source provenance for core and marketplace (finding 89):** with each `core-update` / `marketplace-update`, also set the entry's `source_ref` ← `repos[<name>].ref` and `source_commit` ← `repos[<name>].commit` from `.agent-index/clone-resolution.json` (the clones Step 0 just synced) — the same fields `upgrade-collection` writes for collections, on channel and tag orgs alike. When `ref_type` is `tag`, also set `source_tag` ← the ref; otherwise leave any existing `source_tag` alone. (Without this a channel org's org-config kept the previous channel ref/commit after a publish.)
 - **`collection-update`:** Find the `installed_collections[]` entry with `name: <operation.details.collection>`. Update `version` to `target_version`, `upgraded_date` to today.
 - **`collection-install`:** Add a new entry to `installed_collections[]` if not present: `{ name, version, installed_date: today, repo_url: <from operation>, status: "installed" }`. If an entry exists but is marked `status: "removed"`, update its `version` + `upgraded_date` and flip `status` back to `"installed"`.
 - **`collection-remove`:** Find the entry and set its `status` to `"removed"` (preserve historical record).
@@ -589,7 +621,9 @@ Ensure the all-members group can read the two infrastructure roots members need 
 
 **Extended in C.1.5.0 (`collreadgrantmissing`) to cover every installed collection code dir, not just the two infrastructure roots.** The same member-read requirement applies to each installed collection: a non-drive-member reads a collection's capabilities only if the all-members group holds reader on its code dir (`id:{folder_id}`). install-collection grants this at install, but a collection installed before that step existed (e.g. `client-intelligence`), or whose grant was declined or failed at install (install-collection does NOT roll back on that; it records `member_read_grant: "pending"`), is left structurally unreadable with no other self-heal. So 6e now reconciles the all-members reader grant on **`/agent-index-core/`, `/agent-index-marketplace/`, AND every `org-config.json` `installed_collections[].folder_id`** (skip any entry with `status: "removed"`; for an entry lacking a stored `folder_id`, `aifs_stat("/{name}")` to resolve it, same as install-collection). Collect every root whose `all@` reader grant is absent.
 
-For each root collected above: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}` (include inherited). If `{all_members_group}` is already a reader: don't add a change, and **skip it silently** (idempotent — the common case on a healthy org). In that case, if the root is an installed collection whose `member_read_grant` is `"pending"` (e.g. the grant was later applied by hand), set it to `"granted"`. If the reader grant is missing, the root goes into the table below.
+**Also `/shared` (core 4.0.1, bug `20260803-8d20ea22-231012-b7c2`).** The all-members group's direct reader grant on `/shared` is what lets members enumerate the shared tree and read `/shared/dist/` and `/shared/bootstrap/`. create-org grants it, but an org created before that step, whose members relied on per-member reader shares that invite-member no longer issues (`catbredundant`), has no other path back. Check it like the roots above: gdrive `id:{resource_ids.shared_root}` (`aifs_stat("/shared")` for the id if `resource_ids` is absent — 6f back-fills it), OneDrive the `/shared` path. Same behaviour: already a reader → silent no-op; missing → one more `share` row in the table below (`resource_label` "shared folder", `reason` "Members need read to enumerate /shared and read /shared/dist and /shared/bootstrap").
+
+For each root collected above: resolve the folder's Drive id (`aifs_stat`) and `aifs_get_permissions` on `id:{folder_id}` (include inherited). **On OneDrive use the path instead** — `/agent-index-core`, `/agent-index-marketplace`, `/{name}` — for both the permissions read and the `resource` of the share row below: a bare `id:{folder_id}` there resolves against the admin's own drive, not the org's site drive, so the read returns `PATH_NOT_FOUND` and the grant can't be checked or applied (finding 63; the ms_install_10 tester used the path by hand). The id stays the resource on gdrive. If `{all_members_group}` is already a reader: don't add a change, and **skip it silently** (idempotent — the common case on a healthy org). In that case, if the root is an installed collection whose `member_read_grant` is `"pending"` (e.g. the grant was later applied by hand), set it to `"granted"`. If the reader grant is missing, the root goes into the table below.
 
 **If any grant is MISSING, apply it through the core permission-changes procedure, and do NOT defer it (`memberreadgrantnotauto`).** The old "direct path, else silently skip" wording meant the grant was quietly dropped. Members then stayed unable to read core/marketplace (the exact block this heals) until an admin happened to run a separate migration. Instead, follow `/agent-index-core/internal/permission-changes.md` with one table holding every missing grant:
 
@@ -605,7 +639,7 @@ For each root collected above: resolve the folder's Drive id (`aifs_stat`) and `
 }
 ```
 
-That is one `share` row per missing root: core, marketplace, and any installed-collection code dir.
+That is one `share` row per missing root: core, marketplace, any installed-collection code dir, and `/shared`. (`resource` is `id:{folder_id}` on gdrive and `/{root name}` on OneDrive, as above; for `/shared` it is `id:{resource_ids.shared_root}` on gdrive and `/shared` on OneDrive.)
 
 - State the consequence plainly with the table: *"members cannot read {roots} until these are applied."*
 - **Do NOT report the publish as fully complete** unless the procedure returns `complete`.
@@ -650,7 +684,7 @@ If org-config has no `org_uuid`: generate a random UUID v4 (lowercase, e.g. from
 Run the **backend-distribution publish flow** (canonical definition: `templates/backend-distribution.md` § "Publish flow") against the artifacts touched by this publish:
 
 1. **Recompute the manifest.** For each directory file (from the local `resource-listings` clone), compute the SHA **per the Canonical SHA-256 rule** in `backend-distribution.md` (stored/git-blob LF bytes — **never `aifs_read` stdout**). Diff against the current `/shared/dist/manifest.json` and upload only changed/new artifacts; read back and verify each upload with the canonical member-side recipe (stat `size` + `head -c` truncation).
-2. **Rewrite `/shared/dist/manifest.json`** (`dist-manifest/2`) with the new `org_release_tag` (= the core version just published), `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json`, the refreshed artifact SHAs (directory files only; the manifest has no binary entries since core 4.0.0), and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot; abort on mismatch. Verify it reads back + parses.
+2. **Rewrite `/shared/dist/manifest.json`** (`dist-manifest/2`) with the new `org_release_tag` (= the core version just published), `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json` — `channel_head` is a **string**, `"channel/<name>@<sha7>"` (the channel branch and the first 7 hex characters of the core clone's commit, e.g. `"channel/dev-2@3f9c2ab"`), or `null` when `channel` is null; never an object (finding 77) — the refreshed artifact SHAs (directory files only; the manifest has no binary entries since core 4.0.0), and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot (which Step 5 just wrote as `published-state.json`); abort on mismatch. This step and create-org Step 11 are the only writers of `/shared/dist/manifest.json` (`backend-distribution.md`, "Who rewrites the manifest" — finding 74). Verify it reads back + parses.
 3. **Round-trip self-check (manifestsha guard):** after writing the manifest, re-verify the `infrastructure-directory.json` artifact via the member-side recipe and confirm the computed SHA equals the value just written. If it does not, the publish computed a SHA members will reject — **abort and fix** (do not report success). This is the gate that would have caught the `412094b4` vs `e1d549e4` mismatch at publish time.
 4. **Delete retired binaries (core 4.0.0).** Core 4.0.0 removed the permission helper, so nothing reads `/shared/dist/binaries/` any more. If it exists on the backend (normally only on the first publish after the upgrade), `aifs_list` it, show the admin every file that will be deleted, and delete them and the folder on confirmation, the same way Step 0 confirms remote deletes. If the admin declines, leave it and say it is unused; the next publish offers it again. Idempotent: once the folder is gone this is a silent no-op.
 
@@ -689,6 +723,8 @@ After Step 5, Step 6, and the propagation check succeed, surface confirmation:
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
 
+**Scratch files: `mktemp` only (bug `20260928-8d20ea22-140909-e0a9`).** Stage every remote read (update log, `published-state.json`, org-config, dist manifest) in a directory this run creates with `mktemp -d`, never a fixed `/tmp/<name>` — in Cowork another session's leftover `/tmp/ul.json` can't be overwritten and was parsed as the org's log during a publish. No `2>/dev/null` before the redirect; check the exit status and that the file parses before using it.
+
 ### Behavior
 
 This task is the admin's publishing step — the final action after making org-level changes. Treat it as consequential: always present the full draft and require confirmation before writing.
@@ -709,7 +745,7 @@ Never modify collection directories or any file outside the documented write sur
 - `/shared/updates/latest.json`
 - `/shared/updates/published-state.json`
 - `/shared/bootstrap/member-bootstrap.zip` (when bootstrap regen fires per Step 0c's prerequisite subroutine)
-- `/org-config.json` — ONLY these fields, each written by the step named: removal of the retired `binaries` key (6.0), `installed_collections[]` (6a, including `marketplace_id` from 6g), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent), `org_uuid` (6h, only when absent), `installed_collections[].member_read_grant` (6e, 3.32.0). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
+- `/org-config.json` — ONLY these fields, each written by the step named: removal of the retired `binaries` key (6.0), `installed_collections[]` (6a, including `marketplace_id` from 6g, and `source_ref` / `source_commit` / `source_tag` on the core and marketplace entries — finding 89), `agent_index_version` (6b), `resource_ids` (6f), `marketplaces[]` (6g, only when absent), `org_uuid` (6h, only when absent), `installed_collections[].member_read_grant` (6e, 3.32.0). No other org-config fields are mutated. (3.31.0 — bug `20260924-8d20ea22-015604-f386`: the 3.30.0 list omitted 6f and 6g, the same contradiction shape that silently suppressed the 3.7.1 writeback.)
 - `/shared/dist/` (Step 6.5)
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.

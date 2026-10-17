@@ -1,7 +1,7 @@
 ---
 name: view-permissions
 type: task
-version: 1.0.0
+version: 1.0.1
 collection: agent-index-core
 description: Show who has access to a resource on the remote filesystem. Calls aifs_get_permissions and formats the result conversationally. Member-facing — any member can run it on any path they have read access to.
 stateful: false
@@ -63,11 +63,13 @@ Resolve a friendly description (e.g., "the pricing-refresh project") to a path v
 result = aifs_get_permissions(path=<path>, include_inherited=true)
 ```
 
+Address the resource the way the backend resolves it (runtime-reference.md § "Addressing: Owned Content and Sharing", finding 63): org items by path on OneDrive (a bare `id:{itemId}` there resolves against the member's own drive) or by `id:{drive_id}:{item_id}`; on gdrive a path or `id:{itemId}`. A bare `id:` is right on OneDrive only for the member's own space.
+
 Default `include_inherited` to `true` so the member sees the full picture (explicit + inherited grants). They can ask to filter to explicit-only ("show me just the explicit grants") and the task re-runs with `include_inherited: false`.
 
 ### Step 3: Resolve subjects to display names where possible
 
-The response has `subject` fields that are emails (or group addresses). For each email:
+The response has `subject` fields that are emails (or group addresses). Read `org-config.json` and `members-registry.json` per the same addressing rule (gdrive by id anchor, OneDrive by path). For each email:
 
 1. If it matches an entry in `members-registry.json`, attach the display name.
 2. If it matches `org-config.json admins[].email`, append "(admin)".
@@ -97,7 +99,7 @@ If the result has 0 permissions: surface "No explicit or inherited permissions f
 
 If the call returns `ACCESS_DENIED`: surface "I can't see permissions on `{path}` — your access doesn't include permission inspection. Ask whoever owns this resource."
 
-If the call returns `PATH_NOT_FOUND`: surface "No resource exists at `{path}`. Did you mean a different path?"
+If the call returns `PATH_NOT_FOUND`: on OneDrive, if you used a bare `id:` for an org item, re-address it by path (or `id:{drive_id}:{item_id}`) and retry once — that error is the addressing form, not a missing item. Otherwise surface "No resource exists at `{path}`. Did you mean a different path?"
 
 ---
 
