@@ -39,6 +39,9 @@ Run manually by the admin or member, or offered at the end of `create-org` and `
 
 ### Step 1: Check for Log Files
 
+**Channel orgs:** if the local `agent-index.json` has a `distribution_channel`, these logs come from unreleased code. Say: *"This install runs distribution channel {name}. Logs from unreleased code aren't sent to the production log collector; they stay in `.agent-index/logs/`."* Halt, unless the member explicitly says to upload anyway (`channellogupload`, 3.32.0 live test).
+
+
 List files in `.agent-index/logs/` matching `*.jsonl`. If no log files exist: surface "No install logs found. Logs are generated automatically during org setup and member setup." Halt.
 
 If multiple log files exist: show the list with timestamps and types (parsed from filenames), and ask which to upload. Offer "all" as an option.

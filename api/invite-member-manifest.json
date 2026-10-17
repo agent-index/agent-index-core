@@ -3,8 +3,8 @@
   "type": "task",
   "display_name": "Invite Member",
   "collection": "agent-index-core",
-  "collection_version": "3.31.0",
-  "version": "1.12.0",
+  "collection_version": "4.0.1",
+  "version": "1.13.3",
   "eol_date": null,
   "eol_warning_days": 60,
   "stateful": false,
@@ -15,14 +15,12 @@
   "missing_dependencies": [],
   "parameter_provenance": {},
   "dependencies": {
-    "skills": [
-      "permission-change-helper"
-    ],
+    "skills": [],
     "tasks": []
   },
   "external_dependencies": [
     "Remote filesystem exec bundle (gdrive contract v2.0+)",
-    "All-members Google Group"
+    "All-members group"
   ],
   "optional_external_dependencies": [],
   "reads_from": "/members-registry.json",

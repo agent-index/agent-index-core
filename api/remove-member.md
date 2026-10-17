@@ -1,9 +1,9 @@
 ---
 name: remove-member
 type: task
-version: 1.2.0
+version: 1.4.1
 collection: agent-index-core
-description: Admin-only task that removes a member from the agent-index roster. Removes their entry from members-registry.json and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — agent-index does not touch Drive ACLs; Workspace IT handles identity offboarding.
+description: Admin-only task that removes a member from the agent-index roster. Revokes the two member-directory grants invite-member created (through the core permission-changes procedure, each removal confirmed individually), removes their entry from members-registry.json, and surfaces an IT checklist for Workspace-level offboarding. Intentionally narrow — it does not walk the broader ACL graph; Workspace IT handles identity offboarding.
 stateful: false
 produces_artifacts: false
 produces_shared_artifacts: true
@@ -24,7 +24,7 @@ writes_to: "/members-registry.json"
 1. agent-index removes the member's entry from `members-registry.json`.
 2. agent-index surfaces a checklist for IT to handle Workspace-level offboarding (which auto-revokes Drive shares and prompts ownership transfer).
 
-agent-index does **not** touch Drive ACLs in this flow. The reasons:
+Beyond the two member-directory grants `invite-member` created (Step 2.5), agent-index does **not** touch Drive ACLs in this flow. The reasons:
 
 - Workspace IT already has tooling for this (Workspace offboarding flow).
 - agent-index's per-resource ACL graph would be expensive to walk and revoke piecewise.
@@ -52,7 +52,7 @@ On demand, when a member leaves the team or org.
 
 ### Step 1: Pre-flight
 
-1. **Confirm caller is an admin.** Read `org-config.json`. Verify the calling member's `member_hash` is in the `admins` array. If not: surface "Only org admins can remove members." and stop.
+1. **Confirm caller is an admin.** Read `org-config.json` (gdrive `id:{org_config_id}`, OneDrive `/org-config.json` — runtime-reference.md § "Addressing: Owned Content and Sharing"). Verify the calling member's `member_hash` is in the `admins` array. If not: surface "Only org admins can remove members." and stop.
 
 2. **Refuse self-removal of the sole admin.** If the email being removed is in the `admins` array AND it's the only admin, surface "Cannot remove the only admin. Add another admin first via `@ai:edit-org`, then retry." and stop.
 
@@ -60,13 +60,13 @@ On demand, when a member leaves the team or org.
 
 ### Step 2: Find the member
 
-Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
+Compute `member_hash = sha256(email.toLowerCase()).hex.slice(0, 16)`. Read `members-registry.json` (gdrive by id: `id:{resource_ids.members_registry}`; OneDrive by path: `/members-registry.json`) and locate the entry with this hash. If absent: surface "No member with email `{email}` is in the registry. Are you sure that's the right email?" and stop.
 
 Confirm to the admin:
 
 > Removing `{display_name}` ({email}) from the member registry.
 >
-> Their private member space lives in THEIR own My Drive (`Agent-Index-Private`) — it is not org property, agent-index has no access to it, and this task will not (and cannot) touch it or any sharing grants they made on it. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org.
+> Their private member space lives in THEIR own My Drive (`Agent-Index-Private-{org_uuid}`; older spaces keep earlier names) — it is not org property, agent-index has no access to it, and this task will not (and cannot) touch it or any sharing grants they made on it. Workspace IT (or Drive admin) handles Drive-level offboarding when the person leaves the org.
 >
 > Continue?
 
@@ -83,13 +83,13 @@ Before any removal, enumerate the discovery indexes (`/shared/strategies-index/`
 >
 > Acknowledge to proceed with removal (this annotates the pointers but changes no permissions).
 
-On acknowledgment: **overwrite** each such pointer adding `"owner_departed": true` and `"departed_date": "{today}"` — scope UNCHANGED (access still works; the pointer must reflect "live but no longer governed by agent-index"). Never set `revoked` here, and never touch the member's My Drive.
+On acknowledgment, **record the list** of these pointers; they are annotated in Step 3.5, only after the registry removal succeeds (so a halted removal never leaves pointers claiming a departure that didn't happen). The annotation: **overwrite** each such pointer adding `"owner_departed": true` and `"departed_date": "{today}"` — scope UNCHANGED (access still works; the pointer must reflect "live but no longer governed by agent-index"). Never set `revoked` here, and never touch the member's My Drive.
 
 If no live pointers exist: skip silently.
 
 ### Step 2.5: Revoke the explicit member-directory grants (added in v1.1.0; narrowed in v1.2.0)
 
-Before removing the registry entry, revoke the writer grant that `invite-member` explicitly granted at member creation. This is symmetric with `invite-member` 1.6.0 (which creates exactly this grant via the permission-helper). Closes bug `20260513-8d20ea22-3`.
+Before removing the registry entry, revoke the writer grant that `invite-member` explicitly granted at member creation. This is symmetric with `invite-member` (which creates exactly this grant). Closes bug `20260513-8d20ea22-3`.
 
 **Bounded scope.** This step revokes ONLY the specific grant this collection's `invite-member` task is known to have applied:
 
@@ -101,32 +101,55 @@ It does NOT walk the broader ACL graph looking for orphan grants on project reso
 **Skip conditions.** Two cases where this step is a no-op:
 
 1. **Grant doesn't exist.** Read `aifs_get_permissions(path)` for each of the two paths. If the departing member doesn't appear in the result (e.g., they were invited before v1.1.0 and a manual one-shot revoked the grants, or they never had explicit grants because the invite was a partial run), skip that path silently.
-2. **Departing member is also being offboarded from Workspace this session.** This is a hint, not a hard signal — if the admin has already confirmed they're deleting the Google account, surface a notice that Workspace deletion will revoke ALL grants org-wide and ask whether to skip the per-resource revoke. On confirm: skip. On default: proceed with the per-resource revoke as a belt-and-suspenders.
+2. **Departing member is also being offboarded from Workspace this session.** This is a hint, not a hard signal — if the admin has already confirmed they're deleting the Google account, surface a notice that Workspace deletion will revoke ALL grants org-wide and ask whether to skip the per-resource revoke. On confirm: skip — don't run the procedure, and go straight to Step 3. On default: proceed with the per-resource revoke as a belt-and-suspenders.
 
 **Procedure:**
 
-1. **Read pre-state** for both paths via `aifs_get_permissions`. Filter to entries where the recipient subject matches the departing member's email.
-2. **Build a permission-change spec** with one `unshare` op per existing grant (zero, one, or two ops total). Same JSON shape as `invite-member`'s spec. **Build this spec with the committed `build-permission-spec` CLI** (see `permission-change-helper` Step 2.5): emit the ops-array as data and run the CLI -- it enforces the op name, email/UPN recipient form, required role, and the canonical `<project_dir>/outputs/` path, and prints the `spec_path`/`link_path` to use. Do not hand-author the spec JSON.
-3. **Hand the spec to the `permission-change-helper` skill.** Surface the `agent-index://apply?spec={path}` URL in chat per the canonical pattern in `agent-index-core/standards.md` § "Permission-Modifying Operations". Admin reviews and accepts in the browser review page.
-4. **Verify post-state.** Re-read `aifs_get_permissions` for both paths and confirm the departing member is no longer present (either as explicit subject or via the removed permission_id).
-5. **On verification success:** proceed to Step 3.
-6. **On verification failure or admin cancellation:** halt before Step 3. The member-index entry is NOT removed; their grants are in an indeterminate state. Surface what's still in place and the next steps. Re-running `@ai:remove-member` is safe (the unshare ops are idempotent — the second run skips paths where the grant is already gone, per the skip condition above).
+1. **Resolve the recipient.** Use the departing member's `sharing_identity` from their registry entry (UPN/mail on onedrive, email on gdrive), falling back to `email` only on gdrive for pre-1.8.0 entries (identitymap). Never match the raw roster email on onedrive.
+2. **Remove the grants.** Follow `/agent-index-core/internal/permission-changes.md` with one `unshare` per path above:
+
+   ```json
+   {
+     "calling_task": "remove-member",
+     "purpose": "Offboard {display_name}: remove the write access invite-member gave them",
+     "confirmer": "admin",
+     "mode": "independent",
+     "changes": [
+       { "op": "unshare", "resource": "id:{artifacts_dir_id}", "resource_label": "{display_name}'s artifacts folder (/shared/members/artifacts/{member_hash}/)", "is_folder": true,
+         "recipient": "{sharing_identity}", "reason": "Granted by invite-member; removed on offboarding", "source": "current_state" },
+       { "op": "unshare", "resource": "/members/{member_hash}/", "resource_label": "{display_name}'s legacy member folder", "is_folder": true,
+         "recipient": "{sharing_identity}", "reason": "Legacy pre-3.9.0 grant; removed on offboarding", "source": "current_state" }
+     ]
+   }
+   ```
+
+   - Include the legacy row only if `/members/{member_hash}/` exists. Use the `/shared/members/artifacts/{member_hash}/` path if the entry has no `artifacts_dir_id`, **and always on OneDrive** — there a bare `id:{artifacts_dir_id}` resolves against the admin's own drive and the permission read fails `PATH_NOT_FOUND` (finding 63).
+   - Removals are high-impact, so the procedure asks the admin to confirm each one individually.
+   - A path where the member has no explicit grant shows as "no access to remove" and is skipped (skip condition 1).
+3. **Act on the result.**
+   - **`complete`** → proceed to Step 3.
+   - **Anything else** (declined, failed, not verified) → **halt before Step 3.** The registry entry is NOT removed. Tell the admin what's still in place (the procedure's `summary_lines`). Re-running `@ai:remove-member` is safe: it re-reads current access, and anything already removed shows as "no access to remove".
 
 **Why this is bounded vs. unbounded ACL cleanup.** Walking every resource on the org's Drive to find any grant featuring the departing member is an expensive operation (potentially thousands of file lookups) and competes with Workspace IT's standard offboarding flow (which already revokes all grants on Google account deletion). The narrow scope of this step — only the two paths agent-index's own `invite-member` is known to have granted — is the symmetric counterpart of what we created, no more.
 
 ### Step 3: Remove the entry (revision-aware)
 
 ```
-{ content, revision } = aifs_read("/members-registry.json"), aifs_stat("/members-registry.json")
+{ content, revision } = aifs_read("id:{resource_ids.members_registry}"), aifs_stat("id:{resource_ids.members_registry}")
 ```
+(On gdrive address the registry by id anchor; the root path is the fallback. On OneDrive use `/members-registry.json` for the read, stat and write — finding 63.)
 
-Parse, remove the entry whose `member_hash` matches, write back with the captured revision:
+Parse, remove the entry whose `member_hash` matches, **and append a removal record** to the registry's top-level `removed_members[]` (create the array if absent): `{"member_hash", "email", "display_name", "removed": "{ISO 8601}", "removed_by": "{admin member_hash}"}` (`removalrecord`, core 4.0.0 live test finding 42 — without it a later re-invite saw only the leftover artifacts folder and called the person "an unfinished invite"). Write back with the captured revision:
 
 ```
-aifs_write("/members-registry.json", new_content, if_revision=revision)
+aifs_write("id:{resource_ids.members_registry}", new_content, if_revision=revision)
 ```
 
 On `REVISION_CONFLICT`: re-read, re-apply the removal, retry. Cap at 5 retries.
+
+### Step 3.5: Annotate the departing member's pointers
+
+Only after Step 3's registry write succeeds: apply the Step 2.4 annotation to each recorded pointer (`owner_departed: true`, `departed_date`; scope unchanged; overwrite-only).
 
 ### Step 4: Surface the IT checklist
 
@@ -161,14 +184,14 @@ Offer the admin: "Want to see what's still shared with `{email}` across the org?
 - Never write to `members-registry.json` outside this task, `invite-member`, and `member-bootstrap`.
 - **MAY revoke the two specific ACLs `invite-member` explicitly created** (writer on `/members/{hash}/` and `/shared/members/artifacts/{hash}/`) per Step 2.5. These two grants are bounded, known, and symmetric with their creation; revoking them here closes a real correctness gap where a member who's been removed from the registry retains agent-index-issued Drive access until Workspace IT runs full account offboarding (which may never happen, e.g., for contractors).
 - **MUST NOT walk the broader ACL graph** looking for orphan grants the departing member may have accumulated through project membership, idea collaboration, shared-artifact creation, etc. Those remain Workspace IT's responsibility — either through full Workspace offboarding (which auto-revokes everything) or through project-scoped removal via `@ai:edit-project`.
-- **MUST go through the `permission-change-helper` skill** for the Step 2.5 unshare ops per `agent-index-core/standards.md` § "Permission-Modifying Operations". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` directly from this task.
+- **MUST use the core permission-changes procedure** for the Step 2.5 removals, per `agent-index-core/runtime-reference.md` § "Permission changes: list, confirm, apply, verify". Never call `aifs_share` / `aifs_unshare` / `aifs_transfer_ownership` outside it.
 - Stale references render at the task layer as historical names. Never rewrite or scrub historical data.
 
 ### Edge Cases
 
 - **Email is not in the registry.** Surface clearly and stop. Don't attempt fuzzy matching — the admin should re-check the email.
 - **Member is mid-task.** Removal does not interrupt any task the departing member is currently running in their own session. Their next session-start will fail at the registry-membership check and surface the standard "You're not registered with this org" path. (This is correct behavior — they've been removed.)
-- **Two admins removing the same member concurrently.** Revision-aware writes protect the registry: the second admin's `aifs_write` carries `if_revision` and fails with `REVISION_CONFLICT`. On conflict, re-read the registry, observe the member is already removed, and report "already removed by another admin" — do NOT retry the removal and do NOT re-run the Step 2.5 unshare ops (the first admin's flow owns them; the helper ops are idempotent but a second Accept would be redundant ceremony).
+- **Two admins removing the same member concurrently.** Revision-aware writes protect the registry: the second admin's `aifs_write` carries `if_revision` and fails with `REVISION_CONFLICT`. On conflict, re-read the registry, observe the member is already removed, and report "already removed by another admin" — do NOT retry the removal and do NOT re-run the Step 2.5 unshare ops (the first admin's flow owns them; a second run would only show them as already removed).
 
 <!-- RECONSTRUCTED 2026-06-10: original tail lost to truncation (bug 20260608-8d20ea22-003039-trunc); completion reviewed and approved by Bill. -->
 

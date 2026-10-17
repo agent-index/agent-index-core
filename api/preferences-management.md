@@ -1,7 +1,7 @@
 ---
 name: preferences-management
 type: skill
-version: 3.0.1
+version: 3.0.2
 collection: agent-index-core
 description: Enables members to configure, review, and update their agent-index session preferences, invocation aliases, and natural-language routing phrases through natural language without editing configuration files directly.
 stateful: true
@@ -117,7 +117,7 @@ The rule that matters: **`apply-updates` merges collection defaults by exact phr
 List active mappings grouped by collection and capability, showing the phrases for each. Mark the ones the member has customized. Mention how many phrases are switched off, and show them only if asked. Use capability names and descriptions, not file fields.
 
 **"Add a phrase"** (e.g. "make 'what's on deck' open my daily view")
-1. Resolve the target to an installed capability in `member-index.json`. If it isn't installed, say so and stop.
+1. Resolve the target to an installed capability in `member-index.json`. If it isn't installed, say so and stop. (`agent-index-core` and `agent-index-marketplace` capabilities are always available and aren't listed in `member-index.json` — finding 90; they count as installed.)
 2. **Check switched-off mappings first.** If a mapping with the same phrase exists with `active: false`, do not add a second row. Switch that row back on and point it at the target: set `active: true`, `source: member-custom`, and its `capability` and `collection`. Confirm with the member as for any change ("'{phrase}' is switched off at the moment. I'll switch it back on and point it at {capability}."), then go to Writing. Compare case-insensitively and ignoring punctuation, as below.
 3. Check the phrase against existing active mappings, comparing case-insensitively and ignoring punctuation:
    - **Same phrase, different capability:** surface it. "That phrase already opens {capability}. Change it to {new}, or pick a different phrase?" Do not write until resolved.
@@ -134,7 +134,7 @@ Update `capability` and `collection` on the mapping, and set `source: member-cus
 **"Delete a phrase" / "stop using this phrase"**
 First decide whether the phrase is one of a collection's defaults. `source` alone can't tell you: a default whose target or wording the member changed is marked `member-custom` too.
 - `source: collection-default`: it is a default.
-- `source: member-custom`: check the phrase against the declared triggers of every collection the member has installed (from `member-index.json`), read from each `collection.json` by id, the same way Reset does. Start with the collection the mapping names, and stop at the first match. It is a default if any collection declares it. Checking only the named collection is not enough: "change where a phrase goes" can move a default to a capability in another collection, so a phrase that now names capture may be one of projects' defaults, and the next projects update would add it back. If any collection's triggers can't be read and no match was found in the ones that could, treat it as a default.
+- `source: member-custom`: check the phrase against the declared triggers of every collection the member has installed (from `member-index.json`, plus `agent-index-core` and `agent-index-marketplace`), read from each `collection.json` the same way Reset does. Start with the collection the mapping names, and stop at the first match. It is a default if any collection declares it. Checking only the named collection is not enough: "change where a phrase goes" can move a default to a capability in another collection, so a phrase that now names capture may be one of projects' defaults, and the next projects update would add it back. If any collection's triggers can't be read and no match was found in the ones that could, treat it as a default.
 
 Then:
 - **A default:** set `active: false` and `source: member-custom`. **Never remove the row.** A removed default comes back with the next update, so a deletion that isn't recorded doesn't last.
@@ -143,8 +143,8 @@ Then:
 When the triggers can't be read, switching off is the safe choice. A switched-off row that turns out not to be a default does no harm. A removed row that turns out to be a default comes back on the next update.
 
 **"Reset"** (one phrase, one collection, or all)
-Read the collection's current declared triggers from its `collection.json`. Read it by id, the way CLAUDE.md § "How to execute a skill or task" reads collection files. Then:
-- For each default phrase in scope: restore it with the collection's current `capability`, set `source: collection-default` and `active: true`.
+Read the collection's current declared triggers from its `collection.json`. Read it the way CLAUDE.md § "How to execute a skill or task" reads collection files: by id anchor (`id:{folder_id}/collection.json`) on Google Drive, by path (`/{collection}/collection.json`) on OneDrive, where a bare `id:` resolves against the member's own drive (finding 63). Then:
+- For each default phrase in scope whose capability the member has installed (core and marketplace exempt, as in `apply-updates` Phase 4 step 4 — finding 90): restore it with the collection's current `capability`, set `source: collection-default` and `active: true`.
 - Remove `member-custom` rows in scope that are not collection defaults. Before resetting, list exactly what will be removed and what will be restored.
 - If the collection's `collection.json` can't be read, say so and do not reset. Never guess defaults.
 

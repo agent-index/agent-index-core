@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.10.0
+version: 3.13.2
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -82,7 +82,7 @@ This skill must maintain a structured install log during first-time setup and re
 When invoked, determine the context: first-time setup, reconnection, or re-authentication.
 
 - **First-time setup:** No `member-index.json` exists locally at `{project_dir}/members/{member_hash}/member-index.json`. The member has not been set up yet.
-- **Re-authentication:** `member-index.json` exists locally (member is set up) but `aifs_auth_status()` returns `authenticated: false`. The credential has expired or been revoked.
+- **Re-authentication:** `member-index.json` exists locally (member is set up) but `aifs_auth_status()` returns `authenticated: false`. The credential has expired or been revoked. (A `reason` of `network_error`, `tls_or_proxy_error` or `credential_write_failed` — gdrive 2.11.5+ — is a connection or local-storage problem, not an expired sign-in: report it from `detail` and don't restart the sign-in flow.)
 - **Reconnection:** `member-index.json` exists and auth is valid, but the member is explicitly invoking this skill to verify or repair connectivity.
 
 For re-authentication: skip directly to the authentication steps (Steps 2–3), verify connectivity (Step 4), then confirm and exit. Do not re-create the workspace or re-register.
@@ -164,11 +164,13 @@ Do not proceed without successful authentication.
 
 **Step 4 — Verify remote connectivity**
 
-Confirm that the authenticated member can actually access the org's files on the remote filesystem. **This step is id-anchored (bug `groupshareapivisibility`): a freshly-added member's group→drive access has not necessarily propagated to *by-path* resolution yet, but reading a resource by its Drive *id* works immediately.** So every probe here addresses resources by id, never by path — a member onboards with NO web-UI visit in the normal case.
+Confirm that the authenticated member can actually access the org's files on the remote filesystem. **This step is id-anchored (bug `groupshareapivisibility`): a freshly-added member's group→drive access has not necessarily propagated to *by-path* resolution yet, but reading a resource by its Drive *id* works immediately.** So on **Google Drive** every probe here addresses resources by id, never by path — a member onboards with NO web-UI visit in the normal case.
 
 **The `id:` prefix is mandatory.** Every id anchor MUST be written as `id:{fileId}` or `id:{folderId}/rel/path`. A bare `{folderId}/child` is treated as a literal path segment and FAILS with `BACKEND_ERROR` (verified live). Never drop the `id:` prefix.
 
-**a. Read org-config BY ID first.** Using `org_config_id` from Step 1, call `aifs_read("id:{org_config_id}")` — do **NOT** call `aifs_exists("/org-config.json")` or read it by path. If the id-read succeeds: connectivity is confirmed. Parse it, extract the org name, and display: "Connected to {org_name}'s agent-index." Also read the top-level `resource_ids` object (`{ shared_root, members_registry }`) and the `installed_collections[]` array — you need these for the rest of bootstrap.
+**OneDrive: paths, not bare ids (finding 63; runtime-reference.md § "Addressing: Owned Content and Sharing").** The id-anchored reads in this skill are the **Google Drive** form. On OneDrive a bare `id:{item_id}` resolves against the member's **own** drive, not the org's SharePoint site drive, so it returns `FILE_NOT_FOUND` / `PATH_NOT_FOUND` for every org item. On OneDrive use the path for each org read and write in this skill: (a) `aifs_read("/org-config.json")`; (c) `aifs_exists("/agent-index-core/api/session-start.md")`; Step 5 item 4 `/shared/members/artifacts/{member_hash}/member-folder.json`; Step 5 `last_applied_update` from `/shared/updates/latest.json`; Step 6 `/members-registry.json`. If a path read fails, the only id fallback is drive-qualified, `id:{drive_id}:{item_id}` (`drive_id` from `remote_filesystem.connection`). The `drive.google.com` link in (b) is gdrive-only: on OneDrive an `ACCESS_DENIED` on org-config means the member's SharePoint site access hasn't propagated yet (or they weren't added) — say so and ask them to retry in a few minutes or check with their admin. Reads of the member's own space (`id:root/...`, `id:{member_folder_id}`) are in their own drive and work as written on every backend.
+
+**a. Read org-config BY ID first** (gdrive; OneDrive by path, above). Using `org_config_id` from Step 1, call `aifs_read("id:{org_config_id}")` — do **NOT** call `aifs_exists("/org-config.json")` or read it by path. If the id-read succeeds: connectivity is confirmed. Parse it, extract the org name, and display: "Connected to {org_name}'s agent-index." Also read the top-level `resource_ids` object (`{ shared_root, members_registry }`) and the `installed_collections[]` array — you need these for the rest of bootstrap.
 
 **b. Org-config-first probe + single-link fallback.** If the id-read in (a) fails (e.g. `BACKEND_ERROR` / `ACCESS_DENIED` on a member whose group-share hasn't propagated at all yet), this is the residual group-share propagation edge — the member's account exists in the group but Drive hasn't surfaced *any* access yet. Emit **EXACTLY ONE** clickable link and ask the member to open it once:
 
@@ -185,6 +187,8 @@ Other failure causes to surface if an id-read errors unexpectedly:
 - The remote root may not be set up yet — if the admin hasn't completed create-org.
 
 **d.** For re-authentication flows: stop here. Confirm connectivity is restored and exit: "Your connection is restored. You're good to go."
+
+**e. Fresh-read check (first-time setup; finding 44).** Right after a new member's first sign-in, Drive can serve an old revision: a live gdrive test read an org-config ~3.5 h old and a registry copy from before the invite; re-reads minutes later were current. Read core's `collection.json` (through the same read base as (c); Step 5 needs its `version` anyway). If org-config `agent_index_version` disagrees with it, wait ~30 s and re-read org-config once (and, in Step 6, the registry). If they still disagree, continue with the newer information (the higher version, the registry copy that has your entry) and tell the member: *"Your org's files were still syncing when you joined. Everything works; run `@ai:update` later today to pick up anything that arrived late."* Don't loop.
 
 **Step 5 — Create local member workspace**
 
@@ -207,20 +211,26 @@ If any of these directories already exist: skip creation, do not overwrite.
 
 **Ensure the member's private remote space — "ensure-my-drive-space" subroutine** (reworked in core 3.9.0; this is the canonical definition, referenced by org-setup and apply-updates):
 
-The member's private remote space is a folder named `Agent-Index-Private` **in the member's own personal space** — their My Drive on Google Drive, or their OneDrive on Microsoft 365 — created with the member's own credentials, owned by the member. It is NOT on the org's shared root (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see standards.md § "Addressing"). On all backends the space is addressed by the backend-neutral `id:root/...` anchor, which resolves to the member's own personal drive.
+The member's private remote space is a folder named `Agent-Index-Private-{org_uuid}` (spaces created before core 4.0.0 keep the name `Agent-Index-Private`; see item 0) **in the member's own personal space** — their My Drive on Google Drive, or their OneDrive on Microsoft 365 — created with the member's own credentials, owned by the member. It is NOT on the org's shared root (members cannot share Shared-Drive folders — Drive restricts folder-sharing to drive Managers; see `runtime-reference.md` § "Addressing: Owned Content and Sharing"). On all backends the space is addressed by the backend-neutral `id:root/...` anchor, which resolves to the member's own personal drive.
 
 **Not-provisioned handling (OneDrive):** a member's OneDrive does not exist until they have signed in to office.com at least once — OR the account may lack a OneDrive license entirely. If any step below returns `NOT_PROVISIONED` (top-level `needs_provision: true`), stop and relay **the adapter's own message** verbatim (2.1.0+ distinguishes the two causes — "no OneDrive license, ask your admin" vs "not signed in yet, sign in once at office.com"; bug `20260615-8d20ea22-memberlicense`). Do not retry automatically, and do not assume "sign in once" if the adapter indicates a licensing gap. The rest of bootstrap can still complete (local workspace + registry); owned-content collections that need the member space stay unavailable until the personal OneDrive exists, while shared/open collections work via site membership. (Google Drive and S3 never emit this; the branch is inert for them.)
 
-1. `aifs_exists("id:root/Agent-Index-Private")`. If missing, create it:
-   `aifs_write("id:root/Agent-Index-Private/.keep", "Agent-index private member space — created {date}")`.
-2. `aifs_stat("id:root/Agent-Index-Private")` → record the **resolved** Drive ID as `new_id`. Never record the `root` alias anywhere — registry, handshake, member-index, and pointers must always carry real Drive IDs.
-3. **One-time content migration:** if the local `member-index.json` already has a `member_folder_id` that differs from `new_id` AND `aifs_exists("id:{old_id}")` (a pre-3.9.0 Shared-Drive member space): recursively `aifs_list` the old space and copy every file to the same relative path under `id:{new_id}/`. **For each destination directory, materialize it first** (`aifs_write` of an empty `.keep`) — `aifs_copy` does NOT auto-create destination parents (verified live 2026-06-04; cross-drive copy itself works). Then `aifs_copy` per file (`source`/`destination` args); if a copy fails, fall back to `aifs_read` + `aifs_write` for that file. Never delete the old space (the admin archives it manually later). If there is no old space or no prior id, skip silently.
+0. **One space per org, named by the org's UUID (`privatespacecrossorg`, core 4.0.0; finding 9/40).** Before core 4.0.0 every org named the space `Agent-Index-Private` and found it by that name, so a person in two orgs got one folder shared by both. Each org now has a permanent random identifier, org-config **`org_uuid`** (generated by create-org; back-filled into existing orgs by publish-updates 6h), and its member spaces are named **`{space} = "Agent-Index-Private-{org_uuid}"`**. Two orgs can never pick the same name, so no org ever has to decide whether a folder is "its" by name. Each space also holds `org.json` (`{"org_uuid", "org_id", "org_name", "tagged"}`) as a second check.
+   If org-config has no `org_uuid` yet (the admin hasn't published since core 4.0.0), use `{space} = "Agent-Index-Private ({org_id})"` for now; Migration 7 adds the UUID tag later.
+   **A folder qualifies only if** (i) `aifs_stat` reports it outside the org's Shared Drive (`drive_id` null or different from `remote_filesystem.connection.drive_id` — a folder on the org drive is a pre-3.9.0 Shared-Drive space, which item 3 migrates *from*; gdrive adapter 2.11.4+ returns `drive_id` — if the stat result has no `drive_id` key at all, the adapter is older: accept a folder from (a) without the drive check, and never write `org.json` into it until a later run can check), and (ii) its `org.json` is absent, names this `org_uuid`, or names this `org_id` with no `org_uuid` (tagged by an earlier 4.0.0 build; item 2 re-tags it with the UUID).
+   **Choose the space** — the first candidate that qualifies:
+   (a) **this org's own records:** the `member_folder_id` in local `member-index.json`, else in the member's handshake (`id:{artifacts_dir_id}/member-folder.json`) or registry entry. A folder this org already recorded is this org's, whatever it's called (spaces created before core 4.0.0 keep the old `Agent-Index-Private` name: there is no rename, and nothing looks the space up by name — every reader uses `id:{member_folder_id}`).
+   (b) `id:root/{space}`.
+   Otherwise create `id:root/{space}`. **Never adopt a folder by the legacy name `Agent-Index-Private`** — one this org hasn't recorded may belong to another org or an old install, so it's left untouched.
+1. Create the chosen space if it doesn't exist: `aifs_write("id:root/{space}/.keep", "Agent-index private member space for {org_name} — created {date}")`.
+2. `aifs_stat` the chosen space → record the **resolved** Drive ID as `new_id`. Never record the `root` alias or the name anywhere — registry, handshake, member-index, and pointers must always carry real Drive IDs. Then write or refresh `org.json`: `aifs_write("id:{new_id}/org.json", {"org_uuid": "{org_uuid or null}", "org_id": "{org_id}", "org_name": "{org_name}", "tagged": "{ISO 8601}"})`.
+3. **One-time content migration:** if the local `member-index.json` already has a `member_folder_id` that differs from `new_id` AND `aifs_exists("id:{old_id}")` (a pre-3.9.0 Shared-Drive member space) — **but never when the old folder's `org.json` names another org** (its content belongs to that org and is not copied): recursively `aifs_list` the old space and copy every file to the same relative path under `id:{new_id}/`. **For each destination directory, materialize it first** (`aifs_write` of an empty `.keep`) — `aifs_copy` does NOT auto-create destination parents (verified live 2026-06-04; cross-drive copy itself works). Then `aifs_copy` per file (`source`/`destination` args); if a copy fails, fall back to `aifs_read` + `aifs_write` for that file. Never delete the old space (the admin archives it manually later). If there is no old space or no prior id, skip silently.
 4. Write the handshake file so the admin-side reconcile can update the registry (members cannot write `/members-registry.json` fields reliably under least-privilege). **Address the artifacts dir BY ID (bug `groupshareapivisibility`)** — by-path write to the artifacts namespace is unreliable for a not-yet-propagated member, but testing confirmed a member CAN write to its own artifacts dir by id, pre-visit. Read the member's own registry entry (via the id-anchored registry read in Step 6) to get `artifacts_dir_id`, then:
    `aifs_write("id:{artifacts_dir_id}/member-folder.json", {"member_hash": "{member_hash}", "member_folder_id": "{new_id}", "previous_folder_id": "{old_id or null}", "recorded": "{ISO 8601}"})`
-   **The `id:` prefix is mandatory** — `id:{artifacts_dir_id}/member-folder.json`, never a bare `{artifacts_dir_id}/member-folder.json` (a bare id segment is read as a literal path and FAILS with `BACKEND_ERROR`). If `artifacts_dir_id` is absent from the member's registry entry (an older invite that predates the fix), fall back to the path form `aifs_write("/shared/members/artifacts/{member_hash}/member-folder.json", {...})` and note that the by-path fallback was used.
+   **The `id:` prefix is mandatory** — `id:{artifacts_dir_id}/member-folder.json`, never a bare `{artifacts_dir_id}/member-folder.json` (a bare id segment is read as a literal path and FAILS with `BACKEND_ERROR`). If `artifacts_dir_id` is absent from the member's registry entry (an older invite that predates the fix), fall back to the path form `aifs_write("/shared/members/artifacts/{member_hash}/member-folder.json", {...})` and note that the by-path fallback was used. **On OneDrive the path form is the primary** (a bare `id:{artifacts_dir_id}` resolves against the member's own drive — finding 63).
 5. Set `member_folder_id: "{new_id}"` in the local `member-index.json` (created below, or updated in place if it exists).
 
-The subroutine is idempotent: re-runs find the folder existing, stat the same id, and harmlessly overwrite the handshake. All member-remote-space operations address the space as `id:{member_folder_id}/...` (standards.md § "Addressing: paths vs. ID anchors").
+The subroutine is idempotent: re-runs find the folder existing, stat the same id, and harmlessly overwrite the handshake. All member-remote-space operations address the space as `id:{member_folder_id}/...` (`runtime-reference.md` § "Addressing: Owned Content and Sharing").
 
 Create the local `member-index.json`:
 
@@ -230,6 +240,8 @@ Create the local `member-index.json`:
   "member_folder_id": "{new_id from the ensure-my-drive-space subroutine above}",
   "agent_index_version": "{the ACTUAL installed core version — read it from agent-index-core/collection.json `version` on the remote; do NOT hardcode. Hardcoding a stale default like 2.0.0 is the versionmarker bug.}",
   "last_updated": "{today YYYY-MM-DD}",
+  "helper_removed": true,
+  "last_applied_update": "{latest_id from id:{resource_ids.shared_root}/updates/latest.json (OneDrive: /shared/updates/latest.json), or null if the org has published nothing yet — newmembercursor (core 4.0.0 live test finding 43): a member who just installed from the current bootstrap zip is already at the latest published state, so without a cursor every past entry would look pending}",
   "installed": {
     "skills": [],
     "tasks": []
@@ -237,15 +249,17 @@ Create the local `member-index.json`:
 }
 ```
 
+`helper_removed: true`: a workspace created by core 4.0.0 or later never had the retired permission helper, so apply-updates Step 1.6 has nothing to remove.
+
 If `member-index.json` already exists: do not overwrite. This is a safety check — if it exists, this might be a re-run of setup and we should not lose installed capability records.
 
 > **Write `member-index.json` shell-first, then verify (localcfgtrunc — ms-install-4 AND ms-install-5).** Compose the full JSON in-memory and write it with a single shell redirection to an executor-readable path — NOT the editor file-write path. The Cowork mount truncated/null-padded member-index.json mid-write in both ms-install-4 and ms-install-5 (caught only because the next read failed to parse); writing shell-first avoids the torn write entirely. Then read it back and `JSON.parse` it as a backstop (here and on any later update — e.g. when ensure-my-drive-space sets `member_folder_id`); if it doesn't parse or is missing fields you just wrote, rewrite via the shell and re-verify. Never proceed past a member-index write you haven't read back and parsed.
 
 **Step 6 — Register member on remote**
 
-Read the current `members-registry.json` from the remote filesystem **BY ID (bug `groupshareapivisibility`)**, using `resource_ids.members_registry` from the org-config you read by id in Step 4: `aifs_read("id:{members_registry_id}")` — **NOT** `aifs_read("/members-registry.json")` by path. **The `id:` prefix is mandatory** (`id:{members_registry_id}`, never a bare id). This is also the read the ensure-my-drive-space handshake (Step 5 item 4) depends on for `artifacts_dir_id`.
+Read the current `members-registry.json` from the remote filesystem **BY ID (bug `groupshareapivisibility`)**, using `resource_ids.members_registry` from the org-config you read by id in Step 4: `aifs_read("id:{members_registry_id}")` — **NOT** `aifs_read("/members-registry.json")` by path. **The `id:` prefix is mandatory** (`id:{members_registry_id}`, never a bare id). This is also the read the ensure-my-drive-space handshake (Step 5 item 4) depends on for `artifacts_dir_id`. **On OneDrive read `/members-registry.json` by path** (finding 63), and write it back by path below.
 
-Check if the member is already registered (by `member_hash`).
+Check if the member is already registered (by `member_hash`). **If your entry is missing, re-read once after ~30 s before adding one** (finding 44: a fresh sign-in can see a pre-invite copy of the registry). Use whichever copy has your entry.
 
 If not registered: add the member's entry:
 
@@ -259,7 +273,7 @@ If not registered: add the member's entry:
 }
 ```
 
-Write the updated registry back **BY ID**: `aifs_write("id:{members_registry_id}", "{updated content}")` — again with the mandatory `id:` prefix, never the `/members-registry.json` path. Keep the existing revision-aware / least-privilege behavior otherwise (re-read + retry on `REVISION_CONFLICT`; the member only touches its own entry's `display_name`/`email`).
+Write the updated registry back **BY ID**: `aifs_write("id:{members_registry_id}", "{updated content}")` — again with the mandatory `id:` prefix, never the `/members-registry.json` path (on OneDrive the reverse: the path, never a bare id). Keep the existing revision-aware / least-privilege behavior otherwise (re-read + retry on `REVISION_CONFLICT`; the member only touches its own entry's `display_name`/`email`).
 
 If already registered: update `display_name` and `email` if they've changed, otherwise leave as is.
 
@@ -291,20 +305,7 @@ org_name: {org_name}
 status: connected
 ```
 
-**Step 7b — Install the permission-helper binary (closes the member-side of nohelperpin)**
-
-**Release C + `regenzipnobinary` — the bootstrap zip carries NO binary; fetch the member's-arch build from `/shared/dist/binaries/` as an onboarding step (never from GitHub).** The zip is arch-neutral because the admin cannot know each member's os/arch at build time. So member-bootstrap MUST install the binary here — do **not** defer it to the member's first share (the `regenzipnobinary` miss was onboarding completing without a binary, leaving the member to hit `binary_not_found` at first share). Steps: **detect the host `os`/`arch`; select the matching build** from the manifest's per-backend×os×arch `binaries[]`; **`aifs_read` that specific build** from `/shared/dist/binaries/`; **SHA-verify** it against its own manifest entry; place it (shell-first + read-back) at `mcp-servers/permission-helper-go/agent-index-show-plan{ext}`; write `version.txt`; then prompt `--register` (below). This is the same arch-select-and-fetch as `apply-updates` Step 1.6. **If no build is published for the member's `<os>/<arch>`, FAIL LOUD** — "no permission-helper build published for your platform (`<os>/<arch>`) — ask your admin to publish it via `@ai:pin-binary-version` / `@ai:update`" — and do **not** report onboarding complete with a missing/mismatched binary. **Never fetch it from GitHub.**
-
-**Register the `agent-index://` handler — manual host step in Cowork (hostregister), per platform.** The registration CANNOT run from a Cowork session (Linux sandbox; the binary is host-native), and a Linux-sandbox registration of a Windows/Mac binary is NOT host registration. Do NOT claim it auto-registers or "registers on first use." Surface the exact host step as a required one-time action:
-- **Windows** (PowerShell — note the leading `&` and quotes): `& "{project_dir}\\mcp-servers\\permission-helper-go\\agent-index-show-plan.exe" --register`
-- **Linux host:** `"{project_dir}/mcp-servers/permission-helper-go/agent-index-show-plan" --register`
-- **macOS host:** run the bundled **`.app` installer** — `--register` on the bare binary always fails on darwin (macOS registers bundles, not loose executables; bug `20260626-8d20ea22` `macosregister`). The darwin build fetched from `/shared/dist/binaries/` (the matrix's darwin entry) is the notarized `Agent-Index Helper.app` / `installer/darwin/install.sh`, not a loose binary; the member runs the installer, which places the `.app` in `~/Applications/` and registers via `lsregister`.
-
-After the member runs it on the host, **verify** rather than assume: macOS → `lsregister -dump | grep agent-index:` (or `--isregistered`); Windows → the HKCU `agent-index` scheme key; Linux → `xdg-mime query default x-scheme-handler/agent-index`. On the member's native platform a registration failure is a **hard** blocker for sharing — surface it as such, do not proceed as if registered.
-
-Signing behavior depends on the directory binary entry's **`signing`** field. If `"trusted"`: the assets are code-signed/notarized and an OS block ("unverified publisher" / Smart App Control) is a signing/release **defect** (bug `20260626-8d20ea22-2`) — report it, don't work around it. If `"unsigned-bypass"` (the interim state while certs are pending): the binary is intentionally unsigned, so a block is **expected** — point the member at the Smart App Control **Evaluation-mode** workaround in `lib/permission-helper-go/SIGNING.md` (and right-click→Open for an unsigned macOS `.app`).
-
-**Registration is a do-it-now completion step, not a closing footnote (`helpernoreg`, ms-install-9).** Present the register command as a required action the member runs **during bootstrap**, and re-surface until the helper setup check confirms the handler is registered. Do NOT defer it to a one-line "note at the end," and do NOT report bootstrap "complete" in a way that implies sharing works — because if the member skips registration, their **first owned-content share will emit an `agent-index://` link that does nothing** (the handler isn't registered; and in the unsigned-bypass interim SAC may block it even if it is). When that happens, the fallback is the helper's headless **`--cli <spec PATH>`** path (see `permission-change-helper` § headless fallback — pass the spec FILE path, not the `agent-index://` URL). State that consequence plainly so the member registers now rather than discovering the dead link at first share. (If a member's install pre-dates a pinned helper, this step is skipped silently.)
+**Step 7b** — (Step removed in core 4.0.0: the permission helper is retired.)
 
 **Step 8 — Confirm and hand off**
 
@@ -312,11 +313,11 @@ Confirm to the member that bootstrap is complete:
 
 > "You're all set up and connected to {org_name}. Next, I'll help you configure your preferences and install your org's skills and tasks."
 
-**Offer install log upload:** If an install log file exists in `.agent-index/logs/` for this run and `log_collector_url` is configured in `agent-index.json`, offer to share it:
+**Offer install log upload:** If an install log file exists in `.agent-index/logs/` for this run, `log_collector_url` is configured in `agent-index.json`, **and the org runs released code** (local `agent-index.json` / org-config `distribution_channel` is null — a channel org's logs would pollute production telemetry; `channellogoffer`, finding 58), offer to share it:
 
 > "Your setup generated a diagnostic log that can help the agent-index team improve the experience. It contains step-level diagnostics with hashed identifiers — no credentials or personal information. Would you like to share it?"
 
-If the member accepts: invoke the `upload-install-log` task. If they decline: "No problem. The log is at `.agent-index/logs/{log_filename}` if you change your mind." If `log_collector_url` is not configured: skip silently.
+If the member accepts: invoke the `upload-install-log` task. If they decline: "No problem. The log is at `.agent-index/logs/{log_filename}` if you change your mind." If `log_collector_url` is not configured, or the org runs a distribution channel: skip silently.
 
 Hand off to the preferences-management skill for the initial setup interview, then to org-setup for capability selection and installation.
 
@@ -353,7 +354,7 @@ When something goes wrong, be specific and actionable. "Contact your org admin" 
 
 ### Constraints
 
-Never write to any remote file other than: `members-registry.json` (the member's registry entry, addressed by `id:{members_registry_id}`), the member's own bootstrap handshake (`id:{artifacts_dir_id}/member-folder.json`), and the member's own private-space marker in their My Drive (`id:root/Agent-Index-Private/.keep`). This skill reads from remote for org context and writes only those. All other remote writes are handled by other skills and tasks.
+Never write to any remote file other than: `members-registry.json` (the member's registry entry, addressed by `id:{members_registry_id}`; OneDrive by path), the member's own bootstrap handshake (`id:{artifacts_dir_id}/member-folder.json`; OneDrive `/shared/members/artifacts/{member_hash}/member-folder.json`), and the member's own private-space marker in their My Drive (`id:root/Agent-Index-Private/.keep`). This skill reads from remote for org context and writes only those. All other remote writes are handled by other skills and tasks.
 
 Never overwrite an existing local `member-index.json`. If it exists, the member has installed capabilities and overwriting would lose that data.
 

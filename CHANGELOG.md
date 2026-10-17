@@ -1,5 +1,202 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.0.1] — 2026-10-17 — OneDrive upgrade fixes and the post-4.0 backlog
+
+Fixes from the OneDrive upgrade test of 4.0.0 (ms_install_10 admin, ms_prod_10 member, findings 61–75) plus the items held back from the Google Drive round (findings 6, 8, 14, 20, 23, 44, 50, 53–56). Pairs with onedrive adapter 2.7.1, gdrive adapter 2.11.5, developer 1.14.1, marketplace 2.22.2, projects 4.4.2, library 1.7.2, client-intelligence 2.4.2, bug-reports 1.4.3 and brand-book 1.2.1.
+
+### Fixed — OneDrive
+- **OneDrive reads org files by path (finding 63).** A bare `id:{item}` on OneDrive resolves against the caller's own drive, so `id:{org_config_id}` and the code-folder rows `id:{folder_id}` failed on ms_install_10. standards.md § Addressing now has one backend table (gdrive: id first, path fallback; OneDrive: path first, drive-qualified `id:{drive_id}:{item_id}` fallback), and the CLAUDE.md template, member-bootstrap 3.13.2, session-start 3.2.1, invite-member 1.13.3, remove-member 1.4.1, view-permissions 1.0.1, verify-workspace-policy 1.0.3, org-setup 3.12.1, apply-updates 4.2.2, publish-updates 3.20.1 (6e) and create-org 3.15.2 follow it. The permission-changes `resource` rule is backend-conditional.
+- **invite-member 1.13.3 resolves the person's identity before creating anything (finding 75).** A non-tenant address now stops with a plain message (add them to the Microsoft 365 tenant first — a guest counts — then invite by their tenant address) and leaves no orphan artifacts folder.
+- **permission-changes:** an external share refused by the tenant (`EXTERNAL_SHARE_BLOCKED` from onedrive adapter 2.7.1, also `EXTERNAL_SHARE_UNSUPPORTED` / `POLICY_DENIED`) reads "your Microsoft 365 / Google Workspace sharing settings don't allow sharing with people outside the org" plus the backend's reason, never "not a valid account" (finding 72); OneDrive outside-org rows say Microsoft emails an invitation.
+
+### Fixed — upgrades and publishing
+- **publish-updates 3.20.1 Step 0g enforces the 3.x → 4.x gate (findings 61, 64)** using the versions the org will be on after this publish (a marketplace or collection update in the same publish counts), and halts with the list of blockers. `upgrade/3-to-4.md` points to it.
+- **apply-updates 4.2.2 removes retired capabilities (finding 69).** Step 1.6 archives the old `permission-change-helper` entry and folders with the helper; Step 3 lists any capability core or the marketplace dropped and archives it in the confirmed plan; the manifest sync skips such orphans instead of failing the whole collection.
+- **apply-updates accepts several operations per update entry** (`collection-update` plus `provider-register` / `provider-deregister`; finding 62).
+- **Migration 7 says when a private space predates the org** (finding 68).
+- **regenerate-bootstrap builds the zip in a sandbox temp dir** (the Cowork mount refuses zip's temp files) and uploads raw bytes with a size + SHA read-back (finding 67); create-org Step 12 likewise.
+- **`/shared/dist/` is rewritten only by create-org Step 11 and publish-updates 6.5** (finding 74); install, download and upgrade defer to the next publish.
+- **Dotfiles are never uploaded or deleted by the sync** (`.git*`, `.github/`, `.vscode/`, `.idea/`, `.DS_Store`; `.claude/`, the cowork-plugin manifest files and `.gitkeep` are kept) — publish-updates Step 0, create-org Step 9, apps/ copies (finding 23).
+
+### Fixed — create-org
+- **No raw-GitHub fetch of the adapter directory before cloning** (finding 6): Step 3 uses the fixed backend list or an existing listings clone, and 3c checks the choice against the fresh clone.
+- **Resumable after Step 8** (finding 53): install-state records `phase3-in-progress` / `phase3_step`; a re-run resumes instead of routing to edit-org (edit-org 3.5.2 hands it back); `current-state.md` lives at `.agent-index/create-org-current-state.md` until the workspace exists.
+- **Uploads in ~10-file batches, safe to re-run** (finding 54); **Step 9.5 provisions one collection at a time and creates every collaborative-acls folder before its grants** (finding 55).
+
+### Fixed — members and sessions
+- **member-bootstrap re-reads org-config and the registry once (~30 s) when a first sign-in sees a stale copy** (finding 44).
+- **session-start tells a member when their access to a collection was removed** outside agent-index; `member_read_grant` is documented as a cache verified by publish-updates 6e / apply-updates M4 (finding 20).
+- **permission-changes notes access that is more than a row needs** ("already has writer — more than this needs") and verify-workspace-policy 1.0.3 reports member-writable collection code folders, with the SharePoint explanation (finding 65).
+- **standards `staletmpinject` covers every scratch file** — `mktemp` only, never a fixed `/tmp` name (finding 60).
+
+### Changed — wording
+- Install paths: `{type}` is the singular `skill` / `task`; an entry's `installed_path` wins, so 3.x installs that recorded `skills/` / `tasks/` keep them (finding 70). The upgrade flow writes the local manifest as `manifest.json` (finding 70). Core `*-setup.md` files name the collection-qualified install path (finding 14).
+- **`collection-authoring-guide.md` (v1.8.1)** — the normative setup-responses format is stated in org-setup Phase 4b and here (finding 14).
+
+### Fixed — second round (OneDrive retest findings 76–84, bug review 2026-10-15)
+- **create-org Step 1 detects an existing org for admins off the Shared Drive** (bug `20261011-8d20ea22-183003-2dea`; Kallista Salak, core#19). The org counts as configured if either the id check or the path check finds `org-config.json`; a decline, a check that couldn't run, or local evidence of an earlier org all halt instead of starting a fresh install. Merged with two adjustments: the finding-53 "this task's own unfinished org → resume" test runs first, and on OneDrive the id check uses the drive-qualified `id:{drive_id}:{org_config_id}`. **Step 8 refuses to overwrite an existing `org-config.json`** (her recommended follow-up, `createorgoverwrite`).
+- **publish-updates lists remote leftovers** — skip-listed files, anything under a directory the clone no longer has, empty folders — on every run and offers them for deletion as a separate confirmed list (finding 76, bug `20260824-68dff8bf-021702-b49a`); `channel_head` is the string `"channel/<name>@<sha7>"` (finding 77); 6e also repairs the all-members reader grant on `/shared` (bug `20260803-8d20ea22-231012-b7c2`); Step 0a uses the commits-LIST endpoint for the head SHA (bug `20260617-8d20ea22-165359-6715`); Step 0b regenerates a stale bootstrap zip even on a no-diff publish (bug `20260803-8d20ea22-230939-a1f3`).
+- **apply-updates:** scratch files via `mktemp` only, "up to date" cross-checked against `latest.json`, Migration 5 never lowers a version (bug `20260928-8d20ea22-140909-e0a9`); `manifest_sync` entries for collections with nothing installed are dropped (finding 82); `apps/` is overwritten in place and `pending-update-plan.json` is marked resolved, so the Cowork mount's delete block can't stall an update (finding 83).
+- **standards:** durable read-back waits ~5 s and re-reads once before declaring a mismatch (finding 78); an `authenticated: false` with `network_error` / `tls_or_proxy_error` / `credential_write_failed` (gdrive 2.11.5) is reported, not re-authenticated — session-start and member-bootstrap too (bug `20260822-8d20ea22-143449-a1c4`).
+- **permission-changes:** an outside-org share refused with no policy-specific reason reads "refused to share outside the org — usually the tenant's external-sharing setting" plus the backend's text (finding 84).
+- **lib/clone:** a collections entry with `version` clones tag `v<version>` and fails loud if it's missing (bug `20260926-8d20ea22-133903-0ddf`); a target folder that isn't a git repo is cloned into when empty, otherwise reported plainly, and git's own error text is passed through (bug `20261010-8d20ea22-145943-72ef`).
+- **session-bootstrap hook finds the project dir from its own location** when `CLAUDE_PROJECT_DIR` is unset (bug `20260822-8d20ea22-143450-b7e2`).
+
+### Fixed — third round (Dev Two retest findings 85–90)
+- **publish-updates 6a records `source_ref` / `source_commit`** (and `source_tag` for tags) on the core and marketplace org-config entries from clone-resolution, so a channel org's org-config matches published-state (finding 89).
+- **apply-updates and org-setup add routing phrases only for capabilities the member has installed** (core and marketplace exempt); existing phrases are kept (finding 90).
+- **The bootstrap-zip content hash is reproducible** — computed over the input files (the `.plugin`'s inner files, never the archive, which embeds timestamps) as sorted `path<TAB>sha256` lines, so publish-updates Step 0b's check can recompute it (finding 91; the first publish after upgrading regenerates the zip once).
+- **invite-member says when a Google Drive address may have no Google account** — detected only when the share fails; the halt message says so, and the cleanup leaves nothing (finding 87).
+
+## [4.0.0] — 2026-10-13 — Permission helper removed
+
+**MAJOR — breaking for any collection that still calls the permission-change-helper.** Core 3.32.0 moved every permission change to `internal/permission-changes.md` and kept the helper only for collections that hadn't moved. Every first-party collection has moved, so 4.0.0 removes the helper completely. Read `upgrade/3-to-4.md` before publishing: it refuses the upgrade while any installed collection is below its procedure release (projects 4.4.0, strategy 1.3.0, library 1.7.0, brand-book 1.2.0, cx-studio 4.1.0, client-intelligence 2.4.0, bug-reports 1.3.3, marketplace 2.22.0). Pairs with marketplace 2.22.0 (check-updates 2.13.1) and resource-listings (infrastructure-directory without `binaries[]`).
+
+### Removed
+- **`permission-change-helper` skill** (definition, setup, manifest) and **`pin-binary-version` task** (definition, setup, manifest). `collection.json` `api[]` no longer lists them.
+- **`lib/permission-helper-go/`** (the `agent-index-show-plan` binary source, installers, signing), **`lib/permission-spec/`** (`build-permission-spec`) and **`lib/clone/install-helper-binary.{ps1,sh}`**.
+- **Helper provisioning everywhere:** the infra clone no longer downloads or registers a binary (`lib/clone/clone-repos.{ps1,sh}`); create-org 3.14.0 drops the binary steps (old Step 13b and the binary bits of 3c, 9, 11, 12); member-bootstrap 3.11.0 drops Step 7b; org-setup 3.10.0 drops Phase 5b; `templates/backend-distribution.md` and `templates/clone-script-generator.md` drop `/shared/dist/binaries/`, binary SHAs and binary verification.
+- **`binaries` in org-config** (`org-config-schema.json`) and **`binaries[]` in the infrastructure directory.**
+- **standards.md:** the "Deprecated: the permission-change-helper flow" section (URL-handler and binary-download trust contracts) and the code-signing rule for native binaries.
+
+### Added
+- **`lib/uninstall/remove-permission-helper.{ps1,sh}`** (Level 3): removes the `agent-index://` handler, the install-folder copy (including the stray `agent-index-show-plan{ext}` folder) and the standalone installer's copy. Idempotent; prints one JSON line; exit 1 on partial failure, which never blocks an update.
+- **apply-updates 4.0.0 Step 1.6 "Remove the retired permission helper"** replaces Binary Pin Sync. It runs on every update until the removal succeeds (`helper_removed: true` in member-index).
+- **publish-updates 3.18.0:** Step 6.5 deletes `/shared/dist/binaries/` (listed and confirmed with the admin); Step 6.0 drops the org-config `binaries` key.
+- **`upgrade/3-to-4.md`** with the collection-version gate, the admin and member halves, and 3.x end of support (2027-01-31).
+
+### Changed
+- marketplace `check-updates` 2.13.1 no longer checks registered binary tools.
+
+### Fixed (dev-1 live test — batch 6, release wording)
+- **apply-updates 4.2.1:** the Constraints name the member's own space and handshake as the only remote writes (Migrations 2 and 7), instead of "never modify remote" (finding 51).
+- **create-org 3.15.1:** the bootstrap-zip rule names what is excluded (credentials, tokens, path cache) and documents the gdrive installed-app OAuth client secret the zip carries (finding 52); the admin gets an artifacts dir and `artifacts_dir_id` before the private-space subroutine, so its handshake is written by id (finding 57); Step 13 names the space `Agent-Index-Private-{org_uuid}`.
+- **member-bootstrap 3.13.1:** no install-log upload offer on a distribution-channel org (finding 58).
+- **upgrade/3-to-4.md:** cx-studio's minimum is 5.1.0. cx-studio 5.0.0 was released separately and still calls the helper; its move to the permission-changes procedure ships as 5.1.0 after this release, so orgs with cx-studio installed stay on core 3.x until then.
+
+### Fixed (dev-1 live test, Dev Two — batch 5)
+- **Member private spaces are named by a permanent org UUID (`privatespacecrossorg`, findings 9/40).** create-org 3.15.0 generates org-config `org_uuid` (publish-updates 3.20.0 standing reconcile 6h back-fills existing orgs); member-bootstrap 3.13.0 creates `Agent-Index-Private-{org_uuid}`, adopts a folder only from this org's own records (never by the legacy name `Agent-Index-Private`), and tags it with `org.json` (`org_uuid`); apply-updates 4.2.0 Migration 7 tags recorded spaces and gives a member whose space another org tagged a new one. Nothing finds the space by name, so existing spaces keep their names.
+- **A new member's update cursor is set at bootstrap** (`newmembercursor`, finding 43): member-bootstrap writes `last_applied_update` from `latest.json`.
+- **org-setup 3.12.0 creates `routing.json` for a fresh member** (`freshrouting`, finding 45), using apply-updates' Phase 5 procedure.
+- **remove-member 1.4.0 keeps a removal record** (`removed_members[]` in the registry), so invite-member 1.13.2 recognises a returning member and clears the record on re-invite (`removalrecord`, finding 42); both read and write the registry by id.
+- **permission-changes procedure:** a gdrive 2.11.4 transfer that moves the folder but not all of its contents is recorded as failed (`TRANSFER_PARTIAL`), so no caller updates its records as if it were complete.
+- **CLAUDE.md template:** members on Google Drive may also need the id form for `/shared/**` (finding 46).
+
+### Fixed (dev-1 live test, Dev Two)
+- **Members read org files by id anchor (`memberpathreads`, findings 34/36).** A member in two orgs resolved `/agent-index-core` and `/org-config.json` into the other org's drive (pairs with gdrive adapter 2.11.3, which scopes the lookup to the org's drive). session-start 3.2.0 reads org-config as `id:{org_config_id}` and `latest.json` / the registry through `resource_ids`; apply-updates 4.1.0 adds a "Remote addressing" table and reads gdrive collections id-first; the CLAUDE.md template tells members to load definitions from `id:{folder_id}/api/{name}.md`; standards.md extends the bootstrap id-anchor rule to every member read of a root-level resource.
+- **One private space per org (`privatespacecrossorg`, finding 9).** (invite-member 1.13.1 shows the new name.) member-bootstrap 3.12.0 names the space `Agent-Index-Private ({org_id})`, tags it with `org.json`, and never reuses a space another org owns; apply-updates Migration 7 checks existing members.
+- **Helper removal works on member installs (`uninstallscriptmissing`, finding 35).** apply-updates Step 1.6 reads the removal script from the org's core into `.agent-index/tmp/uninstall/` when the install has no local `agent-index-core/lib/`.
+- **apply-updates 4.1.0:** the core-update `from_version` is the version before Migration 5 synced it (`m5beforemerge`, finding 32); entries without `operations[]` are read as one operation (`flatupdateentry`, finding 27); routing mappings to removed capabilities are pruned (`routingstale`, finding 33).
+- **publish-updates 3.19.0:** Step 0b also derives prerequisites from state (template vs root CLAUDE.md, CLAUDE.md and adapter vs the last publish), so a re-run doesn't lose them (`step0bprereqlost`, finding 31); the M3 guard ignores the `2026-10-13` placeholder on channel orgs (finding 29).
+- **org-setup 3.11.0** reads collections from their id-anchored base on gdrive (a member install checked another org's `projects` for `apps/` and installed projects without its scripts), and its upgrade flow replaces a capability's alias when the new setup template registers a different one (client-intelligence 2.4.1 `@ai:view-client-permissions`, finding 24).
+- **edit-org 3.5.1** syncs `agent-index.json` `adapter_version` when it deploys an adapter (`editorgadapterversion`, finding 28).
+- **upgrade/3-to-4.md:** the gate checks downloaded collections too, and install-collection applies the same minimums (`gatedownloaded`, finding 26).
+
+### License
+- **Licensed under AGPL-3.0-only with the Agent Index Collection Exception 1.0** (`AGPL-3.0-only WITH LicenseRef-AgentIndex-Collection-Exception-1.0`): the platform is open; collections and storage adapters built on it are their authors' to license (`COLLECTION-EXCEPTION.md`). Earlier releases keep the license they were released with.
+
+## [3.32.0] — 2026-10-01 — Permission changes: list, confirm, apply, verify
+
+**MINOR — additive for un-upgraded collections; changes how core's own tasks make permission changes.** Collections that still call the `permission-change-helper` keep working (the helper is deprecated, not removed). Pairs with **agent-index-marketplace 2.22.0** and **developer 1.14.0**; collections move over in their own releases. The helper is removed in **core 4.0.0**. Design record: `/shared/projects/core-improvements/artifacts/retire-permission-helper-{outcomes,solution-design,tech-design,test-plan}.md`.
+
+### Why
+Every permission change went through the `permission-change-helper`: a native binary, an `agent-index://` URL handler and a browser review page. That machinery is being retired. The replacement keeps the guarantees that mattered (the person sees exactly what will change, approves it, it runs under their own account, and it's verified) without the binary.
+
+### Added
+- **`internal/permission-changes.md`** — the one shared procedure for every share, unshare and ownership transfer: read current access → drop changes already in effect → show the exact table → fresh, explicit confirmation from the owner/admin running the task → apply under their own credentials → re-read to verify → record. Removals, ownership transfers and `inherit:false` are confirmed one at a time. Outside-org recipients are flagged, never blocked.
+- **`lib/permission-changes/permission-changes.js`** (Level 3; `plan` / `verify` / `record`, pure data, `node --test` suite). Changes must name a declared `source` (`task_spec`, `collaborative_acls`, `org_config`, `member_request`, `current_state`). There is no value for content the agent read, so such a change can't be proposed.
+- **Per-change final states:** `applied`, `skipped_noop`, `declined`, `failed`, `verify_mismatch`, `not_attempted`, `unsupported`, `awaiting_recipient`. Only the first two satisfy the verified-outcome gate.
+- **Caller contract** (procedure + standards gate corollaries):
+  - Never write any access record (pointer, roster, collaborators list, `meta.json`, registry, changelog event) before the procedure returns.
+  - Never derive destructive state (roster removal, `revoked`, a pointer flip, a stub) from declined or cancelled rows; a cancelled table declines every row.
+  - After removals, recompute "who has access" from a fresh `aifs_get_permissions` read.
+  - Recipients can be anyone the person names; outside-org addresses are flagged.
+  - Ownership transfers resume on re-run once the new owner accepts.
+- **`all_or_nothing` confirmation rule:** all confirmations are collected before applying, and declining any row applies nothing. This prevents half of an atomic set from being applied when its rows are confirmed one at a time (script `verify` enforces it; test V9).
+- **Approval record** at `members/{hash}/state/permission-changes.jsonl` (local; never used as a source of truth about current access; the backend activity log stays the audit trail).
+
+### Changed
+- **`standards.md`** — § "Permission-Modifying Operations" is replaced by § "Permission changes: list, confirm, apply, verify":
+  - the rule (no direct calls anywhere; the create-org exception is gone)
+  - trust rules
+  - who confirms
+  - what happens when the agent doesn't make a call (manual step, row pending)
+  - final states and the verified-outcome gate
+  - the approval record vs the backend audit
+  - backend notes
+
+  The URL-handler and binary-download trust contracts move under "Deprecated" until 4.0.0. The collaborative-ACL provisioning contract and the addressing conventions now reference the procedure. `grants[]` is accepted as a legacy alias for `acls[]`.
+- **`invite-member` 1.13.0** — Step 6 applies the artifacts-dir grants through the procedure (`task_spec`). The registry write and welcome email are gated on `complete`. The helper dependency is dropped.
+- **`remove-member` 1.3.0** — Step 2.5 removals go through the procedure (each confirmed individually). The recipient is matched by `sharing_identity`. The stale "does not touch Drive ACLs" description is fixed.
+- **`publish-updates` 3.17.0** — 6e member-read reconcile goes through the procedure (`org_config`), and sets `member_read_grant` per collection from row states.
+- **`apply-updates` 3.17.0** — Migration 4 goes through the procedure, and writes `member_read_grant` after the grants.
+- **`create-org` 3.13.0** — the Step 8 root grants, Step 9 core reader, Step 9.5 collection provisioning and Step 10 marketplace reader go through the procedure, with the admin confirming. The install-time direct-apply exception and helper fallback are removed. Also fixed: Outputs no longer claims the helper binary is baked into the bootstrap zip.
+- **`verify-workspace-policy` 1.0.2**, **`templates/regenerate-bootstrap`** Step 7 (now reads inherited permissions), **`.claude/CLAUDE.md.template`**, **`ROADMAP.md`** — now reference the procedure.
+- **`collection-authoring-guide.md` (v1.8.0)** — owned-content and verified-outcome guidance moved to the procedure; new "Sharing callers" rule set.
+- **`standards.md`, additional changes:**
+  - Who confirms: org admins (`admin`), content owners (`owner`) and collection admins (`collection_admin`: a collection's backend-enforced admin role, e.g. client-intelligence).
+  - `inherit:false` now requires adapter contract ≥ 2.0.0 and organizer/owner (was helper ≥ 0.3.0); ignored on onedrive.
+  - The collaborative-ACL provisioning contract gains an upgrade-ordering guard (MUST: a collection whose grants wait on an upgrade review ships the upgrade script and says so in `collaborative-acls.json`).
+  - `sharing_identity` is email-form (UPN/mail), never a bare objectId.
+  - Implementation enforcement matches preflight Check 17.
+- **Procedure details:**
+  - Read locally first (works during `create-org` before core is uploaded).
+  - Registry path fallback while `resource_ids.members_registry` is null.
+  - Callers can declare extra org identities for the run (invite-member's new member).
+  - `reason` is optional (defaults to the run's purpose).
+  - `confirmer: "collection_admin"`.
+- **`remove-member` 1.3.0** — owner-departed pointer annotations are written only after the registry removal succeeds (new Step 3.5); skip condition 2 goes straight to Step 3.
+- **`publish-updates` 3.17.0 6e / `apply-updates` 3.17.0 Migration 4** — `member_read_grant` flips `pending` → `granted` when the grant is already present (including a manual fix). 6e's org-config write-surface list includes `member_read_grant`.
+- **`create-org` 3.13.0** — non-`complete` handling for the core and marketplace reader grants (continue; 6e offers them again).
+- **`member-bootstrap` 3.10.1, `org-setup` 3.9.3; `create-org` Step 13b** — helper install and registration are now optional and deprecated, and never block onboarding.
+- **`verify-network-allowlist` setup 1.0.1** — standard setup frontmatter and Upgrade Behavior (preflight structural fix).
+- **`invite-member`** — the new member's address is `member_request`. Step 7's group question is asked before the grant table, and the new member is declared as an org identity only if they're already in the all-members group (so group access they don't have yet never counts as already in effect). Frontmatter YAML quoting fixed; manifest dependency name aligned.
+
+### Added — distribution channels (stage unreleased code for testing)
+Design record: `/shared/projects/core-improvements/artifacts/distribution-channels-{outcomes,solution-design,tech-design,test-plan}.md`.
+- **org-config `distribution_channel`** (mirrored in the admin's `agent-index.json`). null = released code (default, unchanged behaviour). A name (e.g. `dev-1`) = every repo with a `channel/<name>` branch comes from that branch head; the rest fall back to release tags.
+- **`lib/clone/resolve-refs.js`** (+ tests) is now the single place that decides each repo's ref. Both clone drivers call it.
+  - **Fixed:** the bash driver sorted tags on the first dot-field only and picked `v3.9.1` over `v3.29.2`, so it disagreed with the PowerShell driver.
+  - **Fixed:** the PowerShell driver failed on suffixed tags.
+  - **Fixed:** detached shallow clones silently failed to refresh.
+  - Every run writes `.agent-index/clone-resolution.json`.
+- **`standards.md` § "Distribution channels"**, plus amendments to the backend-first and release-procedure rules (distribution pins to tags unless the org names a channel).
+- **`create-org` 3.13.0** asks for the channel and passes it to both clone manifests. Step 10 uses the infra clone instead of a default-branch ZIP.
+- **`edit-org` 3.5.0** gains a *Distribution channel* option (set, change or clear, then refresh and publish). The adapter update follows the resolved ref and, on channel orgs, compares by checksum.
+- **`publish-updates` 3.17.0** detects changes by commit on channel orgs and on any channel change, whatever the version direction. It records `commits` + `distribution_channel` in `published-state.json`, refuses `--check-upstream` on channel orgs, and verifies against the local catalog clone.
+- **`apply-updates` 3.17.0** never skips a commit-carrying operation for having the same or a lower version, and mirrors the channel locally.
+- **`session-start` 3.1.0** shows a channel banner on channel orgs and skips the public adapter-directory nag there.
+- **`templates/backend-distribution`** introduces `dist-manifest/2` (`channel`, `channel_head`, `sources{}`); readers accept `/1`. **`templates/clone-script-generator`**: the manifest's `channel` field is required (may be null).
+- **`org-config-schema.json`** documents `distribution_channel` and the `installed_collections[]` fields tasks already write.
+- **Review fixes (verifier round):**
+  - **Node.js on the admin's host is needed only for channels.** Without Node the drivers resolve release tags with a built-in numeric sort and refuse a channel with a clear message, so production admins without Node are unaffected.
+  - **publish-updates compares what's on the backend:** core and marketplace from the clone record, collections from `installed_collections[].source_commit` (set by upgrade-collection), the adapter from the deployed bundle checksum. The commit rule also covers *leaving* a channel (absent = null; previous `channel/` refs).
+  - **publish-updates refuses clones refreshed for a different channel** than org-config names.
+  - **edit-org's channel switch** runs refresh → upgrade-collection per collection → adapter update → publish, and compares the adapter by checksum after leaving a channel.
+  - **create-org keeps the channel across the session restart** (install-state `collected.distribution_channel`).
+  - The resolution record carries `channel` per repo.
+  - A zero-tag infra repo with no version is a phantom again (production behaviour restored).
+
+### Deprecated
+- **`permission-change-helper` 1.4.0** (skill, binary, `agent-index://` handler, `lib/permission-spec/`) — kept working through 3.x for collections not yet moved; removed in 4.0.0 together with `pin-binary-version` and the binaries registry entries.
+
+### Fixed — fresh-clone setup (`createorgnoseed`)
+- **`create-org` Step 1 now creates `agent-index.json` from `templates/agent-index.template.json` on a fresh clone.** Since 3.6.0 retired `agent-index-core/agent-index.json`, nothing created the root configuration file, so a fresh clone halted at Step 1 unless the agent improvised the copy. Found by the 3.32.0 live test (new org on `channel/dev-1`). The README's Step 1 layout is corrected to match.
+
+### Fixed — found in the 3.32.0 live test (batch 2)
+- **create-org Step 9.5 uploads each collection to `/{collection name}/` (`createorgrepopath`).** It used the clone directory's repository name (`/agent-index-marketplace-projects/`), so every capability read failed with `FILE_NOT_FOUND`.
+- **create-org Step 9.5 always puts the code-folder reader row in a collection's table (`createorgcodedirrow`),** also when the collection's setup has a grant table of its own (client-intelligence). A check before moving on catches a missing row.
+- **create-org Step 11.6 seeds the update baseline (`createorgupdatebaseline`):** `published-state.json`, an `update-log.json` with a `000` baseline entry, and `latest.json`. The admin's cursor starts at `000`. The first publish then contains only real changes, and session-start always uses the update-instruction check.
+- **session-start no longer compares capability versions with collection versions (`capversionfallback`).** They are independent since 3.7.0, so the comparison reported almost every capability as upgradable.
+- **publish-updates Step 0b no longer halts when Step 0 found no core or marketplace file changes (`step0bfirstpublishhalt`).** Collection upgrades, adapter changes, channel commits and a first publish are found by Steps 1–3, which decide "nothing has changed".
+- **invite-member (`invitestalefolder`):** a previous membership is decided by the members registry, not by an existing artifacts folder. A cancelled invite deletes the empty folder it created.
+- **apply-updates:** the permission helper is optional when it isn't installed (`helperpinoptional`). The adapter's embedded-URL scan is advisory, because it aborted every real gdrive bundle; the checksum gate is the integrity control (`adapterdomainscan`). An adapter-step stop halts the whole update without advancing the cursor.
+- **org-setup: Pre-Setup Checks are advisory for installation (`presetupblocks`).** Only "collection setup completed" blocks; unmet checks are recorded and mentioned.
+- **CLAUDE.md template: when no `AGENT_INDEX_BOOTSTRAP` signal arrives, run session-start before the first request (`sessionstartnorun`).** In Cowork the hook's output often never reaches the session.
+- **Channel orgs don't upload install logs (`channellogupload`):** create-org Step 16 doesn't offer it, and `upload-install-log` halts unless asked explicitly.
+- **lib/clone/install-helper-binary expands `{ext}` in `install_destination` and prints the host-verified SHA-256 (`helperext`).**
+- **permission-changes unit test V10:** a direct grant layered on inherited access verifies as applied and can be removed. This is the shape the gdrive adapter reports from 2.11.2 (`getpermsinheritedmask`).
+
 ## [3.31.0] — 2026-09-27 — Multi-marketplace: unique names instead of mandatory prefixes; two publish-updates fixes
 
 **MINOR — relaxes a 3.30.0 rule; every 3.30.0-valid catalog stays valid.** Pairs with **agent-index-marketplace 2.21.0**.
@@ -694,6 +891,7 @@ helper-go 0.4.0 bare-ID specs already work on My Drive unchanged (verified live 
 ### Added
 
 - **`standards.md` § "Cache-busting directory/version fetches"** — normative rule that any task fetching a `raw.githubusercontent.com` directory/version URL must append a unique cache-buster, so future authored tasks don't reintroduce the silent-staleness footgun.
+  > **Correction (2026-10-01).** This section no longer exists. It was replaced in [3.11.0] by `standards.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback", which supersedes the cache-buster rule.
 
 ### Notes
 
@@ -1312,6 +1510,7 @@ The contract change applies to all backends, but the v2.2.0 release ships the ne
 - `org-config-schema.json` — reference schema for org-config.json
 - `standards.md` — open marketplace collection specification
 - Setup templates and manifests for all skills and tasks.
+
 
 
 
