@@ -38,18 +38,36 @@ Members use natural language to interact with agent-index. They say "what's on m
 
 When a member makes a request:
 
-1. **Match against natural language mappings** (from `routing.json` if loaded, otherwise the default mappings — see § "Natural language → capability mapping" — plus the member's installed capabilities in `member-index.json`). If the intent matches an agent-index capability, route to it.
-2. **Match against `@ai:` alias tables** if the request uses explicit alias syntax.
-3. **Use catch-all resolution** for `@ai:{name}` aliases not in the tables.
-4. **Only use external tools** if no agent-index capability matches and the request falls outside agent-index scope.
+1. **`@ai:` aliases first.** If the request uses explicit alias syntax, resolve it through the alias tables below, then catch-all resolution for `@ai:{name}` aliases not in the tables.
+2. **Match against natural-language phrases**, following § "Routing rules" below. If the intent matches an agent-index capability, route to it.
+3. **Only use external tools** if no agent-index capability matches and the request falls outside agent-index scope.
 
 ### Natural language → capability mapping
 
-At session start, `session-start` loads the member's personalized routing mappings from `members/{member_hash}/profile/routing.json`. These mappings associate natural language phrases with specific capabilities and take precedence over the defaults. Members can customize their mappings via `@ai:preferences` (or "edit my routing").
+At session start, `session-start` (Step 1.5) loads the member's routing phrases from `members/{member_hash}/profile/routing.json`, active phrases only, grouped by capability, with custom phrases marked. Each phrase is either a **collection default** or **member-custom**, and can be switched off. Members view and change their phrases through `@ai:preferences` ("show my phrases", "edit my routing").
 
-If `routing.json` is not present (new installs, pre-Phase 2 members), use the default mappings in `runtime-reference.md` § "Default Natural-Language Mappings" (how to reach it: § "Reference Documents" below). They are not exhaustive — use judgment to match new phrasings to the closest installed capability by checking `member-index.json`.
+`org-setup` creates `routing.json` for a new member, and `@ai:update` keeps it current: it adds the default phrases of new and updated collections for the capabilities you have installed (finding 90), updates a default whose target the collection changed, removes defaults the collection no longer declares, and never changes a phrase the member customized, except to switch it off when its capability is gone.
 
-When new collections are installed, their default triggers are merged into `routing.json` automatically (see `org-setup`). Members can review and customize these at install time or later via preferences.
+If `routing.json` is absent or unreadable, use the default mappings in `runtime-reference.md` § "Default Natural-Language Mappings" (how to reach it: § "Reference Documents" below).
+
+#### Routing rules
+
+**Which wins.** The first of these that matches:
+1. An explicit `@ai:{name}` alias.
+2. An active **member-custom** phrase.
+3. An active **collection-default** phrase.
+4. The default mappings, **only** when `routing.json` is absent or unreadable. When the file is loaded it already holds every collection default, so the table adds nothing.
+5. Judgment against the member's installed capabilities in `member-index.json`.
+
+**How phrases match.** Phrases are examples of intent, not exact strings:
+- An exact match, ignoring case, punctuation and quote style, wins outright.
+- Otherwise the phrase **closest in meaning** to the request wins. Length is a useful proxy ("what's on my plate today" is more specific than "what's on my plate"), but meaning is the rule.
+- If two candidates still fit equally and point to **different capabilities**, ask one short question naming both. Never pick silently.
+
+**What never routes.**
+- A switched-off phrase (`active: false`) never matches, by fuzzy matching either. It is a recorded choice.
+- A phrase whose capability is not installed (not in `member-index.json`; `agent-index-core` and `agent-index-marketplace` capabilities always count as installed — finding 90) does not route. Fall through to the next rule, and mention that the capability is available to install.
+- If two **active** mappings claim the same phrase for different capabilities (a hand edit or an interrupted update), ask rather than pick.
 
 ### How to execute a skill or task
 

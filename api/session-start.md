@@ -19,7 +19,7 @@ writes_to: null
 
 ## About This Task
 
-The Session Start Task is the foundation of every agent-index session. It runs automatically and silently before any member interaction begins. Its job is to reconstruct the member's working context from the member's local workspace and the org's remote filesystem so that Claude arrives at the first member interaction already oriented — knowing who the member is, what capabilities they have installed, what aliases invoke those capabilities, and whether anything in their environment requires attention.
+The Session Start Task is the foundation of every agent-index session. It runs automatically and silently before any member interaction begins. Its job is to reconstruct the member's working context from the member's local workspace and the org's remote filesystem so that Claude arrives at the first member interaction already oriented — knowing who the member is, what capabilities they have installed, what aliases and natural-language phrases invoke those capabilities, and whether anything in their environment requires attention.
 
 This task does not perform work on behalf of the member. It performs work on behalf of the system, so that every subsequent interaction in the session is informed and capable rather than cold and generic.
 
@@ -47,13 +47,37 @@ Parse the full contents. Register all installed skills and tasks into session co
 
 This step is the only hard dependency in the entire sequence. If `member-index.json` cannot be found or cannot be parsed:
 
-**On success:** Proceed to Step 2 with full registry loaded.
+**On success:** Proceed to Step 1.5 with full registry loaded.
 
 **On failure:** Halt session start. Surface the following to the member:
 
 > "I wasn't able to load your agent-index member index. This file is required to know what skills and tasks you have installed. This usually means your member profile hasn't been set up yet. To fix this: if you haven't set up agent-index yet, say **'set up my agent-index member workspace'** to begin. If you have set up before and need to reconnect to remote storage, say **'@ai:member-bootstrap'** to re-authenticate."
 
 Do not proceed with any further steps. Do not attempt to infer installed capabilities from the filesystem directly.
+
+---
+
+### Step 1.5: Load Routing Mappings
+
+Load the member's natural-language routing phrases so requests route through them (CLAUDE.md § "Routing rules"). This step is local only: it makes no remote calls and never writes.
+
+Read `members/{member_hash}/profile/routing.json` with native file tools. From its `mappings`, keep only those with `active: true`. Build a compact routing table in session context, one line per capability, grouped by collection:
+
+```
+{collection}/{capability}: phrase | phrase | phrase*
+```
+
+Mark a phrase with `*` when its `source` is `member-custom`, since custom phrases win over collection defaults. Drop `description` and every other field: they are for the preferences view, not for matching. Do **not** write the compact table to a file. It is rebuilt from `routing.json` every session, so there is only ever one copy to keep in sync.
+
+The compact table, not the raw file, is what the session keeps. The raw file is several times larger (about 60 KB for a typical member, against about 8 KB compacted) and would be charged to every session.
+
+**On success:** the routing table is loaded. Proceed to Step 2.
+
+**If `routing.json` does not exist** (members set up before core 4.0.0 who haven't run an update since; `org-setup` creates it for new members): routing uses the default mappings (`runtime-reference.md` § "Default Natural-Language Mappings"). Queue one advisory notice for Step 8: "You don't have a personal routing file yet, so I'm using the default phrases. Running `@ai:update` creates one." Proceed to Step 2.
+
+**If `routing.json` exists but cannot be parsed:** do not repair or rewrite it. Routing uses the default mappings. Queue one advisory notice for Step 8: "Your routing file couldn't be read, so I'm using the default phrases. Say 'show my phrases' to check it." Proceed to Step 2.
+
+Never halt session start over routing. A missing or broken routing file degrades matching to the defaults; it does not block the member.
 
 ---
 
@@ -230,7 +254,7 @@ If the member has no org_role, or if org_roles is empty in org-config: skip this
 
 ### Step 8: Surface Notices and Confirm Readiness
 
-Collect all queued notices from Steps 2–7. Surface them to the member in this priority order:
+Collect all queued notices from Steps 1.5–7. Surface them to the member in this priority order:
 
 1. **Hard failures** (anything that blocks a capability — missing always-on skill, connectivity failure)
 2. **Deprecation warnings** (always shown, regardless of verbosity)
