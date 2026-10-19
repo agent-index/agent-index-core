@@ -19,7 +19,7 @@ This installs the Org Setup skill — the main entry point for installing skills
 
 - `member-bootstrap` has been completed (local `member-index.json` exists and remote filesystem is authenticated via `aifs_auth_status()`) → if not: run member-bootstrap first
 - `preferences-management` is installed in member index → if not: install it first
-- `org-config.json` is readable from the remote filesystem via `aifs_read("/org-config.json")` → if not: "Your org hasn't been configured yet. An org admin needs to run 'create org' before members can complete setup."
+- `org-config.json` is readable from the remote filesystem (org-config read by backend (local `agent-index.json` `remote_filesystem.backend`): on Google Drive `aifs_read("id:{org_config_id}")` with `org_config_id` from local `agent-index.json` `remote_filesystem.connection`; on OneDrive `aifs_read("/org-config.json")` (a bare `/org-config.json` path fails for a member who is not in the Shared Drive, and a bare `id:` fails on OneDrive — core `runtime-reference.md` § "Addressing: Owned Content and Sharing", finding 63)) → if not: "Your org hasn't been configured yet. An org admin needs to run 'create org' before members can complete setup."
 
 ---
 
