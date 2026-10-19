@@ -1,8 +1,7 @@
 # Collection Authoring Guide
 
 **Companion to:** the developer collection's `marketplace-eligibility.md` (the formal requirements) and `runtime-reference.md` (the runtime rules)
-**Version:** 1.8.1
-**Last Updated:** 2026-10-14
+**Last Updated:** 2026-10-19
 
 ---
 
