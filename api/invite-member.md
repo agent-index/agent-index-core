@@ -86,7 +86,7 @@ Confirm the hash to the admin: "I'll provision org access for `{email}` (hash `{
 
 ### Step 4: Re-invite detection
 
-Check whether the email was previously a member: **a `members-registry.json` entry with this `member_hash`, or a `removed_members[]` record for it (written by remove-member 1.4.0+)**, is what makes someone a previous member. Then check `aifs_exists("/shared/members/artifacts/{hash}/")`.
+Check whether the email was previously a member: **a `members-registry.json` entry with this `member_hash`, or a `removed_members[]` record for it (written by remove-member 1.4.0+)**, is what makes someone a previous member. Then check `aifs_exists({shared}/members/artifacts/{hash}/)`.
 
 **An artifacts folder with no registry entry is not a previous membership** (`invitestalefolder`, 3.32.0 live test): it's left over from an invite that never finished. Don't ask the re-invite question. Resolve the identity (Step 4.5), then reuse the folder in Step 5 and tell the admin in one line: *"An empty artifacts folder from an earlier unfinished invite exists; I'll reuse it."*
 
@@ -122,10 +122,10 @@ On gdrive, `aifs_resolve_identity` is a passthrough (the email IS the grantable 
 
 This step creates the folder if it doesn't exist. It performs **no permission writes** — those go through the permission-changes procedure in Step 6.
 
-- Check `aifs_exists("/shared/members/artifacts/{hash}/")`.
-- If it does not exist: materialize it via `aifs_write("/shared/members/artifacts/{hash}/.placeholder", "")`.
+- Check `aifs_exists({shared}/members/artifacts/{hash}/)`.
+- If it does not exist: materialize it via `aifs_write({shared}/members/artifacts/{hash}/.placeholder, "")`.
 - If it already exists (re-invite case): leave it untouched.
-- **Capture the directory's Drive id (bug `groupshareapivisibility`).** After materializing (or on re-invite/reuse, against the existing dir), `aifs_stat("/shared/members/artifacts/{hash}/")` and record the resolved Drive id as `artifacts_dir_id`. This id is persisted on the registry entry in Step 8 so that `member-bootstrap` can write its onboarding handshake **by id** (`aifs_write("id:{artifacts_dir_id}/member-folder.json", …)`) — a member's by-path resolution into the artifacts namespace isn't reliable before group-share propagation, but writing to its own artifacts dir by id works pre-visit. (On OneDrive member-bootstrap writes the handshake by path instead — a bare `id:` there resolves against the member's own drive; finding 63.)
+- **Capture the directory's Drive id (bug `groupshareapivisibility`).** After materializing (or on re-invite/reuse, against the existing dir), `aifs_stat({shared}/members/artifacts/{hash}/)` and record the resolved Drive id as `artifacts_dir_id`. This id is persisted on the registry entry in Step 8 so that `member-bootstrap` can write its onboarding handshake **by id** (`aifs_write("id:{artifacts_dir_id}/member-folder.json", …)`) — a member's by-path resolution into the artifacts namespace isn't reliable before group-share propagation, but writing to its own artifacts dir by id works pre-visit. (On OneDrive member-bootstrap writes the handshake by path instead — a bare `id:` there resolves against the member's own drive; finding 63.)
 
 **The member's private space is NOT created here** (changed in core 3.9.0). It is a folder named `Agent-Index-Private-{org_uuid}` (older spaces keep earlier names) in the member's **own personal space** — their My Drive on gdrive, their OneDrive on onedrive — created by the member's own credentials during their first bootstrap (`member-bootstrap` ensure-my-drive-space subroutine) — member-owned so the member can apply sharing grants on it themselves (Shared-Drive folders can only be shared by drive Managers, which members deliberately are not; on onedrive the member owns their OneDrive items outright). On onedrive this requires the member to have a OneDrive-inclusive license and to have signed into office.com once (see memberlicense; create-org now surfaces this prerequisite to the admin). The bootstrap writes a handshake file to `/shared/members/artifacts/{hash}/member-folder.json`; the admin's next `@ai:publish-updates` reconciles it into the registry. Legacy `/members/{hash}/` directories on the Shared Drive are deprecated (migration handled by apply-updates 3.9.0 Migration 2; admin archives the old folders manually afterwards).
 
@@ -284,6 +284,16 @@ Append an activity event to a local audit hint file (no remote audit log — tha
 ---
 
 ## Directives
+
+**Remote addressing (CI-019; `memberpathreads`, finding 63).** Every org-config, registry and `/shared` read **and write** in this task uses the per-backend form below, so it also works for an admin who is not a member of the org's Shared Drive (a bare path returns not found for them on Google Drive). Backend: local `agent-index.json` `remote_filesystem.backend`.
+
+| Written in this task as | Google Drive | OneDrive |
+|---|---|---|
+| `{org-config}` | `id:{org_config_id}` (local `agent-index.json` → `remote_filesystem.connection.org_config_id`) | `/org-config.json` |
+| `{registry}` | `id:{resource_ids.members_registry}` (from org-config) | `/members-registry.json` |
+| `{shared}/...` | `id:{resource_ids.shared_root}/...` (from org-config) | `/shared/...` |
+
+On Google Drive, if an id is missing (an org that predates `resource_ids`), halt and name it rather than falling back to a bare path; `publish-updates` Step 6f back-fills it.
 
 ### Behavior
 

@@ -285,7 +285,7 @@ After all prerequisites complete, surface a one-line summary per prereq (`✓ Bo
 
 ### Step 1: Verify Admin and Read Current Org State
 
-Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")`.
+Read `org-config.json` from the remote filesystem via `aifs_read({org-config})` (see "Remote addressing" under Directives).
 
 Compute the current member's hash: SHA256(lowercase email from session context), first 16 hex characters. Check whether this hash matches any entry in `admins[].member_hash` in org-config.json.
 
@@ -297,7 +297,7 @@ Read and assemble the current org state — this is the "truth" that members sho
 
 1. **Infrastructure versions:** Read `agent-index-core/collection.json` and `agent-index-marketplace/collection.json` from the remote filesystem via `aifs_read`. Extract `version` from each.
 
-2. **Installed collections:** Read `installed_collections` from `org-config.json`. For each, also read the collection's `collection.json` from the remote filesystem via `aifs_read("/{collection}/collection.json")` to get the current `version` and `api` array.
+2. **Installed collections:** Read `installed_collections` from `org-config.json`. For each, also read the collection's `collection.json` from its read base (Google Drive `id:{folder_id}`, `folder_id` from that entry in org-config `installed_collections[]`; OneDrive `/{collection}`) via `aifs_read("{base}/collection.json")` to get the current `version` and `api` array.
 
 3. **CLAUDE.md hash:** Read `CLAUDE.md` from the local project directory. Compute SHA-256 of its content **after LF normalization** (`\r\n` and lone `\r` → `\n`) — the same bytes the bootstrap zip ships, so a member's check of the zip copy matches on a Windows admin's machine. This is used to detect changes without storing the full file.
 
@@ -341,7 +341,7 @@ Assemble this into a structured state object:
 
 ### Step 2: Read Last Published State
 
-Read `/shared/updates/published-state.json` from the remote filesystem via `aifs_read("/shared/updates/published-state.json")`.
+Read `/shared/updates/published-state.json` from the remote filesystem via `aifs_read({shared}/updates/published-state.json)`.
 
 If the file does not exist (first time publishing): treat every element of the current state as new. All installed collections will generate `collection-install` operations. Infrastructure versions, CLAUDE.md, and the adapter bundle will all be included. Proceed to Step 3 with `previous_state = null`.
 
@@ -386,7 +386,7 @@ Production orgs (no channel before or now) keep the version rule above unchanged
 **Collection changes:**
 
 For each collection in the current `installed_collections`:
-- If the collection exists in previous state and the version increased: generate a `collection-update` operation with `collection`, `from_version`, `target_version`, and `has_migration` (true if the MAJOR version changed — check whether `aifs_exists("/{collection}/upgrade/{from_major}.x-to-{target_major}.x")` or equivalent upgrade scripts exist)
+- If the collection exists in previous state and the version increased: generate a `collection-update` operation with `collection`, `from_version`, `target_version`, and `has_migration` (true if the MAJOR version changed — check whether `aifs_exists("{base}/upgrade/{from_major}.x-to-{target_major}.x")` — `{base}` is the collection's read base, as in Step 1 — or equivalent upgrade scripts exist)
 - If the collection exists in previous state and the API member list changed (new members added, members removed): note the changes in the operation's `api_changes` field
 - If the collection does not exist in previous state: generate a `collection-install` operation with `collection`, `version`, and `category` (from the collection's `collection.json`)
 - If a collection existed in previous state but is absent from current state: generate a `collection-remove` operation with `collection` and `last_version`
@@ -440,7 +440,7 @@ On confirmation: proceed to Step 5.
 
 **Read or initialize the update log:**
 
-Read `/shared/updates/update-log.json` from the remote filesystem via `aifs_read("/shared/updates/update-log.json")`.
+Read `/shared/updates/update-log.json` from the remote filesystem via `aifs_read({shared}/updates/update-log.json)`.
 
 If the file does not exist: initialize it as:
 
@@ -513,11 +513,11 @@ Only include the operation types that were actually generated in Step 3. The exa
 
 **Write the update log:**
 
-Append the new entry to `entries` array. Write the full `update-log.json` back via `aifs_write("/shared/updates/update-log.json", ...)`.
+Append the new entry to `entries` array. Write the full `update-log.json` back via `aifs_write({shared}/updates/update-log.json, ...)`.
 
 **Write the state snapshot:**
 
-Write the current state object (assembled in Step 1) to `/shared/updates/published-state.json` via `aifs_write("/shared/updates/published-state.json", ...)`. This becomes the baseline for the next `publish-updates` run. **From core 3.32.0 the snapshot also records `distribution_channel` and a `commits` map** `{<name>: {ref, commit}}`, for every org, channel or not:
+Write the current state object (assembled in Step 1) to `/shared/updates/published-state.json` via `aifs_write({shared}/updates/published-state.json, ...)`. This becomes the baseline for the next `publish-updates` run. **From core 3.32.0 the snapshot also records `distribution_channel` and a `commits` map** `{<name>: {ref, commit}}`, for every org, channel or not:
 - core and marketplace from `clone-resolution.json`;
 - collections from `installed_collections[].source_ref` / `source_commit`;
 - `adapter: {ref, checksum}` from the deployed `adapter.json`. Older snapshots without `commits` are treated as "no previous commit".
@@ -553,7 +553,7 @@ If `org-config.json` still has a `binaries` key (the pin for the permission help
 
 #### 6a. Per-operation `installed_collections[]` writeback
 
-Read `aifs_read("/org-config.json")`. For each operation in the new update-log entry:
+Read `aifs_read({org-config})`. For each operation in the new update-log entry:
 
 - **`core-update`:** Find the `installed_collections[]` entry with `name: "agent-index-core"`. Update its `version` to the operation's `target_version`. Update its `upgraded_date` to today (`YYYY-MM-DD`). If the entry doesn't exist (corrupt or hand-edited org-config), surface a notice and skip.
 - **`marketplace-update`:** Same for the `name: "agent-index-marketplace"` entry.
@@ -602,7 +602,7 @@ The reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`, 6g 
 
 Members create their private space in their own My Drive at bootstrap and cannot write the registry; their bootstrap records the folder ID in a handshake file instead. This step copies handshakes into the registry — it runs on EVERY publish-updates invocation, even when nothing else is being published:
 
-1. `aifs_list("/shared/members/artifacts/")` → for each member hash directory, check for `member-folder.json`. Read each one found.
+1. `aifs_list({shared}/members/artifacts/)` → for each member hash directory, check for `member-folder.json`. Read each one found.
 2. For each handshake whose `member_folder_id` differs from the corresponding `members-registry.json` entry (including entries where it is `null`): update the registry entry's `member_folder_id` (revision-aware write, same retry semantics as invite-member Step 8).
 3. Surface one line: "Reconciled {N} member folder ID(s) into the registry." (or nothing if N=0).
 4. Handshake with no matching registry entry (member removed but artifacts dir retained): skip, note in the summary.
@@ -611,7 +611,7 @@ No admin prompt — the handshake is the member's authoritative self-report abou
 
 #### Write semantics
 
-Write the updated `org-config.json` back via `aifs_write("/org-config.json", ...)`. Idempotent: re-running publish-updates with the same target_version is a no-op for these fields. If the write fails after Step 5's writes succeeded, surface the failure but do NOT roll back the log entry (members can still apply the update; org-config drift is a bookkeeping issue, recoverable on the next publish).
+Write the updated `org-config.json` back via `aifs_write({org-config}, ...)`. Idempotent: re-running publish-updates with the same target_version is a no-op for these fields. If the write fails after Step 5's writes succeeded, surface the failure but do NOT roll back the log entry (members can still apply the update; org-config drift is a bookkeeping issue, recoverable on the next publish).
 
 ---
 
@@ -681,7 +681,7 @@ If org-config has no `org_uuid`: generate a random UUID v4 (lowercase, e.g. from
 
 `upgrade-collection` records its update-log entry and `published-state.json` itself (its Step 10), so the publish that follows has an empty diff and used to halt before Step 6.5, the only step that rewrites `/shared/dist/manifest.json`. The manifest then kept the old collection versions although upgrade-collection tells the admin it updates "after your next `@ai:publish-updates`".
 
-On an empty-diff publish (only there; a has-diff publish runs Step 6.5): read `/shared/dist/manifest.json` and compare its `collections[]` with org-config `installed_collections[]` (`status: "installed"`, name and `version`). If they match, this is a silent no-op. If not, run Step 6.5 items 2–3 now: rewrite the manifest with `collections[]` from org-config, keeping `org_release_tag` (= the core version already published) and the directory-artifact SHAs (recompute them per item 1 only if the listings clone changed), then the round-trip self-check. Say one line: "Refreshed `/shared/dist/manifest.json`: {name} {old} → {new}, …". This writes no update-log entry.
+On an empty-diff publish (only there; a has-diff publish runs Step 6.5): read `{shared}/dist/manifest.json` and compare its `collections[]` with org-config `installed_collections[]` (`status: "installed"`, name and `version`). If they match, this is a silent no-op. If not, run Step 6.5 items 2–3 now: rewrite the manifest with `collections[]` from org-config, keeping `org_release_tag` (= the core version already published) and the directory-artifact SHAs (recompute them per item 1 only if the listings clone changed), then the round-trip self-check. Say one line: "Refreshed `/shared/dist/manifest.json`: {name} {old} → {new}, …". This writes no update-log entry.
 
 ### Step 6.5: Republish `/shared/dist/` (added in core 3.22.0 — closes `publishdistgap`)
 
@@ -690,9 +690,9 @@ On an empty-diff publish (only there; a has-diff publish runs Step 6.5): read `/
 Run the **backend-distribution publish flow** (canonical definition: `templates/backend-distribution.md` § "Publish flow") against the artifacts touched by this publish:
 
 1. **Recompute the manifest.** For each directory file (from the local `resource-listings` clone), compute the SHA **per the Canonical SHA-256 rule** in `backend-distribution.md` (stored/git-blob LF bytes — **never `aifs_read` stdout**). Diff against the current `/shared/dist/manifest.json` and upload only changed/new artifacts; read back and verify each upload with the canonical member-side recipe (stat `size` + `head -c` truncation).
-2. **Rewrite `/shared/dist/manifest.json`** (`dist-manifest/2`) with the new `org_release_tag` (= the core version just published), `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json` — `channel_head` is a **string**, `"channel/<name>@<sha7>"` (the channel branch and the first 7 hex characters of the core clone's commit, e.g. `"channel/dev-2@3f9c2ab"`), or `null` when `channel` is null; never an object (finding 77) — the refreshed artifact SHAs (directory files only; the manifest has no binary entries since core 4.0.0), and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot (which Step 5 just wrote as `published-state.json`); abort on mismatch. This step and create-org Step 11 are the only writers of `/shared/dist/manifest.json` (`backend-distribution.md`, "Who rewrites the manifest" — finding 74). Verify it reads back + parses.
+2. **Rewrite `{shared}/dist/manifest.json`** (`dist-manifest/2`) with the new `org_release_tag` (= the core version just published), `channel` / `channel_head` / `sources` from `.agent-index/clone-resolution.json` — `channel_head` is a **string**, `"channel/<name>@<sha7>"` (the channel branch and the first 7 hex characters of the core clone's commit, e.g. `"channel/dev-2@3f9c2ab"`), or `null` when `channel` is null; never an object (finding 77) — the refreshed artifact SHAs (directory files only; the manifest has no binary entries since core 4.0.0), and **`collections[]` taken from `org-config.json` → `installed_collections[]` (`status: "installed"`) with each entry's installed `version`** — after this publish's Step 6 writeback. **Never use a catalog `current_version`** (core 3.31.0 — bug `20260924-8d20ea22-015603-a4ac`: publish #076 advertised email-triage 1.2.3 while the org ran 1.2.2). Assert each `collections[]` version equals both the org-config version and the Step 1 state snapshot (which Step 5 just wrote as `published-state.json`); abort on mismatch. This step and create-org Step 11 are the only writers of `/shared/dist/manifest.json` (`backend-distribution.md`, "Who rewrites the manifest" — finding 74). Verify it reads back + parses.
 3. **Round-trip self-check (manifestsha guard):** after writing the manifest, re-verify the `infrastructure-directory.json` artifact via the member-side recipe and confirm the computed SHA equals the value just written. If it does not, the publish computed a SHA members will reject — **abort and fix** (do not report success). This is the gate that would have caught the `412094b4` vs `e1d549e4` mismatch at publish time.
-4. **Delete retired binaries (core 4.0.0).** Core 4.0.0 removed the permission helper, so nothing reads `/shared/dist/binaries/` any more. If it exists on the backend (normally only on the first publish after the upgrade), `aifs_list` it, show the admin every file that will be deleted, and delete them and the folder on confirmation, the same way Step 0 confirms remote deletes. If the admin declines, leave it and say it is unused; the next publish offers it again. Idempotent: once the folder is gone this is a silent no-op.
+4. **Delete retired binaries (core 4.0.0).** Core 4.0.0 removed the permission helper, so nothing reads `/shared/dist/binaries/` any more. If it exists on the backend (normally only on the first publish after the upgrade), `aifs_list({shared}/dist/binaries/)`, show the admin every file that will be deleted, and delete them and the folder on confirmation, the same way Step 0 confirms remote deletes. If the admin declines, leave it and say it is unused; the next publish offers it again. Idempotent: once the folder is gone this is a silent no-op.
 
 If this publish changed nothing distributed (e.g. a docs-only org-config edit), this step is a no-op — but still confirm `/shared/dist/manifest.json` already advertises the current versions; if it doesn't (a pre-C.1.3 org whose dist was never refreshed), republish it now to heal the org.
 
@@ -705,7 +705,7 @@ If this publish changed nothing distributed (e.g. a docs-only org-config edit), 
 1. Re-fetch each touched directory file using the **Distribution fetch protocol (SHA-pinned)** — `admin-distribution.md` § "Distribution fetch protocol (SHA-pinned) — admin-side / deprecated fallback". **On a channel org,** don't fetch the GitHub default branch (it never advertises channel versions). Read the local catalog clone at its resolved ref (`git show <ref>:<file>`, read-only) and apply steps 2–3 to that.
 2. Confirm the fetched copy advertises the versions just published (and that `directory_version` itself was bumped — a listing content change under an unchanged `directory_version` is invisible to consumers; see bug `20260607-8d20ea22-131906-d1rv`).
 3. If the fetched copy does NOT reflect the publish: **the publish report must say so as a failure**, naming the stale or unbumped file. Do not report overall success. Typical causes: the listing push was missed, or `directory_version` wasn't bumped. Direct the admin to push/bump and re-run the check.
-4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read("/shared/dist/manifest.json")` and confirm it advertises the versions/`org_release_tag` just published, that **every `collections[]` version equals `org-config.json` `installed_collections[].version`** (3.31.0), AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
+4. **Backend-dist check (added 3.22.0 — the member-facing authority).** `aifs_read({shared}/dist/manifest.json)` and confirm it advertises the versions/`org_release_tag` just published, that **every `collections[]` version equals `org-config.json` `installed_collections[].version`** (3.31.0), AND that the `infrastructure-directory.json` artifact SHA in it passes the member-side verify recipe (Step 6.5.3 already did this on write; re-confirm here so the report reflects the bytes members will actually read). Members read `/shared/dist/`, **not** the GitHub listing — a green GitHub re-fetch with a stale/uncomputed dist manifest is still a member-visible failure. If the dist manifest is stale or its SHA doesn't verify, report failure and re-run Step 6.5.
 
 If no listing or collection was touched, skip steps 1–3 but still run step 4 (the dist manifest must always be current for members).
 
@@ -728,6 +728,16 @@ After Step 5, Step 6, and the propagation check succeed, surface confirmation:
 ### Remote Filesystem Access
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
+
+**Remote addressing (CI-019; `memberpathreads`, finding 63).** Every org-config, registry and `/shared` read **and write** in this task uses the per-backend form below, so it also works for an admin who is not a member of the org's Shared Drive (a bare path returns not found for them on Google Drive). Backend: local `agent-index.json` `remote_filesystem.backend`.
+
+| Written in this task as | Google Drive | OneDrive |
+|---|---|---|
+| `{org-config}` | `id:{org_config_id}` (local `agent-index.json` → `remote_filesystem.connection.org_config_id`) | `/org-config.json` |
+| `{registry}` | `id:{resource_ids.members_registry}` (from org-config) | `/members-registry.json` |
+| `{shared}/...` | `id:{resource_ids.shared_root}/...` (from org-config) | `/shared/...` |
+
+On Google Drive, if an id is missing (an org that predates `resource_ids`), halt and name it rather than falling back to a bare path; `publish-updates` Step 6f back-fills it.
 
 **Scratch files: `mktemp` only (bug `20260928-8d20ea22-140909-e0a9`).** Stage every remote read (update log, `published-state.json`, org-config, dist manifest) in a directory this run creates with `mktemp -d`, never a fixed `/tmp/<name>` — in Cowork another session's leftover `/tmp/ul.json` can't be overwritten and was parsed as the org's log during a publish. No `2>/dev/null` before the redirect; check the exit status and that the file parses before using it.
 

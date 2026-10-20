@@ -87,8 +87,8 @@ Ask for the new admin's display name and email address. Compute their member_has
 
 On confirmation:
 - Add to `org-config.json` admins array with: `member_hash`, `display_name`, `email`, `granted_by` (current admin's hash), and `granted_date` (today YYYY-MM-DD).
-- Add or update `members-registry.json` on the remote filesystem via `aifs_read("/members-registry.json")` (read), modify, then `aifs_write("/members-registry.json", ...)` (write back) if the new admin is not already present.
-- Write updated `org-config.json` back to remote via `aifs_write("/org-config.json", ...)` with `last_updated` set to today.
+- Add or update `members-registry.json` on the remote filesystem via `aifs_read({registry})` (read), modify, then `aifs_write({registry}, ...)` (write back) if the new admin is not already present.
+- Write updated `org-config.json` back to remote via `aifs_write({org-config}, ...)` with `last_updated` set to today.
 
 **Removing an admin:**
 Present the current admin list by display name. Ask who to remove.
@@ -97,7 +97,7 @@ If removing self: warn "You're removing yourself as an org admin. You won't be a
 
 If this would leave zero admins: block the removal. "At least one org admin must remain. Add another admin before removing the last one."
 
-On confirmation: write updated `org-config.json` to remote via `aifs_write("/org-config.json", ...)` with the admin removed and `last_updated` set to today.
+On confirmation: write updated `org-config.json` to remote via `aifs_write({org-config}, ...)` with the admin removed and `last_updated` set to today.
 
 ---
 
@@ -124,7 +124,7 @@ Present the current `org_roles` list with `display_name`, `description`, and `de
   "created_by": "{current_admin_hash}"
 }
 ```
-7. Write updated `org-config.json` to remote via `aifs_write("/org-config.json", ...)` with `last_updated` set to today.
+7. Write updated `org-config.json` to remote via `aifs_write({org-config}, ...)` with `last_updated` set to today.
 
 **Editing a role:**
 
@@ -132,7 +132,7 @@ Present the current `org_roles` list with `display_name`, `description`, and `de
 2. Allow changing: `display_name`, `description`, and `default_collections`.
 3. Note: `role_id` cannot be changed (would require migration).
 4. Confirm changes before writing.
-5. Write updated `org-config.json` to remote via `aifs_write("/org-config.json", ...)` with `last_updated` set to today.
+5. Write updated `org-config.json` to remote via `aifs_write({org-config}, ...)` with `last_updated` set to today.
 
 **Removing a role:**
 
@@ -140,7 +140,7 @@ Present the current `org_roles` list with `display_name`, `description`, and `de
 2. Warn: "Removing this role won't affect members who already have it assigned — their installed capabilities remain. But new members won't see this role as an option during setup."
 3. Require explicit confirmation.
 4. Remove from `org_roles` array in org-config.json.
-5. Write updated `org-config.json` to remote via `aifs_write("/org-config.json", ...)` with `last_updated` set to today.
+5. Write updated `org-config.json` to remote via `aifs_write({org-config}, ...)` with `last_updated` set to today.
 
 ---
 
@@ -278,6 +278,16 @@ After the marketplace flow completes (if the admin installed or upgraded collect
 ### Remote Filesystem Access
 
 All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh <tool_name> '<json_args>'`. Each call runs a fresh Node process, executes one operation, and exits. There is no persistent server or bridge. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and suggest '@ai:member-bootstrap'. In Cowork, `<project_dir>` resolves to the mounted workspace directory containing `agent-index.json`.
+
+**Remote addressing (CI-019; `memberpathreads`, finding 63).** Every org-config, registry and `/shared` read **and write** in this task uses the per-backend form below, so it also works for an admin who is not a member of the org's Shared Drive (a bare path returns not found for them on Google Drive). Backend: local `agent-index.json` `remote_filesystem.backend`.
+
+| Written in this task as | Google Drive | OneDrive |
+|---|---|---|
+| `{org-config}` | `id:{org_config_id}` (local `agent-index.json` → `remote_filesystem.connection.org_config_id`) | `/org-config.json` |
+| `{registry}` | `id:{resource_ids.members_registry}` (from org-config) | `/members-registry.json` |
+| `{shared}/...` | `id:{resource_ids.shared_root}/...` (from org-config) | `/shared/...` |
+
+On Google Drive, if an id is missing (an org that predates `resource_ids`), halt and name it rather than falling back to a bare path; `publish-updates` Step 6f back-fills it.
 
 ### Behavior
 
