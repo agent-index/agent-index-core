@@ -1,7 +1,7 @@
 # Agent-Index Admin and Distribution
 
 **Maintained by:** agent-index
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-19
 
 ---
 
@@ -132,7 +132,7 @@ The web-fetched catalog cache has had no writer on a clone-publishing org since 
 
 Publishing a new version of any artifact (a collection, an adapter, or core/marketplace) follows a fixed, gated procedure. The canonical, ordered gate list is the **release-checklist** in the developer collection (`release-checklist.md`); the `release` task there **generates** the push script that encodes it. Do not hand-author release scripts — generate them, so the invariants below are never left to memory.
 
-- **Preflight is a hard gate, and there are two checkers.** Every collection in the release passes `lib/preflight-cli.sh` with zero errors before anything is pushed; `release-prep` runs it and aborts on error (the `release-script-runs-preflight` contract). For a collection's first marketplace listing, and for any release that changes a capability's definition or setup file, `@ai:preflight` at `marketplace` strictness must also pass with zero errors. It is an agent task, so the person cutting the release runs it. Neither checker substitutes for the other (developer collection, `marketplace-eligibility.md` § "Release Gate").
+- **Preflight is a hard gate, and there are two checkers.** Every collection in the release passes `lib/preflight-cli.sh` with zero errors before anything is pushed; `release-prep` runs it and aborts on error (the `release-script-runs-preflight` contract). For a collection's first marketplace listing, and for any release that changes a capability's definition or setup file (`api/{name}.md`, `api/{name}-setup.md`; the per-release manifest restamp does not count), `@ai:preflight` at `marketplace` strictness must also pass with zero errors. It is an agent task, so the person cutting the release runs it. Neither checker substitutes for the other (developer collection, `marketplace-eligibility.md` § "Release Gate").
 - **Push in dependency order, `agent-index-resource-listings` LAST.** The broadcast layer must never reference a version whose code isn't live yet (else `check-updates`/adapter-update flows resolve to a 404). Order: adapter → core → marketplace → collections → resource-listings.
 - **Tag every repo `v<version>` after a successful push.** The `clone-script-generator` and `/shared/dist/manifest.json` pin to these exact tags — tags are the contract between a release and the distribution layer. **Never move or delete a published tag** (cut a new one if a re-cut is truly needed). Distribution pins to release tags. The **only** exception is an org that has explicitly named a distribution channel (§ "Distribution channels (core 3.32.0)"), which pins to `channel/<name>` branch heads with tag fallback.
 - **The agent never pushes or tags.** `git push`/`git tag` run natively on the admin's host, where credentials and a clean working tree are. Agent-side git over a synced/mounted filesystem produces torn commits (FCI-1).
