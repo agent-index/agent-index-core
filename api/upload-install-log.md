@@ -74,7 +74,7 @@ For each log file being uploaded, construct the JSON envelope:
 }
 ```
 
-**Computing org_hash:** Read `org-config.json` from the remote filesystem via `aifs_read("/org-config.json")` if available, or from `.agent-index/install-state.json` if remote is not accessible. Compute SHA256 of the lowercase org name, prefix with `sha256:`, and truncate to 16 hex characters (same convention as member identity resolution).
+**Computing org_hash:** Read `org-config.json` from the remote filesystem (org-config read by backend (local `agent-index.json` `remote_filesystem.backend`): on Google Drive `aifs_read("id:{org_config_id}")` with `org_config_id` from local `agent-index.json` `remote_filesystem.connection`; on OneDrive `aifs_read("/org-config.json")` (a bare `/org-config.json` path fails for a member who is not in the Shared Drive, and a bare `id:` fails on OneDrive — core `runtime-reference.md` § "Addressing: Owned Content and Sharing", finding 63)) if available, or from `.agent-index/install-state.json` if remote is not accessible. Compute SHA256 of the lowercase org name, prefix with `sha256:`, and truncate to 16 hex characters (same convention as member identity resolution).
 
 **Computing member_hash:** Use the current member's hash from the session bootstrap context. If not available (e.g., running during an incomplete install), compute from the member's email using the same SHA256 convention.
 
