@@ -157,11 +157,13 @@ Proceed to Step 1.7.
 
 Remove default phrases for capabilities the member never installed. Before the installed-only rule (finding 90), the trigger merge added every trigger a collection declared, so older `routing.json` files hold `collection-default` rows for capabilities the member doesn't have (member.three: `view-bugs`, `forward-bug`). They can't route (CLAUDE.md § "Routing rules"), but "show my phrases" lists them.
 
-This step is local only: it compares `members/{member_hash}/profile/routing.json` with `member-index.json` and makes no remote calls. If `routing.json` doesn't exist, skip it (the file is built in Phase 5 or, with nothing pending, in Step 2).
+This step is local only: it compares `members/{member_hash}/profile/routing.json` with `member-index.json` and makes no remote calls. If `routing.json` doesn't exist, skip it (the file is built in Phase 5 or, with nothing pending, in Step 2). If `routing.json` exists but can't be parsed, skip this step and never rewrite the file (as in `session-start` Step 1.5 and `preferences-management`): rewriting it would discard the member's customizations.
 
 - Remove every mapping with `source: "collection-default"` whose `collection` is not `agent-index-core` or `agent-index-marketplace` and whose `capability` has no installed entry in `member-index.json` with that `name` and `collection`.
 - Never touch a `member-custom` mapping. A default the member switched off or changed is already `member-custom` (`preferences-management`), so this never removes a recorded choice.
 - If anything was removed, write the file and add one line to the Step 4 plan (or the up-to-date message): "Removed {n} routing phrases for capabilities you don't have installed." Otherwise write nothing and say nothing.
+
+**When it writes (intended).** Like Step 1.6 item 8, this step writes before the Step 4 plan is confirmed, and on `--dry-run` too. That is deliberate: it only removes phrases that can't route, it never touches a member-custom phrase, and it is idempotent, so it needs no confirmation. The plan reports what was removed.
 
 Proceed to Step 2.
 
@@ -254,6 +256,7 @@ Present the merged plan to the member. Group operations by category with clear d
 > {collection-updates, for collections the member has capabilities installed from}: {collection} will be upgraded from {from} to {target} {if has_migration: "(may require your input during setup)"}
 > {retired_capabilities, if any}: {name} ({collection}) no longer exists in {collection} {target}; it will be removed from your workspace and its files archived (not deleted)
 > {if Step 1.6 item 8 ran}: Archived the retired permission-change-helper skill
+> {if Step 1.7 removed rows}: Removed {n} routing phrases for capabilities you don't have installed
 >
 > **Optional — new collections available:**
 > {collection-installs}: {collection display name} ({category}) — {description from collection.json}. You can choose to install capabilities from this collection.
