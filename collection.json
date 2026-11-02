@@ -8,8 +8,8 @@
   "category": "infrastructure",
   "agent_index_min_version": "3.0.0",
   "api": [
-    "session-start",
-    "member-bootstrap",
+    { "name": "session-start" },
+    { "name": "member-bootstrap" },
     {
       "name": "org-setup",
       "triggers": [
@@ -75,8 +75,8 @@
         }
       ]
     },
-    "create-org",
-    "edit-org",
+    { "name": "create-org" },
+    { "name": "edit-org" },
     {
       "name": "invite-member",
       "triggers": [
@@ -197,7 +197,7 @@
         }
       ]
     },
-    "publish-updates",
+    { "name": "publish-updates" },
     {
       "name": "apply-updates",
       "triggers": [
@@ -253,7 +253,7 @@
         }
       ]
     },
-    "upload-install-log",
+    { "name": "upload-install-log" },
     {
       "name": "verify-network-allowlist",
       "triggers": [
