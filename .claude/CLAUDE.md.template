@@ -18,17 +18,13 @@ Agent-index is the source of truth for project tracking, action items, ideas, de
 
 When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTSTRAP` signals. This section stays inline because a session that is not signed in cannot read any remote document.
 
-- **`needs_auth`**: The exec bundle is present but the member is not authenticated. Re-authenticate automatically with stored credentials; if that fails, surface it and suggest `@ai:member-bootstrap`.
+- **`needs_auth`**: The exec bundle is present but the member is not authenticated. Re-authenticate automatically with stored credentials; if that fails, surface it and suggest `@ai:member-bootstrap`. If the hook's `reason` is `identity_unknown` (signed in, but no saved identity yet), call `aifs_auth_status` first and act on its `bootstrap` field; it reports the identity and saves it.
 - **`needs_setup`**: No local workspace (`member-index.json` not found). **Route by whether the org already exists** — do NOT blindly run `@ai:setup`:
-  - **Member joining an existing org** — `agent-index.json` has a configured `remote_filesystem` backend (the person unpacked a bootstrap zip). Run **member-bootstrap** (`@ai:member-bootstrap`). This is the common case; do NOT send them to `org-setup`/create-org. To drive its sign-in from here: `aifs_authenticate(action="start")` returns the sign-in URL; after the person pastes the redirected `localhost` URL (or the bare code), call `aifs_authenticate(action="complete", auth_code="{pasted value}")`. **Do NOT re-issue `start` after showing the URL** — that restarts the flow (`pkcerestart`); start again only if `complete` reports the code expired. Once signed in, member-bootstrap confirms access to core (by id on Google Drive, by path on OneDrive); if it cannot, it halts — do NOT build a local workspace from the release manifest, default routing or this file and report success (`memberbootstrapfabricates`).
+  - **Member joining an existing org** — `agent-index.json` has a configured `remote_filesystem` backend (the person unpacked a bootstrap zip). Run **member-bootstrap** (`@ai:member-bootstrap`). This is the common case; do NOT send them to `org-setup`/create-org. To drive its sign-in from here: `aifs_authenticate(action="start")` returns the sign-in URL; after the person pastes the redirected `localhost` URL (or the bare code), call `aifs_authenticate(action="complete", auth_code="{pasted value}")`. Once signed in, member-bootstrap confirms access to core; if it cannot, it halts — do NOT build a local workspace from the release manifest, default routing or this file and report success (`memberbootstrapfabricates`).
   - **Admin creating a brand-new org** — no `remote_filesystem` backend configured yet (a fresh `agent-index-core` clone). Only then run `@ai:setup` (org-setup → create-org).
 - **`ready`**: Everything is configured. Proceed normally.
 
-**If no `AGENT_INDEX_BOOTSTRAP` signal reached the session** (in Cowork the hook's output often doesn't arrive — `sessionstartnorun`, 3.32.0 live test), don't skip session start. Before handling the member's first request, decide the state yourself:
-- `members/{member_hash}/member-index.json` exists locally → run session-start (`/agent-index-core/api/session-start.md`), then handle the request.
-- It doesn't exist → treat it as `needs_setup` and route as above.
-
-Compute `member_hash` from the member's email (see Identity Resolution). Do this once per session.
+**If no `AGENT_INDEX_BOOTSTRAP` signal reached the session** (in Cowork the hook's output often doesn't arrive), call `aifs_auth_status` before the member's first request and act on its `bootstrap` field as above; on `ready`, run session-start (`/agent-index-core/api/session-start.md`), then handle the request. Do this once per session.
 
 ## Handling Member Requests
 
@@ -82,8 +78,6 @@ When routing resolves to a capability, follow this procedure — **do not explor
    where `{collection}` is the collection name from the mapping table or `member-index.json`.
 
 The general pattern: all task and skill definitions live at `/{collection}/api/{name}.md` on the remote filesystem. Read them with `aifs_read`, then follow the instructions in the file. **Do not `ls` or `aifs_list` to search for them** — the path is deterministic.
-
-**On a Google Drive org, if you aren't a member of its Shared Drive** (most members), read by id anchor instead: `id:{folder_id}/api/{name}.md`, where `folder_id` is the collection's entry in org-config `installed_collections[]` (read org-config as `id:{org_config_id}`). Use the id form whenever the path read fails, or returns a file whose collection version disagrees with org-config — a name lookup can reach a same-named folder outside this org. **On a OneDrive org, use the path form above**; never a bare `id:{folder_id}` (it resolves against your own drive, not the org's site — finding 63).
 
 `<project_dir>` is the directory containing `agent-index.json`. In Cowork, this is the mounted workspace folder.
 
@@ -140,24 +134,8 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 ## Key Files
 
 - **`agent-index.json`** (local): Root configuration — backend settings, paths, org metadata
-- **`org-config.json`** (remote): authoritative org configuration. How to read it depends on the
-  backend (local `agent-index.json` → `remote_filesystem.backend`):
-  - **Google Drive (`gdrive`):** read by id anchor:
-    `aifs_read("id:{org_config_id}")` using `org_config_id` from local `agent-index.json` →
-    `remote_filesystem.connection`. **A non-Drive-member cannot resolve root-level files by
-    path** — `aifs_read("/org-config.json")` returns `FILE_NOT_FOUND` even though the file
-    exists and is readable. Same for `members-registry.json`, whose id is
-    `resource_ids.members_registry` in org-config. On Google Drive the same goes for `/shared/**`:
-    a member may get `PATH_NOT_FOUND` on a `/shared/...` path — re-read it as
-    `id:{resource_ids.shared_root}/...` (finding 46).
-  - **OneDrive (`onedrive`):** read by path: `aifs_read("/org-config.json")`. Paths work for
-    admins and members alike (`/members-registry.json`, `/shared/...`, `/{collection}/...` too).
-    A bare `id:{org_config_id}` resolves against your **own** drive, not the org's site, and
-    returns `FILE_NOT_FOUND` (finding 63). If a path read fails, the only id fallback is the
-    drive-qualified `id:{drive_id}:{org_config_id}` (`drive_id` from `remote_filesystem.connection`).
-- **`members-registry.json`** (remote): member lookup table. On Google Drive read by id anchor —
-  `resource_ids.members_registry` in `org-config.json`; same path caveat as above. On OneDrive
-  read `/members-registry.json` by path.
+- **`org-config.json`** (remote, `/org-config.json`): authoritative org configuration
+- **`members-registry.json`** (remote, `/members-registry.json`): member lookup table
 - **`member-index.json`** (local: `members/{hash}/member-index.json`): Member's installed capabilities
 - **`routing.json`** (local: `members/{hash}/profile/routing.json`): Member's natural language routing mappings
 - **`preferences.md`** (local: `members/{hash}/profile/preferences.md`): Member preferences
@@ -165,25 +143,17 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 
 ## Addressing
 
-*Paths for what you can enumerate; ID anchors for what you're granted.* On Google Drive, non-admin members are not Shared-Drive members and cannot enumerate the backend root, so for them:
-
-- **Root-level resources are reached through the top-level id manifest:** `org-config.json` by `org_config_id` (local `agent-index.json`); `/shared` by `resource_ids.shared_root` and the registry by `resource_ids.members_registry` (both in org-config); each collection by `installed_collections[].folder_id`.
-- **Nested resources are reached by walking down from an id-addressed ancestor:** `id:{shared_root}/dist/manifest.json`, `id:{folder_id}/api/{name}.md`.
-- **The `id:` prefix is required.** A bare `{folderId}/child` is read as a literal path and fails.
-- On Google Drive, a bare `/shared/...` path can fail for a member (`PATH_NOT_FOUND`); use `id:{shared_root}/...`.
-- **On OneDrive, paths stay primary for org files**, for admins and members alike. A bare `id:` there resolves against your own drive, not the org's site drive; the only id fallback is the drive-qualified `id:{drive_id}:{item_id}` (finding 63). The per-backend table: `runtime-reference.md` § "Addressing: Owned Content and Sharing" (backend rule).
-
-Owned content, sharing and cross-drive anchors: `runtime-reference.md` § "Addressing: Owned Content and Sharing".
+Address org files by plain path on every backend: `/org-config.json`, `/members-registry.json`, `/shared/...`, `/{collection}/...`. The executor finds them from org-config, whether or not you are a member of the org's Shared Drive. Content another member shared from their own drive is reached by the `id:` address the org's catalog gives you; owned content and sharing: `runtime-reference.md` § "Addressing: Owned Content and Sharing".
 
 ## Reads go through aifs only
 
-All remote agent-index content — org config, the registry, `/shared/...`, collection files, and content another member shared — is read through the `aifs_*` executor, **never** through an external file connector (Google Drive, OneDrive, SharePoint, Dropbox), even when one is connected (`wrongconnectorfallback`). A connector bypasses the org's catalog, access model and pointer semantics, and gives wrong answers: an unshared doc reads as "deleted", a private doc's title-only pointer as "broken".
+All remote agent-index content — org config, the registry, `/shared/...`, collection files, and content another member shared — is read and written through the `aifs_*` executor, **never** through an external file connector (Google Drive, OneDrive, SharePoint, Dropbox), even when one is connected (`wrongconnectorfallback`). A connector bypasses the org's catalog, access model and pointer semantics, and gives wrong answers: an unshared doc reads as "deleted", a private doc's title-only pointer as "broken". A `FILE_NOT_FOUND` from aifs is not a reason to check with a connector.
 
-**A `FILE_NOT_FOUND` / `PATH_NOT_FOUND` from the wrong addressing form is an addressing artifact, not evidence of absence.** Re-address with the other form (§ "Addressing": on Google Drive a failed path read by id anchor; on OneDrive a failed bare `id:` read by path) before drawing any conclusion, and diagnose within the aifs model. Never reach for a connector to "check whether it's really there".
+**The other way round:** documents a member asks for that are not agent-index files (a Google Doc, a Sheet, a Word file in their own drive) are handled with Cowork's own connectors, not aifs.
 
 ## Reference Documents
 
-Rules needed only for a specific operation live in two documents in `agent-index-core`: `runtime-reference.md` and `admin-distribution.md`. Read them like any core file (§ "How to execute a skill or task"): `/agent-index-core/runtime-reference.md`, or `id:{folder_id}/runtime-reference.md` on Google Drive when you aren't a member of its Shared Drive, with `folder_id` from the `agent-index-core` entry in org-config `installed_collections[]`. Read them when this file points to a section.
+Rules needed only for a specific operation live in two documents in `agent-index-core`: `runtime-reference.md` and `admin-distribution.md`. Read them like any core file (§ "How to execute a skill or task"): `/agent-index-core/runtime-reference.md`. Read them when this file points to a section.
 
 - `runtime-reference.md` — permission changes, owned content and sharing, the registry schema, shared-data paths, the adapter operations contract, and the default natural-language mappings.
 - `admin-distribution.md` — releases, distribution, marketplaces, the update log, org roles, and the admin side of "check for updates".
@@ -210,8 +180,6 @@ Optional: `"encoding": "base64"` — with `content_file` or `content_stdin` the 
 ```
 bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_write '{"path":"/shared/…","content_file":"/path/to/local-file.json","if_revision":"…"}'
 ```
-
-(On Google Drive the path is `id:{shared_root}/…`; see § "Addressing".)
 
 If more than one content source is given, `content` wins, then `content_file`, then `content_stdin`, and the others are ignored without warning. Entries in `aifs_write_batch` accept `content_file` as well.
 

@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.13.3
+version: 3.13.4
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -13,6 +13,8 @@ external_dependencies:
   - name: Remote filesystem exec bundle
     description: The on-demand executor bundle (aifs-exec.bundle.js and aifs-exec.sh) must be present in mcp-servers/filesystem/. It is included in the bootstrap zip. If the shell wrapper is not found, the exec bundle is missing from the install — surface an error and guide the member to obtain a new bootstrap zip from their org admin.
 ---
+
+<!-- ci025-addressing-exception: this update-path task keeps its id-anchor reads for one release after the plain-path cleanup, so a member on an older adapter can always run the update that brings the new one (CI-025 technical design §8.3). Remove in the following release. -->
 
 ## About This Skill
 

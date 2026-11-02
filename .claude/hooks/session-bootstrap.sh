@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-index session bootstrap hook (v3.0.0)
+# agent-index session bootstrap hook (v4.2.0: ready | needs_auth | needs_setup)
 # Runs automatically at the start of every Cowork session.
 #
 # This script performs LOCAL checks only — no remote calls.
@@ -42,7 +42,8 @@ fi
 
 # Verify agent-index.json exists
 if [ ! -f "$AGENT_INDEX_JSON" ]; then
-  echo "AGENT_INDEX_BOOTSTRAP: NO_CONFIG"
+  echo "AGENT_INDEX_BOOTSTRAP: needs_setup"
+  echo "reason=no_agent_index_json"
   echo "agent-index.json not found. This directory may not be an agent-index install."
   echo "If you downloaded a bootstrap zip, make sure it was unpacked correctly."
   exit 0
@@ -67,6 +68,28 @@ MEMBERS_ROOT="$PROJECT_DIR/members"
 # If not available, we signal Claude to resolve identity from session context.
 MEMBER_EMAIL="${CLAUDE_USER_EMAIL:-}"
 
+# core 4.2.0 (CI-025): when the environment doesn't carry the email, use the
+# identity the filesystem adapter saved at sign-in ({credential_store}/identity.json,
+# adapter gdrive 2.12.0 / onedrive 2.8.0). No network call.
+if [ -z "$MEMBER_EMAIL" ]; then
+  # The path goes in as an argument (not spliced into the source) so quotes or
+  # spaces in it can't break the script; "~" in credential_store is expanded.
+  MEMBER_EMAIL=$(python3 - "$AGENT_INDEX_JSON" 2>/dev/null <<'PY' || echo ""
+import json, os, sys
+try:
+    cfg_path = sys.argv[1]
+    cfg = json.load(open(cfg_path, encoding='utf-8-sig'))
+    store = (cfg.get('remote_filesystem', {}).get('auth', {}) or {}).get('credential_store') or '.agent-index/credentials/'
+    store = os.path.expanduser(store)
+    if not os.path.isabs(store):
+        store = os.path.join(os.path.dirname(os.path.abspath(cfg_path)), store)
+    print(json.load(open(os.path.join(store, 'identity.json'), encoding='utf-8')).get('email', ''))
+except Exception:
+    print('')
+PY
+)
+fi
+
 if [ -n "$MEMBER_EMAIL" ]; then
   # Compute member hash from email
   MEMBER_EMAIL_LOWER=$(echo -n "$MEMBER_EMAIL" | tr '[:upper:]' '[:lower:]')
@@ -74,20 +97,22 @@ if [ -n "$MEMBER_EMAIL" ]; then
   MEMBER_INDEX="$MEMBERS_ROOT/$MEMBER_HASH/member-index.json"
 
   if [ -f "$MEMBER_INDEX" ]; then
-    echo "AGENT_INDEX_BOOTSTRAP: RETURNING_MEMBER"
+    echo "AGENT_INDEX_BOOTSTRAP: ready"
     echo "member_hash=$MEMBER_HASH"
     echo "member_index=$MEMBER_INDEX"
     echo "Run the agent-index session-start task for this member."
   else
-    echo "AGENT_INDEX_BOOTSTRAP: NEW_MEMBER"
+    echo "AGENT_INDEX_BOOTSTRAP: needs_setup"
+    echo "reason=no_member_workspace"
     echo "member_hash=$MEMBER_HASH"
     echo "member_email=$MEMBER_EMAIL"
     echo "No local member workspace found. Prompt the member to say: 'set up my agent-index member workspace'"
   fi
 else
   # Email not available in environment — ask Claude to resolve from session context
-  echo "AGENT_INDEX_BOOTSTRAP: IDENTITY_PENDING"
-  echo "members_root=$MEMBERS_ROOT"
-  echo "hash_length=$HASH_LENGTH"
-  echo "Member email not available in environment. Claude should compute SHA256 of the member's lowercase email from session context, take the first $HASH_LENGTH hex characters, and check for members/{hash}/member-index.json locally. If found: run session-start. If not found: prompt member to say 'set up my agent-index member workspace'."
+  # No identity known locally (never signed in on this install, or an adapter
+  # older than 2.12.0): the first aifs call settles it.
+  echo "AGENT_INDEX_BOOTSTRAP: needs_auth"
+  echo "reason=identity_unknown"
+  echo "No signed-in identity is recorded on this install. Call aifs_auth_status and act on its bootstrap field (ready: run session-start; needs_auth: sign in; needs_setup: member-bootstrap)."
 fi

@@ -1,7 +1,7 @@
 ---
 name: apply-updates
 type: task
-version: 4.2.3
+version: 4.3.0
 collection: agent-index-core
 description: Reads pending update instructions from the org remote, merges them into a cohesive update plan, and executes all steps needed to bring the member's local agent-index installation current — including capability upgrades, new collection installs, CLAUDE.md sync, and adapter bundle updates.
 stateful: true
@@ -17,6 +17,8 @@ external_dependencies:
 reads_from: "/shared/updates/"
 writes_to: null
 ---
+
+<!-- ci025-addressing-exception: this update-path task keeps its id-anchor reads for one release after the plain-path cleanup, so a member on an older adapter can always run the update that brings the new one (CI-025 technical design §8.3). Remove in the following release. -->
 
 ## About This Task
 
@@ -167,9 +169,12 @@ If the file exists: parse the `entries` array. Filter to entries whose `id` is g
 
 **Baseline entries:** create-org seeds entry `000` with `type: "baseline"` and no operations (core 3.32.0). It changes nothing; when it's pending, count it as applied and move the cursor past it. A member whose only pending entry is `000` is up to date.
 
-If no entries are pending (the member's cursor matches or exceeds the latest entry): **before saying so, cross-check the log against `/shared/updates/latest.json`** (same addressing as the log). If `latest_id` is higher than the log's last entry `id`, or higher than the cursor, the log read is stale or wrong — don't conclude "up to date": re-read the log into a fresh `mktemp` file and recheck; if it still disagrees, stop and say "The update log I read ends at #{last id} but your org's latest update is #{latest_id}; not applying anything. Try again in a moment." (bug `20260928-8d20ea22-140909-e0a9`: a stale `/tmp/ul.json` from another session ended at #076 while the real log ended at #079). Only when they agree: surface "You're up to date. No pending updates." Halt.
+**Deferred operations (core 4.2.0, CI-025) — check these before deciding the member is up to date:** if `member-index.json` has a non-empty `deferred_ops[]` (operations an earlier run held back because they needed a newer adapter; see Phase 0a), add those operations to this run's plan ahead of the new entries' operations, even when no new entries are pending; if the same `entry_id` and operation `type` also appears among the pending entries, keep one. They go through Phase 0a again, are applied by the same phases, and are removed from `deferred_ops` once applied. A member with deferred operations is not "up to date", so the halt below doesn't apply to them.
+
+If no entries are pending (the member's cursor matches or exceeds the latest entry): and `deferred_ops` is empty **before saying so, cross-check the log against `/shared/updates/latest.json`** (same addressing as the log). If `latest_id` is higher than the log's last entry `id`, or higher than the cursor, the log read is stale or wrong — don't conclude "up to date": re-read the log into a fresh `mktemp` file and recheck; if it still disagrees, stop and say "The update log I read ends at #{last id} but your org's latest update is #{latest_id}; not applying anything. Try again in a moment." (bug `20260928-8d20ea22-140909-e0a9`: a stale `/tmp/ul.json` from another session ended at #076 while the real log ended at #079). Only when they agree: surface "You're up to date. No pending updates." Halt.
 
 Collect all pending entries in chronological order (by `id`). Proceed to Step 3.
+
 
 **On success:** Proceed to Step 3.
 
@@ -291,6 +296,14 @@ The 3.1.0 release introduces native filesystem permissions, which depend on a Wo
 
 This prerequisite check is gated on target version ≥ 3.1.0. Updates that do not include a `core-update` to 3.1.0+ skip this phase entirely.
 
+**Phase 0a — Operations that need a newer adapter (core 4.2.0, CI-025)**
+
+An operation may carry `requires_adapter: {"gdrive": "2.12.0", "onedrive": "2.8.0"}` (a `claude-md-update`, a `core-update`, or a `collection-update` from the plain-path cleanup releases): it must not reach a member whose adapter is older, because its content addresses org locations by plain path. This phase runs before Phase 1, because a `core-update` is applied there.
+
+1. If any operation in the plan carries `requires_adapter` and the plan has an `adapter-bundle-update`, **run Phase 3 (adapter bundle) now, first of all**, and skip it when its turn comes.
+2. Then compare the installed `mcp-servers/filesystem/adapter.json` `version` with the requirement for this org's backend (`agent-index.json` `remote_filesystem.backend`).
+3. If it is older (no adapter update was published yet, or the adapter step didn't complete), **take that operation out of the plan**: append `{entry_id, operation}` to `member-index.json` `deferred_ops[]` (unless an item with the same `entry_id` and operation `type` is already there) and tell the member in one line: "Held back {what} until your filesystem adapter is updated to {version}; your admin needs to publish it (edit-org Step 2). It applies automatically on a later '@ai:update'." Everything else in the plan still applies, and the cursor still advances (Step 6); the next run picks up `deferred_ops` first (Step 2).
+
 **Phase 1 — Infrastructure updates**
 
 If `core-update` is present:
@@ -327,7 +340,7 @@ If `claude-md-update` is present:
 
 **Phase 3 — Adapter bundle**
 
-If `adapter-bundle-update` is present:
+If `adapter-bundle-update` is present (and Phase 0a didn't already apply it):
 1. Read the bootstrap zip (gdrive `id:{resource_ids.shared_root}/bootstrap/member-bootstrap.zip`, else `/shared/bootstrap/member-bootstrap.zip`) (or the adapter bundle files directly if the admin has published them to a known location).
 2. **Verify bundle integrity BEFORE overwriting anything — and do not defer on the sandbox proxy notice.** The fetch runs through the sandbox's transport proxy, so an `[aifs] Proxy detected — added CA certificate from …` line is **expected, benign, and not a trust signal** — it is documented adapter behavior (since v2.0.2) and prints on every aifs-exec call. Bundle authenticity is established by the **checksum gate below, not by transport trust**, so proceed through these checks rather than pausing on the proxy notice:
    - **Checksum gate (required).** Compute the fetched `aifs-exec.bundle.js`'s SHA-256 and compare it to the `exec_bundle_checksum` declared in the target `adapter.json` (which itself comes from the trusted org backend). On mismatch: **abort, do not install**, surface "adapter bundle checksum mismatch — expected `<declared>`, got `<actual>`; this is a security failure, not retrying. Report to your admin." A matching hash defeats any in-transit tampering regardless of the proxy.

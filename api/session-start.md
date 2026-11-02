@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.3.0
+version: 3.4.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -16,6 +16,8 @@ external_dependencies:
 reads_from: null
 writes_to: null
 ---
+
+<!-- ci025-addressing-exception: this update-path task keeps its id-anchor reads for one release after the plain-path cleanup, so a member on an older adapter can always run the update that brings the new one (CI-025 technical design §8.3). Remove in the following release. -->
 
 ## About This Task
 
@@ -198,6 +200,11 @@ Also check for a pending update plan at `.agent-index/install-state/pending-upda
 > "A newer version of the filesystem adapter is available. The current bundle was built on {bundle_built_at date}. Say '@ai:edit-org' and choose 'Update adapter bundle' to download the latest version and regenerate the bootstrap zip for your members."
 
 If the member is not an admin, skip this notice — only admins can act on it.
+
+**Adapter-lag check, every member (core 4.2.0, CI-025):** if Step 2 confirmed connectivity, read the org's published adapter version from `published-state.json` (`adapter_bundle.version`; on gdrive `aifs_read("id:{resource_ids.shared_root}/updates/published-state.json")`, path `/shared/updates/published-state.json` as the fallback; on OneDrive by path) and compare it with the local `mcp-servers/filesystem/adapter.json` `version`. If the local one is older, queue a notice for any member (not only admins), at the same priority as "Org updates are available":
+> "Your filesystem adapter ({local}) is older than your org's ({published}). Say '@ai:update' to bring it up to date."
+
+Since core 4.2.0, task files address org locations by plain path, which needs adapter gdrive 2.12.0 / onedrive 2.8.0 or later; this notice is what keeps a member who hasn't updated from falling behind. Skip silently if either version can't be read.
 
 These notices are advisory. They surface at the same priority level as role-based collection suggestions — below deprecation warnings and hard failures.
 

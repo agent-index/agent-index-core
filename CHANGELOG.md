@@ -1,5 +1,21 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.2.0] — <RELEASE_DATE> — org locations by plain path (CI-025)
+
+Org files are addressed by plain path on every backend; the filesystem executor finds them from org-config. **Requires filesystem adapter gdrive 2.12.0 / onedrive 2.8.0** (declared in `collection.json` `requires_adapter`; publish-updates refuses to publish 4.2.0 until the org's adapter is deployed). Design record: Core Improvements `artifacts/ci-025-01-outcomes.md` to `ci-025-04-test-plan.md`.
+
+### Changed
+- **CLAUDE.md template:** the per-backend addressing rules are gone. Addressing is one short section ("plain paths; the executor finds them; `id:` only for content the catalog hands you"). Key Files names org-config and the registry by path, How to execute a skill or task has one rule for every backend, Reference Documents drops the `id:{folder_id}` alternative, the sign-in restart warning is removed (a second `start` now returns the sign-in in progress), and the missing-hook fallback is one line: call `aifs_auth_status` and act on its `bootstrap` field. Reads go through aifs only now also states the other side: documents a member asks for that aren't agent-index files go through Cowork's own connectors. 23.3 KB → 19.6 KB.
+- **session-bootstrap hook** speaks the same terms as `aifs_auth_status`: `ready`, `needs_auth`, `needs_setup` (was `RETURNING_MEMBER`, `NEW_MEMBER`, `IDENTITY_PENDING`, `NO_CONFIG`), and reads the identity the adapter saved at sign-in when the environment carries no email.
+- **runtime-reference.md § "Addressing: Owned Content and Sharing"** opens with the plain-path rule; the id-anchor rules describe what the executor does for org locations and remain the rules for owned and shared-from-elsewhere content.
+
+### Added
+- **session-start 3.4.0:** an adapter-lag notice for every member whose local adapter is older than the org's published one.
+- **apply-updates 4.3.0, Phase 0a:** operations that carry `requires_adapter` are applied after the adapter update; a member whose adapter is still older has them held in `member-index.json` `deferred_ops[]` and applied on the next run, while the cursor advances.
+- **publish-updates 3.22.0:** a hard stop when core or a collection being published declares a `requires_adapter` newer than the org's deployed adapter; the requirement is copied onto the operations it writes.
+- **admin-distribution.md § Operation Types:** `requires_adapter` and `deferred_ops`.
+- **apply-updates, session-start and member-bootstrap (3.13.4)** carry a `ci025-addressing-exception` marker: these update-path tasks keep their id-anchor reads for one release after the plain-path cleanup, so a member on an older adapter can always run the update that brings the new one.
+
 ## [4.1.0] — 2026-10-17 — Natural-language routing, and standards.md retired
 
 Ships the Core Improvements work merged since 4.0.1 (Kallista Salak: CI-009, CI-013, CI-017; core#15, #16, #17, #18, #20, #21, with follow-up #24) plus one permission-changes fix. Pairs with marketplace 2.22.3, developer 1.15.0, projects 4.4.3, strategy 1.3.1, client-intelligence 2.4.3, library 1.7.3, brand-book 1.2.2, bug-reports 1.4.4 and gdrive adapter 2.11.6.
