@@ -605,7 +605,6 @@ On confirmation, execute the following writes. All remote writes use `aifs_*` to
     "shared_root": "/shared/",
     "shared_artifacts_root": "/shared/members/artifacts/",
     "members_registry_path": "/members-registry.json",
-    "marketplace_cache_path": "/shared/marketplace-cache/",
     "bootstrap_zip_path": "/shared/bootstrap/member-bootstrap.zip"
   },
   "resource_ids": {

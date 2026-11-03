@@ -25,7 +25,6 @@
     "shared_root": "/shared/",
     "shared_artifacts_root": "/shared/members/artifacts/",
     "members_registry_path": "/members-registry.json",
-    "marketplace_cache_path": "/shared/marketplace-cache/",
     "bootstrap_zip_path": "/shared/bootstrap/member-bootstrap.zip"
   },
   "admins": [
