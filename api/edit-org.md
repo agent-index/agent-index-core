@@ -287,7 +287,7 @@ All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `b
 | `{registry}` | `id:{resource_ids.members_registry}` (from org-config) | `/members-registry.json` |
 | `{shared}/...` | `id:{resource_ids.shared_root}/...` (from org-config) | `/shared/...` |
 
-On Google Drive, if an id is missing (an org that predates `resource_ids`), halt and name it rather than falling back to a bare path; `publish-updates` Step 6f back-fills it.
+**Fallbacks (core 4.0.1).** On Google Drive, use the id form first. If the id is missing (an org that predates `resource_ids`, or a local `agent-index.json` with no `org_config_id`) or the id read fails, fall back to the path in the OneDrive column. On OneDrive, use the path first; the only id fallback is the drive-qualified `id:{drive_id}:{id}`, never a bare `id:`. Never halt only because an id is missing: `publish-updates` Step 6f back-fills missing ids, so a halt here can deadlock an older org. A not-found from one form may only mean the wrong form, so try the other form before concluding something isn't there.
 
 ### Behavior
 

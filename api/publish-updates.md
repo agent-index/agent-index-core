@@ -94,7 +94,7 @@ Surface a one-line confirmation per entry pulled (`✓ pulled <name> <local> →
 
 Runs before Step 0 on every invocation, **including `--no-sync` and `--dry-run`**, because Step 0 is what puts the new core files on the backend, where members read capability definitions from. Before 4.0.1 this gate lived only as admin reading in `upgrade/3-to-4.md` §1 and publish-updates never checked it, so a 3.x org could publish core 4.0.0 with helper-calling collections still installed (finding 64).
 
-1. **Does this publish cross 3.x → 4.x?** Target = the local clone's `agent-index-core/collection.json` `version`. Current = org-config `agent_index_version` (read `/org-config.json` as Step 1 does; the admin reads it by path on both backends, with `id:{org_config_id}` as the gdrive fallback), and `published-state.json` `infrastructure["agent-index-core"]` when that file exists; if either is below 4.0.0, the org is on 3.x. The gate applies only when the org is on 3.x and the target is ≥ 4.0.0. Otherwise skip this step silently.
+1. **Does this publish cross 3.x → 4.x?** Target = the local clone's `agent-index-core/collection.json` `version`. Current = org-config `agent_index_version` (read it as Step 1 does: `aifs_read({org-config})`, see "Remote addressing"), and `published-state.json` `infrastructure["agent-index-core"]` when that file exists; if either is below 4.0.0, the org is on 3.x. The gate applies only when the org is on 3.x and the target is ≥ 4.0.0. Otherwise skip this step silently.
 2. **Work out the version each collection will be on after this publish (finding 61).** Start from org-config `installed_collections[]` (every entry whose `status` is `installed` or `downloaded`), then override with what this same publish carries:
    - `agent-index-marketplace` — the local clone's `agent-index-marketplace/collection.json` `version` (Step 0 uploads it and Step 6a records it as the `marketplace-update`); under `--no-sync`, use the `collection.json` version already on the backend instead.
    - every other collection — the `version` in its `collection.json` on the backend (its read base: gdrive `id:{folder_id}`, OneDrive `/{name}`), when that is higher than org-config's: `upgrade-collection` has already uploaded it, and this publish's `collection-update` (Step 3) and 6a writeback record it.
@@ -295,7 +295,7 @@ If not an admin: surface "Only org admins can publish updates. The current admin
 
 Read and assemble the current org state — this is the "truth" that members should converge to:
 
-1. **Infrastructure versions:** Read `agent-index-core/collection.json` and `agent-index-marketplace/collection.json` from the remote filesystem via `aifs_read`. Extract `version` from each.
+1. **Infrastructure versions:** Read `collection.json` for `agent-index-core` and `agent-index-marketplace` from each one's read base, as item 2 does (Google Drive `id:{folder_id}`, `folder_id` from that collection's entry in org-config `installed_collections[]`; OneDrive `/agent-index-core`, `/agent-index-marketplace`), via `aifs_read("{base}/collection.json")`, with the fallbacks under "Remote addressing". Extract `version` from each.
 
 2. **Installed collections:** Read `installed_collections` from `org-config.json`. For each, also read the collection's `collection.json` from its read base (Google Drive `id:{folder_id}`, `folder_id` from that entry in org-config `installed_collections[]`; OneDrive `/{collection}`) via `aifs_read("{base}/collection.json")` to get the current `version` and `api` array.
 
@@ -524,7 +524,7 @@ Write the current state object (assembled in Step 1) to `/shared/updates/publish
 
 **Write the latest ID file:**
 
-Write a lightweight pointer file at `/shared/updates/latest.json` via `aifs_write`:
+Write a lightweight pointer file at `{shared}/updates/latest.json` via `aifs_write`:
 
 ```json
 {
@@ -603,7 +603,7 @@ The reconciles below (6d handshake, 6e member-read grant, 6f `resource_ids`, 6g 
 Members create their private space in their own My Drive at bootstrap and cannot write the registry; their bootstrap records the folder ID in a handshake file instead. This step copies handshakes into the registry — it runs on EVERY publish-updates invocation, even when nothing else is being published:
 
 1. `aifs_list({shared}/members/artifacts/)` → for each member hash directory, check for `member-folder.json`. Read each one found.
-2. For each handshake whose `member_folder_id` differs from the corresponding `members-registry.json` entry (including entries where it is `null`): update the registry entry's `member_folder_id` (revision-aware write, same retry semantics as invite-member Step 8).
+2. For each handshake whose `member_folder_id` differs from the corresponding `members-registry.json` entry (including entries where it is `null`): update the registry entry's `member_folder_id` in `{registry}` (revision-aware write, same retry semantics as invite-member Step 8).
 3. Surface one line: "Reconciled {N} member folder ID(s) into the registry." (or nothing if N=0).
 4. Handshake with no matching registry entry (member removed but artifacts dir retained): skip, note in the summary.
 
@@ -737,7 +737,7 @@ All `aifs_*` operations are invoked via the on-demand executor shell wrapper: `b
 | `{registry}` | `id:{resource_ids.members_registry}` (from org-config) | `/members-registry.json` |
 | `{shared}/...` | `id:{resource_ids.shared_root}/...` (from org-config) | `/shared/...` |
 
-On Google Drive, if an id is missing (an org that predates `resource_ids`), halt and name it rather than falling back to a bare path; `publish-updates` Step 6f back-fills it.
+**Fallbacks (core 4.0.1).** On Google Drive, use the id form first. If the id is missing (an org that predates `resource_ids`, or a local `agent-index.json` with no `org_config_id`) or the id read fails, fall back to the path in the OneDrive column. On OneDrive, use the path first; the only id fallback is the drive-qualified `id:{drive_id}:{id}`, never a bare `id:`. Never halt only because an id is missing: Step 6f back-fills missing ids, so a halt here can deadlock an older org. A not-found from one form may only mean the wrong form, so try the other form before concluding something isn't there.
 
 **Scratch files: `mktemp` only (bug `20260928-8d20ea22-140909-e0a9`).** Stage every remote read (update log, `published-state.json`, org-config, dist manifest) in a directory this run creates with `mktemp -d`, never a fixed `/tmp/<name>` — in Cowork another session's leftover `/tmp/ul.json` can't be overwritten and was parsed as the org's log during a publish. No `2>/dev/null` before the redirect; check the exit status and that the file parses before using it.
 
