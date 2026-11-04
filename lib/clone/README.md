@@ -18,6 +18,7 @@ invokes the committed script.
 | infra mode, zero tags | default-branch head, plus the phantom check against `version` (`ref_type: branch_head`) |
 | collections mode, no channel branch, entry has `version` | tag `v<version>`; tag missing on a repo that has release tags = per-repo FAILED, no default-branch fallback; zero-tag repo = default-branch head + phantom check (`ref_type: tag`; bug `20260926-8d20ea22-133903-0ddf`) |
 | collections mode, no channel branch, no `version` | default-branch head (`ref_type: branch_head`) |
+| catalog mode, no channel branch | highest release tag if the repo has one (`ref_type: tag`), else default-branch head (`ref_type: branch_head`). **No phantom check:** a catalog carries no version (CI-030, bug `20261018-8d20ea22-163327-7f2e`) |
 
 Every run merges its decisions into `<install_root>/.agent-index/clone-resolution.json` (`clone-resolution/1`: `channel`, `resolved_at`, `repos{name: {ref_type, ref, commit, version}}`). Publishing, update detection and displays read this record. Channel names must match `^[a-z0-9][a-z0-9-]{0,39}$`. The branch is `channel/<name>`.
 
@@ -35,7 +36,7 @@ Tests: `node --test lib/clone/resolve-refs.test.js`.
 ## Manifest contract (the ONLY thing the agent produces -- pure data, no logic)
 ```json
 {
-  "mode": "infra" | "collections",
+  "mode": "infra" | "collections" | "catalog",
   "host_os": "windows" | "darwin" | "linux",
   "host_arch": "amd64" | "arm64",
   "install_root": "<abs path to agent-index/ folder>",
@@ -44,7 +45,7 @@ Tests: `node --test lib/clone/resolve-refs.test.js`.
   "repos": [ { "name": "agent-index-core", "git_url": "https://.../x.git", "version": "3.28.0" } ]
 }
 ```
-`version` is optional. Infra mode uses it only to disambiguate a zero-tag branch-HEAD repo from a phantom. Collections mode pins the repo to tag `v<version>` (a channel branch still wins on a channel org); omit it to take the default-branch head.
+`version` is optional, and catalog entries carry none. Infra mode uses it only to disambiguate a zero-tag branch-HEAD repo from a phantom. Collections mode pins the repo to tag `v<version>` (a channel branch still wins on a channel org); omit it to take the default-branch head.
 
 ## Invocation (surfaced to the admin by the calling task)
 Windows: `powershell -ExecutionPolicy Bypass -File "<install_root>\agent-index-core\lib\clone\clone-repos.ps1" -Manifest "<install_root>\.agent-index\clone-manifest.json"`
