@@ -14,7 +14,7 @@
 #
 # Manifest shape (all data, no logic):
 # {
-#   "mode": "infra" | "collections",
+#   "mode": "infra" | "collections" | "catalog",
 #   "channel": null | "dev-1",
 #   "host_os": "windows",
 #   "host_arch": "amd64" | "arm64",
@@ -40,7 +40,7 @@ $hostArch    = "$($m.host_arch)"
 $installRoot = "$($m.install_root)"
 $backend     = "$($m.backend)"
 $channel     = if ($m.channel) { "$($m.channel)" } else { "" }
-if ($mode -ne "infra" -and $mode -ne "collections") { Fail-Hard "mode must be infra or collections (got: $mode)" }
+if ($mode -ne "infra" -and $mode -ne "collections" -and $mode -ne "catalog") { Fail-Hard "mode must be infra, collections or catalog (got: $mode)" }
 if (-not $installRoot) { Fail-Hard "install_root is required" }
 if ($mode -eq "infra" -and -not $backend) { Fail-Hard "backend is required in infra mode" }
 if (-not (Test-Path $installRoot)) { Fail-Hard "install_root does not exist: $installRoot" }
@@ -67,7 +67,7 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
       if ($line -match '^([0-9a-f]+)\s+refs/tags/(.+?)(\^\{\})?$') { if ($Matches[3]) { $tags[$Matches[2]] = $Matches[1] } elseif (-not $tags.ContainsKey($Matches[2])) { $tags[$Matches[2]] = $Matches[1] } }
     }
     $rel = @($tags.Keys | Where-Object { $_ -match '^v\d+(\.\d+)*$' } | Sort-Object { [version](($_ -replace '^v','') + $(if (($_ -split '\.').Count -lt 2) { '.0' } else { '' })) })
-    if ($mode -eq "infra" -and $rel.Count -gt 0) {
+    if (($mode -eq "infra" -or $mode -eq "catalog") -and $rel.Count -gt 0) {
       $t = $rel[-1]; $planRepos += [pscustomobject]@{ name=$n; git_url=$u; mode=$mode; ref_type="tag"; ref=$t; commit=$tags[$t]; want_version="$($repo.version)" }; continue
     }
     if ($mode -eq "collections" -and "$($repo.version)") {
@@ -166,14 +166,15 @@ foreach ($r in @($plan.repos)) {
     if ($mode -eq "collections" -and -not (Test-Path (Join-Path $dir "collection.json"))) { $results += @{ name=$name; ok=$false; detail="collection.json missing after clone" }; continue }
     $ver = Read-JsonVersion $dir
     $sha = "$(& git -C $dir rev-parse HEAD 2>$null)".Trim()
-    if ($type -eq "branch_head" -and ($mode -eq "infra" -or $want) -and ((-not $ver) -or ($want -and ($ver -ne $want)))) {
+    # catalog mode: a catalog carries no version, so no phantom check (CI-030, bug 7f2e)
+    if ($mode -ne "catalog" -and $type -eq "branch_head" -and ($mode -eq "infra" -or $want) -and ((-not $ver) -or ($want -and ($ver -ne $want)))) {
       $results += @{ name=$name; ok=$false; detail="ERROR: no release tag found for $name and version does not match (want=$want got=$ver) -- phantom/never-released (tagnofallback)" }
       continue
     }
     $label = switch ($type) {
       "channel" { "(channel)" }
       "tag"     { if ($mode -eq "collections") { "(collection, release tag from manifest version)" } else { "(release tag)" } }
-      default   { if ($mode -eq "collections" -and -not $want) { "(collection, default-branch head -- no version in manifest)" } else { "(branch-HEAD distribution, no release tags)" } }
+      default   { if ($mode -eq "catalog") { "(catalog, default-branch head -- the catalog has no release tag)" } elseif ($mode -eq "collections" -and -not $want) { "(collection, default-branch head -- no version in manifest)" } else { "(branch-HEAD distribution, no release tags)" } }
     }
     $short = if ($sha.Length -ge 7) { $sha.Substring(0,7) } else { $sha }
     $results += @{ name=$name; ok=$true; detail="$ref@$short $label" }

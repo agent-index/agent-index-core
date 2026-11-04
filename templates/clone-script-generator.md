@@ -13,11 +13,12 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
 ## What the subroutine does now
 1. Detect `host_os`, `install_root`, and (infra) `backend`. (`host_arch` is optional and unused since core 4.0.0; the scripts still parse it, so older manifests stay valid.) Assemble the `repos[]` set for the mode:
    - **infra:** `agent-index-core`, `agent-index-filesystem-<backend>`, `agent-index-marketplace`, `agent-index-resource-listings`.
+   - **catalog** (CI-030, bug `20261018-8d20ea22-163327-7f2e`): subscribed `clone` catalogs that aren't already in the infra set (`agent-index-resource-listings` stays infra), each `{ name, git_url }`, with no `version`. A catalog carries no collection version, so this mode takes the channel branch, else the highest release tag, else the default-branch head, and the driver never applies the phantom check to it. Use it when subscribing a catalog (`edit-org` → Manage marketplaces) and whenever subscribed catalogs are refreshed.
    - **collections:** the selected collection repo(s), each `{ name, git_url }` (+ `version`: the release to install, e.g. `marketplace-directory.json` `current_version` or the upgrade target — **always the catalog `current_version` or an explicit upgrade target, never the org's installed version**, or a refresh would pin to the installed tag and every check would say "up to date"). With `version` the repo is cloned at tag `v<version>` and a missing tag FAILS that repo (no default-branch fallback; a zero-tag repo gets default-branch head plus the phantom check; bug `20260926-8d20ea22-133903-0ddf`); without it, default-branch head. A channel branch still wins on a channel org.
    - **`channel` (core 3.32.0, REQUIRED field, may be null):** the org's distribution channel. Read org-config `distribution_channel`; before org-config exists (create-org Phase 1), read the admin's `agent-index.json` `distribution_channel`. **Always pass it.** A manifest without it makes a channel org silently fall back to released code, the revert the channels design exists to prevent. `null` = released code.
 2. Write the **manifest** to `<install_root>/.agent-index/clone-manifest.json` (torn-write discipline: read it back and confirm before surfacing). Shape:
    ```json
-   { "mode": "infra|collections", "channel": null, "host_os": "...",
+   { "mode": "infra|collections|catalog", "channel": null, "host_os": "...",
      "install_root": "<abs>", "backend": "gdrive|onedrive",
      "repos": [ { "name": "...", "git_url": "https://.../x.git", "version": "3.28.0" } ] }
    ```
@@ -26,12 +27,12 @@ Previously this subroutine had the agent **transcribe** a full clone `.ps1`/`.sh
    - darwin/linux: `bash "<install_root>/agent-index-core/lib/clone/clone-repos.sh" "<install_root>/.agent-index/clone-manifest.json"`
    The driver prints a per-repo status line and a summary; exit 0 = all ok, 1 = one or more repos failed, 2 = fatal.
 
-The two-mode split (infra vs collections) is unchanged and is expressed by the manifest `mode`. The two-script split at create-org still exists because collection selection is interactive and the catalog only appears after the infra clone lands.
+The mode split (infra, collections, and catalog since CI-030) is expressed by the manifest `mode`. The two-script split at create-org still exists because collection selection is interactive and the catalog only appears after the infra clone lands.
 
 ## Invariants preserved (now enforced in `lib/clone/`, not re-derived per run)
 - **Ref decision lives in `lib/clone/resolve-refs.js` (core 3.32.0), shared by both drivers.** A repo with branch `channel/<channel>` comes from that branch head. Otherwise infra repos are tag-pinned to the highest `v*` (numeric semver; this fixes the bash first-field sort bug); collections are pinned to tag `v<version>` when the manifest entry carries `version` (fail loud if missing), else default-branch HEAD-pinned (`colltags`).
 - Every run writes `<install_root>/.agent-index/clone-resolution.json` (`clone-resolution/1`: channel; per repo ref_type, ref, commit, version). Publishing, update detection and displays read it.
-- Three-way discrimination: tag exists -> checkout; zero tags AND cloned `collection.json`/`adapter.json` version == cataloged -> branch-HEAD SUCCESS; has tags but not this one (or zero tags + version mismatch) -> fail loud, no `main` fallback (`tagnofallback`).
+- Three-way discrimination: tag exists -> checkout; zero tags AND cloned `collection.json`/`adapter.json` version == cataloged -> branch-HEAD SUCCESS; has tags but not this one (or zero tags + version mismatch) -> fail loud, no `main` fallback (`tagnofallback`). Catalog mode skips the version check: zero tags -> default-branch head SUCCESS, recorded as `branch_head` (CI-030).
 - `clonescriptdirty`: clear `index.lock`, `reset --hard`, continue-past-failure with a per-repo summary. A target folder without `.git` is cloned into when empty, else that repo FAILS with `exists but is not a git repo: <path>`; FAILED lines carry git's own error text (bug `20261010-8d20ea22-145943-72ef`).
 - TLS 1.2 for every HTTPS call (`tls12`).
 - Scripts are committed ASCII, apostrophe-free (`ps1nonascii`, `clonescriptps1`) -- verified once at authoring, not re-risked each run.

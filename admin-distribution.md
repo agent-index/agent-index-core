@@ -99,7 +99,7 @@ A catalog file with no `marketplace_id` is the legacy public catalog and is read
 
 **`source.ref` for `clone` is stored relative to the install root** (e.g. `"agent-index-resource-listings"`), never absolute — same rule and same reason as `apps_path` (core 3.29.2, `appspathsandboxleak`): an absolute path captured in one session is a dead sandbox mount in every other. Consumers resolve it against the install root at read time.
 
-**Source kinds (v1):** `clone` — a catalog repo cloned into the install root by the committed `lib/clone/clone-repos` script (the current Release-C admin path; subscribing a new `clone` source adds its repo to the infra clone manifest). `url` — the legacy public-directory fetch, retained only for a not-yet-migrated org. `backend` (a catalog JSON on the org's own backend, for an org with no clones) is **reserved and not implemented in v1** — a subscription declaring it is refused.
+**Source kinds (v1):** `clone` — a catalog repo cloned into the install root by the committed `lib/clone/clone-repos` script (the current Release-C admin path; subscribing a new `clone` source clones it through a catalog manifest, `mode: catalog`, which never refuses a catalog for having no release tag — CI-030). `url` — the legacy public-directory fetch, retained only for a not-yet-migrated org. `backend` (a catalog JSON on the org's own backend, for an org with no clones) is **reserved and not implemented in v1** — a subscription declaring it is refused.
 
 Subscriptions are org policy: editable only by an admin, via `@ai:edit-org` → Manage marketplaces.
 

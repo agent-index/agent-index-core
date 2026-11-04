@@ -16,7 +16,7 @@ command -v git >/dev/null 2>&1 || die "git required"
 
 field() { python3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8-sig')).get(sys.argv[2]) or '')" "$MANIFEST" "$1"; }
 MODE=$(field mode); ARCH=$(field host_arch); ROOT=$(field install_root); BACKEND=$(field backend); CHANNEL=$(field channel)
-[ "$MODE" = "infra" ] || [ "$MODE" = "collections" ] || die "mode must be infra|collections (got: $MODE)"
+[ "$MODE" = "infra" ] || [ "$MODE" = "collections" ] || [ "$MODE" = "catalog" ] || die "mode must be infra|collections|catalog (got: $MODE)"
 [ -n "$ROOT" ] || die "install_root required"
 [ -d "$ROOT" ] || die "install_root does not exist: $ROOT"
 [ "$MODE" = "infra" ] && [ -z "$BACKEND" ] && die "backend required in infra mode"
@@ -49,7 +49,7 @@ for r in m.get('repos',[]):
             else: tags.setdefault(t,a[0])
     base={'name':n,'git_url':u,'mode':mode,'want_version':r.get('version')}
     rel=sorted([t for t in tags if key(t)],key=key)
-    if mode=='infra' and rel: out['repos'].append(dict(base,ref_type='tag',ref=rel[-1],commit=tags[rel[-1]])); continue
+    if mode in ('infra','catalog') and rel: out['repos'].append(dict(base,ref_type='tag',ref=rel[-1],commit=tags[rel[-1]])); continue
     if mode=='collections' and r.get('version'):
         t='v'+str(r['version']).lstrip('v')
         if t in tags: out['repos'].append(dict(base,ref_type='tag',ref=t,commit=tags[t]))
@@ -122,13 +122,14 @@ while IFS=$'\t' read -r NAME URL TYPE REF WANT; do
     || { echo "FAILED $NAME -- could not check out $REF${ERR:+ -- $ERR}"; FAILED="$FAILED $NAME"; continue; }
   if [ "$MODE" = "collections" ] && [ ! -f "$DIR/collection.json" ]; then echo "FAILED $NAME -- collection.json missing"; FAILED="$FAILED $NAME"; continue; fi
   VER=$(json_version "$DIR"); SHA=$(git -C "$DIR" rev-parse HEAD 2>/dev/null)
-  if [ "$TYPE" = "branch_head" ] && { [ "$MODE" = "infra" ] || [ -n "$WANT" ]; } && { [ -z "$VER" ] || { [ -n "$WANT" ] && [ "$VER" != "$WANT" ]; }; }; then
+  # catalog mode: a catalog carries no version, so no phantom check (CI-030, bug 7f2e)
+  if [ "$MODE" != "catalog" ] && [ "$TYPE" = "branch_head" ] && { [ "$MODE" = "infra" ] || [ -n "$WANT" ]; } && { [ -z "$VER" ] || { [ -n "$WANT" ] && [ "$VER" != "$WANT" ]; }; }; then
     echo "FAILED $NAME -- ERROR: no release tag found and version mismatch (want=$WANT got=$VER) -- phantom (tagnofallback)"; FAILED="$FAILED $NAME"; continue
   fi
   case "$TYPE" in
     channel) LABEL="(channel)";;
     tag) LABEL=$([ "$MODE" = "collections" ] && echo "(collection, release tag from manifest version)" || echo "(release tag)");;
-    *) if [ "$MODE" = "collections" ] && [ -z "$WANT" ]; then LABEL="(collection, default-branch head -- no version in manifest)"; else LABEL="(branch-HEAD distribution, no release tags)"; fi;;
+    *) if [ "$MODE" = "catalog" ]; then LABEL="(catalog, default-branch head -- the catalog has no release tag)"; elif [ "$MODE" = "collections" ] && [ -z "$WANT" ]; then LABEL="(collection, default-branch head -- no version in manifest)"; else LABEL="(branch-HEAD distribution, no release tags)"; fi;;
   esac
   echo "OK    $NAME -- $REF@${SHA:0:7} $LABEL"; OK=$((OK+1))
   RECORDS="$RECORDS$NAME	$TYPE	$REF	$SHA	$VER"$'\n'
