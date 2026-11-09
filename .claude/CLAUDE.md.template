@@ -46,7 +46,7 @@ When a member makes a request:
 
 At session start, `session-start` (Step 1.5) loads the member's routing phrases from `members/{member_hash}/profile/routing.json`, active phrases only, grouped by capability, with custom phrases marked. Each phrase is either a **collection default** or **member-custom**, and can be switched off. Members view and change their phrases through `@ai:preferences` ("show my phrases", "edit my routing").
 
-`org-setup` creates `routing.json` for a new member, and `@ai:update` keeps it current: it adds the default phrases of new and updated collections for the capabilities you have installed (finding 90), updates a default whose target the collection changed, removes defaults the collection no longer declares, and never changes a phrase the member customized, except to switch it off when its capability is gone.
+`org-setup` creates `routing.json` for a new member, and `@ai:update` creates it if it's missing and keeps it current: it adds the default phrases of new and updated collections for the capabilities you have installed (finding 90), updates a default whose target the collection changed, removes defaults the collection no longer declares or whose capability you don't have installed (finding 98), and never changes a phrase the member customized, except to switch it off when its capability is gone.
 
 If `routing.json` is absent or unreadable, use the default mappings in `runtime-reference.md` § "Default Natural-Language Mappings" (how to reach it: § "Reference Documents" below).
 
