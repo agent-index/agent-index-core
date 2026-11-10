@@ -1,6 +1,6 @@
 ﻿# Agent-Index Core — Changelog
 
-## [4.1.1] — 2026-11-11 — Google OAuth client guidance, routing.json always built, manifest-sync merges
+## [4.1.1] — 2026-11-10 — Google OAuth client guidance, routing.json always built, manifest-sync merges
 
 Ships the Core Improvements work merged since 4.1.0 (Kallista Salak: CI-009, CI-017, CI-019, CI-022, CI-029, DC-001; core#26–#32), with review fixes made at merge. CI-022 has to be out before 2026-11-12, when Google stops letting an existing OAuth client's "AI-powered agent" setting be changed. Pairs with marketplace 2.22.4, bug-reports 1.4.5, email-triage 1.2.4, gdrive adapter 2.11.7 and onedrive adapter 2.7.2.
 
