@@ -1,7 +1,7 @@
 ---
 name: edit-org
 type: task
-version: 3.5.3
+version: 3.5.4
 collection: agent-index-core
 description: Edit org configuration — update the admin list, manage marketplace subscriptions, set the org's distribution channel, or launch the marketplace to install or manage collections.
 stateful: false

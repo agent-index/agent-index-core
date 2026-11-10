@@ -1,5 +1,27 @@
 ﻿# Agent-Index Core — Changelog
 
+## [4.1.1] — 2026-11-10 — Google OAuth client guidance, routing.json always built, manifest-sync merges
+
+Ships the Core Improvements work merged since 4.1.0 (Kallista Salak: CI-009, CI-017, CI-019, CI-022, CI-029, DC-001; core#26–#32), with review fixes made at merge. CI-022 has to be out before 2026-11-12, when Google stops letting an existing OAuth client's "AI-powered agent" setting be changed. Pairs with marketplace 2.22.4, bug-reports 1.4.5, email-triage 1.2.4, gdrive adapter 2.11.7 and onedrive adapter 2.7.2.
+
+### Changed
+- **create-org 3.15.4: leave "Use this client for an AI-powered agent" unchecked when creating the Google OAuth client (CI-022).** agent-index uses the Drive REST API, not Google's Workspace MCP server, and a client marked as an AI agent falls under separate admin controls that could restrict or block it. From 2026-11-12 Google won't let you change this on an existing client, so a wrong choice means a new client and every member signing in again. The step names decision `gdrive-stays-on-rest-not-workspace-mcp` and links Google's "Manage OAuth Clients" page (section "Configure OAuth Clients for AI Agents"), citing Google's 2026-10-12 Workspace developer notice for the date.
+
+### Fixed
+- **apply-updates 4.3.0 builds `routing.json` whenever it's missing (CI-009).** Phase 5 used to run only with a pending core update, so a member with no file and nothing pending never got one; it now also runs from Step 2 when nothing is pending or no update log has been published yet (never on `--dry-run`). Phase 4 no longer starts a one-collection file that stopped Phase 5 adding the rest. New Step 1.7 removes collection-default phrases for capabilities the member never installed (finding 98); member-custom phrases and an unparseable file are left alone. The CLAUDE.md template says `@ai:update` creates the file if it's missing.
+- **apply-updates 4.3.0 / org-setup 3.12.3: manifest-sync merges instead of replacing (CI-029; bugs 155b, 4284, 1928).** Subroutine revision 7 → 8, so every collection is re-swept once.
+  - Step 9 brings each capability's org-mandated values into line for the keys **it uses** (its `parameter_provenance`), adding or replacing only those blocks; it no longer counts every collection-level key as drift or deletes `apps_path`. A missing `collection-setup-responses.md` is a no-op; one that can't be read keeps the revision from advancing, so the step is retried.
+  - Each `manifest.json` takes the remote definition and keeps every local key the remote copy doesn't define (the install records, such as `installed_date`, `provenance` and `presetup_unmet`); `dependency_status` and `missing_dependencies` are re-evaluated against `member-index.json`. org-setup's upgrade flow does the same and overwrites `apps/` in place.
+  - The stale `{name}-manifest.json` copy is no longer written and is removed when found. On a member install the only core file refreshed locally is the session hook; an admin's core clone is never written.
+- **Admin tasks read and write org files by backend (CI-019).** publish-updates 3.21.1, edit-org 3.5.4 and invite-member 1.13.5 each get a "Remote addressing" table (`{org-config}`, `{registry}`, `{shared}`): Google Drive id first with a path fallback, OneDrive path first then `id:{drive_id}:{id}`, never halting only because an id is missing.
+- **Member-facing org-config reads go by backend (CI-017):** org-setup's setup check (org-setup-setup 3.0.1), upload-install-log 3.0.1, and apply-updates' workspace-template read, which a member outside the Shared Drive couldn't reach by path.
+- **publish-updates cites `templates/backend-distribution.md` § "Publish flow (admin side — create-org Phase 2, publish-updates; no other caller)"** by its full heading, and every core `api[]` entry in `collection.json` is now an object with `triggers` (DC-001).
+- **`marketplace_cache_ttl_hours` removed from the workspace template** (bug 2907); nothing has read it since marketplace 2.1.0.
+- `collection-authoring-guide.md` drops its Version line, and `admin-distribution.md`'s release-procedure wording matches the checklist (CI-013 close-out).
+
+### Upgrade
+No admin step beyond the usual publish. On `@ai:update` each member's manifest-sync re-sweeps every installed collection once (revision 8); expect a slightly longer first update.
+
 ## [4.1.0] — 2026-10-17 — Natural-language routing, and standards.md retired
 
 Ships the Core Improvements work merged since 4.0.1 (Kallista Salak: CI-009, CI-013, CI-017; core#15, #16, #17, #18, #20, #21, with follow-up #24) plus one permission-changes fix. Pairs with marketplace 2.22.3, developer 1.15.0, projects 4.4.3, strategy 1.3.1, client-intelligence 2.4.3, library 1.7.3, brand-book 1.2.2, bug-reports 1.4.4 and gdrive adapter 2.11.6.
