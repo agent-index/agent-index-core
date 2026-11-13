@@ -1,7 +1,7 @@
 ---
 name: create-org
 type: task
-version: 3.15.3
+version: 3.15.4
 collection: agent-index-core
 description: First-time org setup — establishes the org's identity, configures the remote filesystem backend, uploads org resources, generates the member bootstrap zip, sets up the admin's local workspace, and optionally defines org roles.
 stateful: true
@@ -180,7 +180,8 @@ Based on the selection, collect backend-specific connection config:
 **Google Drive:**
 - Ask for the Drive ID (if using a shared drive) or leave blank for personal drive
 - Ask for the root folder ID — the folder that will contain all agent-index files. The admin should create this folder first and provide its ID (available in the folder's URL).
-- Ask for the OAuth client ID (`client_id`) — the admin must register an OAuth application in Google Cloud Console. Provide brief guidance: "You'll need an OAuth2 client ID from Google Cloud Console. Create a project, enable the Google Drive API, create OAuth credentials for a 'Desktop app', and paste the client ID here."
+- Ask for the OAuth client ID (`client_id`) — the admin must register an OAuth application in Google Cloud Console. Provide brief guidance: "You'll need an OAuth2 client ID from Google Cloud Console. Create a project, enable the Google Drive API, create OAuth credentials for a 'Desktop app', and paste the client ID here. **On the Create client form, leave 'Use this client for an AI-powered agent' unchecked.** agent-index talks to Drive through the regular Drive API, not Google's Workspace MCP server, and a client marked as an AI agent falls under separate admin controls that can restrict or block it, which would cut agent-index off from your files. **From 2026-11-12 Google won't let you change this on an existing client:** fixing a wrong choice then means creating a new client, and every member would have to sign in again. Google explains the setting here (section 'Configure OAuth Clients for AI Agents'): https://support.google.com/cloud/answer/15549257"
+  - Why (Core Improvements decision `gdrive-stays-on-rest-not-workspace-mcp`): agent-index uses the Drive REST API, which works with a non-agentic client, and doesn't use Google's Drive MCP server, which accepts only agentic clients. From 2026-11-12 Google makes this setting a required choice that can't be changed on an existing client (Google's Workspace developer notice of 2026-10-12). Google's page: https://support.google.com/cloud/answer/15549257, section "Configure OAuth Clients for AI Agents". Don't link the decision record itself: it lives in the agent-index team's own Drive, which a new org's admin can't open.
 - Ask for the OAuth client secret (`client_secret`) — required for the OAuth flow. Provide guidance: "Copy the client secret from the same OAuth credentials page in Google Cloud Console."
 
 **Microsoft OneDrive/SharePoint:**
