@@ -96,11 +96,32 @@ if [ -n "$MEMBER_EMAIL" ]; then
   MEMBER_HASH=$(echo -n "$MEMBER_EMAIL_LOWER" | sha256sum | cut -c1-"$HASH_LENGTH")
   MEMBER_INDEX="$MEMBERS_ROOT/$MEMBER_HASH/member-index.json"
 
+  # The saved identity is the backend sign-in account (a Microsoft UPN, a Google
+  # account), which need not be the agent-index email (finding 108). needs_setup
+  # means no member workspace on this install at all.
+  WORKSPACES=()
+  if [ -d "$MEMBERS_ROOT" ]; then
+    for d in "$MEMBERS_ROOT"/*/; do
+      [ -f "${d}member-index.json" ] && WORKSPACES+=("$(basename "$d")")
+    done
+  fi
+
   if [ -f "$MEMBER_INDEX" ]; then
     echo "AGENT_INDEX_BOOTSTRAP: ready"
     echo "member_hash=$MEMBER_HASH"
     echo "member_index=$MEMBER_INDEX"
     echo "Run the agent-index session-start task for this member."
+  elif [ ${#WORKSPACES[@]} -eq 1 ]; then
+    echo "AGENT_INDEX_BOOTSTRAP: ready"
+    echo "member_hash=${WORKSPACES[0]}"
+    echo "member_index=$MEMBERS_ROOT/${WORKSPACES[0]}/member-index.json"
+    echo "identity_match=false"
+    echo "The signed-in account ($MEMBER_EMAIL) is not this workspace's agent-index email; this install has one member workspace. Run the agent-index session-start task for it."
+  elif [ ${#WORKSPACES[@]} -gt 1 ]; then
+    echo "AGENT_INDEX_BOOTSTRAP: ready"
+    echo "identity_match=false"
+    echo "local_member_hashes=${WORKSPACES[*]}"
+    echo "The signed-in account ($MEMBER_EMAIL) matches none of this install's member workspaces. Compute member_hash from the member's agent-index email (CLAUDE.md Identity Resolution), then run session-start."
   else
     echo "AGENT_INDEX_BOOTSTRAP: needs_setup"
     echo "reason=no_member_workspace"
