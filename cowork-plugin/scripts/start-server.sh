@@ -23,6 +23,9 @@ done
 if [ -z "$PROJECT_DIR" ]; then
   echo "agent-index-filesystem plugin: No agent-index workspace found in Cowork mounts." >&2
   echo "Make sure your Cowork session is pointed at a folder containing agent-index.json." >&2
+  echo "If this session is not linked to your computer with your Agent-Index folder connected, agent-index cannot run here:" >&2
+  echo "link it and start a new session, or use the Code tab in Claude desktop. Never copy your agent-index sign-in elsewhere." >&2
+  echo "Windows setup help: https://github.com/agent-index/agent-index-core/blob/v3.31.1/windows-prerequisites.md" >&2
   exit 1
 fi
 
