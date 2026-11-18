@@ -204,6 +204,8 @@ If the member is not an admin, skip this notice — only admins can act on it.
 **Adapter-lag check, every member (core 4.2.0, CI-025):** if Step 2 confirmed connectivity, read the org's published adapter version from `published-state.json` (`adapter_bundle.version`; on gdrive `aifs_read("id:{resource_ids.shared_root}/updates/published-state.json")`, path `/shared/updates/published-state.json` as the fallback; on OneDrive by path) and compare it with the local `mcp-servers/filesystem/adapter.json` `version`. If the local one is older, queue a notice for any member (not only admins), at the same priority as "Org updates are available":
 > "Your filesystem adapter ({local}) is older than your org's ({published}). Say '@ai:update' to bring it up to date."
 
+If `member-index.json` `deferred_ops[]` is non-empty, add to that notice: "{n} update(s) are waiting for it: {list, e.g. core 4.2.0, the CLAUDE.md update}." (finding 120). If `deferred_ops` is non-empty but the local adapter is not older than the published one, queue instead: "{n} update(s) are waiting; say '@ai:update' to apply them."
+
 Since core 4.2.0, task files address org locations by plain path, which needs adapter gdrive 2.12.0 / onedrive 2.8.0 or later; this notice is what keeps a member who hasn't updated from falling behind. Skip silently if either version can't be read.
 
 These notices are advisory. They surface at the same priority level as role-based collection suggestions — below deprecation warnings and hard failures.
