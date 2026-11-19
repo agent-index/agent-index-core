@@ -130,10 +130,30 @@ if [ -n "$MEMBER_EMAIL" ]; then
     echo "No local member workspace found. Prompt the member to say: 'set up my agent-index member workspace'"
   fi
 else
-  # Email not available in environment — ask Claude to resolve from session context
-  # No identity known locally (never signed in on this install, or an adapter
-  # older than 2.12.0): the first aifs call settles it.
-  echo "AGENT_INDEX_BOOTSTRAP: needs_auth"
-  echo "reason=identity_unknown"
-  echo "No signed-in identity is recorded on this install. Call aifs_auth_status and act on its bootstrap field (ready: run session-start; needs_auth: sign in; needs_setup: member-bootstrap)."
+  # No identity known locally: never signed in on this install, or an adapter
+  # older than 2.12.0 that doesn't save one (C2-F4: an admin's refreshed core
+  # clone carries this hook before the org's adapter is updated). Decide from
+  # the local workspaces, as for finding 108, rather than asking for a sign-in.
+  WORKSPACES=()
+  if [ -d "$MEMBERS_ROOT" ]; then
+    for d in "$MEMBERS_ROOT"/*/; do
+      [ -f "${d}member-index.json" ] && WORKSPACES+=("$(basename "$d")")
+    done
+  fi
+  if [ ${#WORKSPACES[@]} -eq 1 ]; then
+    echo "AGENT_INDEX_BOOTSTRAP: ready"
+    echo "member_hash=${WORKSPACES[0]}"
+    echo "member_index=$MEMBERS_ROOT/${WORKSPACES[0]}/member-index.json"
+    echo "reason=identity_unknown_single_workspace"
+    echo "This install has one member workspace. Run the agent-index session-start task for it."
+  elif [ ${#WORKSPACES[@]} -gt 1 ]; then
+    echo "AGENT_INDEX_BOOTSTRAP: ready"
+    echo "local_member_hashes=${WORKSPACES[*]}"
+    echo "reason=identity_unknown_several_workspaces"
+    echo "Compute member_hash from the member's agent-index email (CLAUDE.md Identity Resolution), then run session-start."
+  else
+    echo "AGENT_INDEX_BOOTSTRAP: needs_auth"
+    echo "reason=identity_unknown"
+    echo "No signed-in identity and no member workspace on this install. Call aifs_auth_status and act on its bootstrap field (ready: run session-start; needs_auth: sign in; needs_setup: member-bootstrap)."
+  fi
 fi

@@ -24,7 +24,7 @@ When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTST
   - **Admin creating a brand-new org** — no `remote_filesystem` backend configured yet (a fresh `agent-index-core` clone). Only then run `@ai:setup` (org-setup → create-org).
 - **`ready`**: Everything is configured. Proceed normally.
 
-**If no `AGENT_INDEX_BOOTSTRAP` signal reached the session** (in Cowork the hook's output often doesn't arrive), call `aifs_auth_status` before the member's first request and act on its `bootstrap` field as above; on `ready`, run session-start (`/agent-index-core/api/session-start.md`), then handle the request. Do this once per session.
+**If no `AGENT_INDEX_BOOTSTRAP` signal reached the session** (in Cowork the hook's output often doesn't arrive), call `aifs_auth_status` before the member's first request and act on its `bootstrap` field as above; on `ready`, run session-start (`/agent-index-core/api/session-start.md`), then handle the request. If its result has no `bootstrap` field (an adapter older than gdrive 2.12.0 / onedrive 2.8.0), decide from local files: not authenticated → `needs_auth`; a `members/*/member-index.json` exists → `ready`; otherwise `needs_setup`. Do this once per session.
 
 ## Handling Member Requests
 
@@ -144,6 +144,8 @@ If a request matches `@ai:{name}` and is not in the tables above, resolve it as 
 ## Addressing
 
 Address org files by plain path on every backend: `/org-config.json`, `/members-registry.json`, `/shared/...`, `/{collection}/...`. The executor finds them from org-config, whether or not you are a member of the org's Shared Drive. Content another member shared from their own drive is reached by the `id:` address the org's catalog gives you; owned content and sharing: `runtime-reference.md` § "Addressing: Owned Content and Sharing".
+
+**On an older adapter (for one release).** If `mcp-servers/filesystem/adapter.json` says gdrive older than 2.12.0 and a plain-path read of an org location returns `FILE_NOT_FOUND` / `PATH_NOT_FOUND`, re-read it by id: `/org-config.json` as `id:{org_config_id}` (local `agent-index.json`), `/members-registry.json` as `id:{resource_ids.members_registry}`, `/shared/...` as `id:{resource_ids.shared_root}/...`, `/{collection}/...` as `id:{folder_id}/...` (org-config). Tell the member once that their adapter needs updating (`@ai:update`, or their admin deploying it).
 
 ## Reads go through aifs only
 

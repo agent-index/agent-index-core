@@ -37,6 +37,8 @@ Selected fields from `<project_dir>/org-config.json` are NOT in the zip directly
 
 If any required input file is missing locally, surface the error with the missing path and halt. Do not produce a zip with missing files.
 
+**Adapter vs core (finding 127, C2-F3).** Read `requires_adapter` from `<project_dir>/agent-index-core/collection.json` (absent means none) and compare the entry for this org's backend (`agent-index.json` `remote_filesystem.backend`) with `<project_dir>/mcp-servers/filesystem/adapter.json` `version`. If the deployed adapter is older, **don't build or upload a zip**: it would pair core's new instructions (CLAUDE.md, session hook) with an adapter that can't follow them, and a member who joins from it has no update step to protect them. Stop and tell the admin: "Not regenerating the bootstrap zip: core {core version} needs filesystem adapter {required}, and this org's deployed adapter is {deployed}. The current zip stays as it is. Deploy the adapter first (`@ai:edit-org` → Update adapter bundle), which regenerates the zip; don't invite new members until then." Return this to the caller as a failed regeneration (publish-updates reports a failed prerequisite as usual). This happens when an org upgrading from 4.1.x publishes core 4.2.0 before deploying the adapter.
+
 ### Step 2: Create staging directory
 
 Create `<project_dir>/.agent-index/staging/bootstrap-<ISO-timestamp>-<source-trigger-slug>/` where `source-trigger-slug` is the trigger string lowercased with non-alphanumeric replaced by hyphens. e.g. `bootstrap-2026-05-05T14-30-00-gdrive-bundle-changed/`.
