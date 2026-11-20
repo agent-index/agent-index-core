@@ -28,6 +28,8 @@ When a session starts, the session-bootstrap hook checks for `AGENT_INDEX_BOOTST
 - `members/{member_hash}/member-index.json` exists locally → run session-start (`/agent-index-core/api/session-start.md`), then handle the request.
 - It doesn't exist → treat it as `needs_setup` and route as above.
 
+**If agent-index's tools can't run in this session (`needs_device_shell`)**: there's no shell, or `bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh` can't be found or started. **A shell that is still starting is not this case:** if a call returns "Workspace still starting" (or a similar not-ready message), wait a few seconds and retry once; treat it as `needs_device_shell` only if the retry also fails. The hook runs in that same shell, so it can't raise this signal itself; recognise it when a call fails this way. Stop all agent-index work and tell the member: "agent-index can't reach your computer in this session, so its tools can't run here. Link this session to your computer with your Agent-Index folder connected and start a new session, or use the Code tab in Claude desktop. Windows setup help: https://github.com/agent-index/agent-index-core/blob/main/windows-prerequisites.md". Don't try to run agent-index anywhere else, and never offer a credential workaround (§ "Important Constraints"). This is an instruction to the session, not an enforcement mechanism; the credentials rule is what forbids the workaround.
+
 Compute `member_hash` from the member's email (see Identity Resolution). Do this once per session.
 
 ## Handling Member Requests
@@ -219,7 +221,7 @@ If more than one content source is given, `content` wins, then `content_file`, t
 
 **IMPORTANT — deprecated v2 artifacts:** If the local install contains `agent-index-core/tools/aifs-bridge/` (with `aifs-bridge.mjs` and `aifs-call.sh`), these are **obsolete v2 infrastructure** — do NOT use them. They reference `server.bundle.js` which no longer exists. The only supported invocation path is `mcp-servers/filesystem/aifs-exec.sh` as shown above.
 
-If `aifs_*` calls return `NOT_AUTHENTICATED`, the system will automatically attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback. **Exception:** if the `reason` / `refresh_reason` is `network_error`, `tls_or_proxy_error` or `credential_write_failed` (or `needs_auth` is `false`), don't re-authenticate — report the `detail`; it is a connection or local-storage problem (`runtime-reference.md` § "Remote access failures (detail)").
+If `aifs_*` calls return `NOT_AUTHENTICATED`, the system will automatically attempt to restore the connection without member intervention. If automatic re-auth fails, the member can say `@ai:member-bootstrap` as a manual fallback. **Exception:** if the `reason` / `refresh_reason` is `credential_lock_busy`, `network_error`, `tls_or_proxy_error` or `credential_write_failed` (or `needs_auth` is `false`), don't re-authenticate — report the `detail`; a busy credential lock means another agent-index process on this computer is refreshing the sign-in (try again in a moment), the others are connection or local-storage problems (`runtime-reference.md` § "Remote access failures (detail)").
 
 **Truncated files.** A file stamped with the `AIFS:FILE-END` sentinel that does not end with it is truncated. Re-fetch before deciding anything, and never overwrite a complete copy with a truncated one.
 
@@ -235,3 +237,4 @@ Member identity is resolved by computing SHA-256 of the member's lowercase email
 - Always read skill/task definitions before executing them
 - Always get member confirmation before making changes
 - Always route through agent-index first for project, strategy, bug, triage, and work-management requests — external tools are supplementary, not primary
+- **Member credentials never leave the member's device.** Never read, open, print, copy, upload, stage or move anything in `.agent-index/credentials/`, with the shell, the file tools, a connector or any other tool. Only the executor (`aifs-exec.sh`) reads that folder, on the member's own device. Never run `aifs-exec` anywhere else with a member's credentials: not in a cloud container, not on another machine. If the executor can't run in this session (no shell, or `aifs-exec.sh` can't be found or started), stop and tell the member the agent-index tools can't run here. Never offer a credential workaround, even to finish a task the member asked for (bug `20261118-68dff8bf-143550-c1a2`).

@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.3.0
+version: 3.3.1
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -116,7 +116,7 @@ bash <project_dir>/mcp-servers/filesystem/aifs-exec.sh aifs_read '{"path":"/org-
 
 > "The remote filesystem is authenticated but the org configuration could not be read. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until connectivity is restored. Say '@ai:member-bootstrap' if you'd like to troubleshoot."
 
-**If `authenticated: false` with `reason` `network_error`, `tls_or_proxy_error` or `credential_write_failed`** (gdrive adapter 2.11.5+, bug `20260822-8d20ea22-143449-a1c4`): this is not an expired sign-in, so do **not** start re-authentication. Say what failed in one line using the adapter's `detail` ("I couldn't reach Google Drive: {detail}" / "…your network's proxy or certificate blocked it…" / "…I couldn't save your refreshed sign-in locally…") and continue to Step 3 with the same queued notice as a failed re-auth. Any other reason (`expired`, `revoked`, `no_credential`, `refresh_failed`, or none):
+**If `authenticated: false` with `needs_auth: false`, or with `reason` `credential_lock_busy`, `network_error`, `tls_or_proxy_error` or `credential_write_failed`** (gdrive adapter 2.11.5+, bug `20260822-8d20ea22-143449-a1c4`; `credential_lock_busy` from the credential-lock adapters, bug `20261118-68dff8bf-143550-c1a2`): this is not an expired sign-in, so do **not** start re-authentication. Say what failed in one line using the adapter's `detail` ("Another agent-index process on this computer is refreshing your sign-in. Try again in a moment; you don't need to sign in again." / "I couldn't reach Google Drive: {detail}" / "…your network's proxy or certificate blocked it…" / "…I couldn't save your refreshed sign-in locally…") and continue to Step 3 with the same queued notice as a failed re-auth. Any other reason (`expired`, `revoked`, `no_credential`, `refresh_failed`, or none):
 
 **If `authenticated: false`:** Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
 
