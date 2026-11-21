@@ -1,6 +1,6 @@
 ﻿# Agent-Index Core — Changelog
 
-## [4.2.0] — <RELEASE_DATE> — org locations by plain path (CI-025)
+## [4.2.0] — 2026-11-20 — org locations by plain path (CI-025)
 
 Org files are addressed by plain path on every backend; the filesystem executor finds them from org-config. Pairs with gdrive adapter 2.12.0 and onedrive adapter 2.8.0, which it requires (declared in `collection.json` `requires_adapter`).
 
