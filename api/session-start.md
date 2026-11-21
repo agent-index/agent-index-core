@@ -209,7 +209,7 @@ If `member-index.json` `deferred_ops[]` is non-empty, add to that notice: "{n} u
 Since core 4.2.0, task files address org locations by plain path, which needs adapter gdrive 2.12.0 / onedrive 2.8.0 or later; this notice is what keeps a member who hasn't updated from falling behind. Skip silently if either version can't be read.
 
 **Org adapter behind core, admins only (finding 127):** if the current member is an admin (org-config `admins[]`), also read `requires_adapter` from the org's core `collection.json` (gdrive `id:{folder_id}/collection.json`, OneDrive `/agent-index-core/collection.json`, as above) and compare the entry for this org's backend with the org's published adapter (`published-state.json` `adapter_bundle.version`). If the published adapter is older, queue this notice for the admin at the top of the list, above "Org updates are available":
-> "Your org's core ({core version}) needs filesystem adapter {required} or later, but your org has published {published}. Members are held on the previous instructions until it's deployed. Say '@ai:edit-org' → Update adapter bundle, then 'publish our org updates'."
+> "Your org's core ({core version}) needs filesystem adapter {required} or later, but your org has published {published}. Until it's deployed, members keep their previous CLAUDE.md and adapter (core's task files on the org are already the new ones; members read them by id, slower). Say '@ai:edit-org' → Update adapter bundle, then 'publish our org updates'."
 
 This happens when an org upgrading from 4.1.x published core 4.2.0 before deploying the adapter (its publish-updates had no hard stop yet). Skip silently if either value can't be read.
 
