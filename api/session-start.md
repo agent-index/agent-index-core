@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.3.0
+version: 3.4.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -16,6 +16,8 @@ external_dependencies:
 reads_from: null
 writes_to: null
 ---
+
+<!-- ci025-addressing-exception: this update-path task keeps its id-anchor reads for one release after the plain-path cleanup, so a member on an older adapter can always run the update that brings the new one (CI-025 technical design §8.3). Remove in the following release. -->
 
 ## About This Task
 
@@ -191,13 +193,25 @@ Also check for a pending update plan at `.agent-index/install-state/pending-upda
 
 **Direct version checks (fallback): none.** When there is no `latest.json` (the admin hasn't published updates yet), session-start has nothing to compare against and queues no update notice. The infrastructure and collection checks that used to sit here compared against `/shared/marketplace-cache/`, which is decommissioned (no writer since marketplace 2.17.0), so they could only skip. They were removed in CI-017. Capability versions aren't compared either. Capabilities have their own version numbers, independent of their collection's version (core 3.7.0), so comparing a capability's version with its collection's `collection.json` version reports almost every capability as upgradable (`capversionfallback`, 3.32.0 live test: "62 of 68" on a minutes-old install). Capability upgrades reach members through org updates (`@ai:update`) and `@ai:setup`; don't queue a capability-upgrade notice from a version comparison.
 
-**Distribution channel banner (core 3.32.0):** read the local `agent-index.json` `distribution_channel` (falling back to `/shared/dist/manifest.json` `channel` if the local field is absent and Step 2 confirmed connectivity). If set, queue an **advisory** notice, shown on every session in every verbosity except `silent`: *"This org runs distribution channel **{name}** (unreleased code for testing)."* On a channel org, skip the adapter bundle check below. It compares against the public released directory, which a channel org intentionally doesn't follow. Use `@ai:check-updates` instead.
+**Distribution channel banner (core 3.32.0):** read the local `agent-index.json` `distribution_channel` (falling back to `/shared/dist/manifest.json` `channel` if the local field is absent and Step 2 confirmed connectivity). If set, queue an **advisory** notice, shown on every session in every verbosity except `silent`: *"This org runs distribution channel **{name}** (unreleased code for testing)."* On a channel org, skip the next paragraph's admin-only adapter bundle check (only that one). It compares against the public released directory, which a channel org intentionally doesn't follow; use `@ai:check-updates` instead. The adapter-lag check and the "org adapter behind core" notice below still run on a channel org.
 
 **Adapter bundle check:** If `aifs_*` tools are available, read the local `adapter.json` from `mcp-servers/filesystem/adapter.json` in the project directory. Compare `bundle_built_at` against the remote adapter directory entry's `current_version` by reading the remote adapter's `adapter.json` from the adapter directory (fetched via the `filesystem_adapter_directory_url` in `agent-index.json`, or from a cached copy). If the local adapter version is behind the directory version, or if `bundle_built_at` is more than 30 days old and cannot be compared: queue a notice for admins only (check whether the current member is in the `admins` list from org-config):
 
 > "A newer version of the filesystem adapter is available. The current bundle was built on {bundle_built_at date}. Say '@ai:edit-org' and choose 'Update adapter bundle' to download the latest version and regenerate the bootstrap zip for your members."
 
 If the member is not an admin, skip this notice — only admins can act on it.
+
+**Adapter-lag check, every member (core 4.2.0, CI-025):** if Step 2 confirmed connectivity, read the org's published adapter version from `published-state.json` (`adapter_bundle.version`; on gdrive `aifs_read("id:{resource_ids.shared_root}/updates/published-state.json")`, path `/shared/updates/published-state.json` as the fallback; on OneDrive by path) and compare it with the local `mcp-servers/filesystem/adapter.json` `version`. If the local one is older, queue a notice for any member (not only admins), at the same priority as "Org updates are available":
+> "Your filesystem adapter ({local}) is older than your org's ({published}). Say '@ai:update' to bring it up to date."
+
+If `member-index.json` `deferred_ops[]` is non-empty, add to that notice: "{n} update(s) are waiting for it: {list, e.g. core 4.2.0, the CLAUDE.md update}." (finding 120). If `deferred_ops` is non-empty but the local adapter is not older than the published one, the member can't fix it themselves when the org's published adapter is also below what the held-back updates need (read `requires_adapter` from core's `collection.json`, read as this task's other exception reads are (gdrive `id:{folder_id}/collection.json` with the `agent-index-core` `folder_id` from org-config `installed_collections[]`; OneDrive `/agent-index-core/collection.json`; a member on an older gdrive adapter can't rely on the plain path)): queue "{n} update(s) are waiting for your org's admin to deploy filesystem adapter {required}. Nothing to do on your side." If that read fails, don't fall back to the "say '@ai:update'" wording: say "{n} update(s) are waiting for a filesystem adapter update." Otherwise queue "{n} update(s) are waiting; say '@ai:update' to apply them."
+
+Since core 4.2.0, task files address org locations by plain path, which needs adapter gdrive 2.12.0 / onedrive 2.8.0 or later; this notice is what keeps a member who hasn't updated from falling behind. Skip silently if either version can't be read.
+
+**Org adapter behind core, admins only (finding 127):** if the current member is an admin (org-config `admins[]`), also read `requires_adapter` from the org's core `collection.json` (gdrive `id:{folder_id}/collection.json`, OneDrive `/agent-index-core/collection.json`, as above) and compare the entry for this org's backend with the org's published adapter (`published-state.json` `adapter_bundle.version`). If the published adapter is older, queue this notice for the admin at the top of the list, above "Org updates are available":
+> "Your org's core ({core version}) needs filesystem adapter {required} or later, but your org has published {published}. Until it's deployed, members keep their previous CLAUDE.md and adapter (core's task files on the org are already the new ones; members read them by id, slower). Say '@ai:edit-org' → Update adapter bundle, then 'publish our org updates'."
+
+This happens when an org upgrading from 4.1.x published core 4.2.0 before deploying the adapter (its publish-updates had no hard stop yet). Skip silently if either value can't be read.
 
 These notices are advisory. They surface at the same priority level as role-based collection suggestions — below deprecation warnings and hard failures.
 

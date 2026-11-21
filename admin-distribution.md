@@ -227,6 +227,8 @@ Each entry:
 
 Each operation in an entry has a `type` field and type-specific fields:
 
+**`requires_adapter` (optional, any operation; core 4.2.0, CI-025).** `{"gdrive": "X.Y.Z", "onedrive": "X.Y.Z"}`. Set by publish-updates (and upgrade-collection) when the operation's content needs that filesystem adapter or later, copied from `requires_adapter` in the content's `collection.json`. publish-updates refuses to publish such content while the org's deployed adapter is older. apply-updates (Phase 0a) applies the adapter first; if the member's adapter is still older it holds the operation back in `member-index.json` `deferred_ops[]` (`{entry_id, operation}`), advances the cursor anyway, and applies `deferred_ops` first on the next run.
+
 **`core-update`** — agent-index-core was updated.
 
 | Field | Type | Description |
