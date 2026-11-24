@@ -1,7 +1,7 @@
 ---
 name: publish-updates
 type: task
-version: 3.16.0
+version: 3.17.0
 collection: agent-index-core
 description: Generates update instructions from the current org state and publishes them to the remote filesystem so members can apply updates via '@ai:update'.
 stateful: false
@@ -48,6 +48,32 @@ Optionally, the admin can provide:
 >
 > If you find yourself about to `WebSearch` or raw-fetch a directory to answer an admin version/release question, stop — read the clone's `collection.json`/tags instead. Repairs of a corrupt remote file likewise re-source from the local clone (`git show HEAD:<path>`), never from a web fetch.
 
+### Step 0-pre: Major-Version Guard (added in core 3.31.1; bug `20261118-68dff8bf-143550-c1a2`)
+
+Run this **first, on every invocation**: with or without `--check-upstream`, `--no-sync` or `--dry-run`. It stops an org on one major line (for example 3.x) from being moved to the next (4.x) by accident. Step 0 uploads whatever core the admin's local clone holds, and a clone can reach the next major without anyone choosing it: a `git pull` of `main`, a clone-script refresh (which checks out the highest release tag), or `--check-upstream` Step 0a.
+
+1. **Read the org's current major.** Read org-config (Google Drive: `id:{org_config_id}`; OneDrive: `/org-config.json`; CLAUDE.md § "Key Files") → `agent_index_version`. If it is missing or unparseable, use the remote `/agent-index-core/collection.json` `version`. If neither can be read, halt: "I can't tell which version this org runs, so I won't publish core. Check the connection (`aifs_auth_status`) and re-run." The org's major is the number before the first dot.
+2. **Read the local major.** Local `<project_dir>/agent-index-core/collection.json` → `version`; its major is the number before the first dot.
+3. **If the local major is not higher, continue** to Step 0a / Step 0 with no message. A same-major update (3.31.0 → 3.31.1) is the normal case and is never questioned here.
+4. **If the local major is higher, stop before uploading or writing anything** and tell the admin, in these words with the versions filled in:
+
+   ```
+   Your local agent-index-core is {local_version}, but this org runs {org_version}.
+   Publishing now would move every member to {local_major}.x. That's a major upgrade, so I've stopped. Nothing has been changed.
+
+   - Not upgrading? Put your local core back on the {org_major}.x line, then run @ai:publish-updates again.
+     In a terminal, in your Agent-Index folder:
+       git -C agent-index-core fetch --tags origin
+       git -C agent-index-core checkout $(git -C agent-index-core tag -l 'v{org_major}.*' --sort=-v:refname | head -1)
+   - Upgrading on purpose? Follow agent-index-core/upgrade/{org_major}-to-{local_major}.md first. Then reply exactly:
+       yes, I am upgrading to {local_major}.x
+   ```
+
+5. **Only that reply continues the publish**, given by the admin in a new turn (matching ignores case and surrounding spaces). Any other reply, including "y", "yes" or "continue", halts with "No changes made." Never infer it from an annotation, a flag (`--all` does not count) or earlier messages. The session does not run the `git` commands itself; the admin runs them on their own computer.
+6. **Re-check after Step 0a.** If Step 0a pulled anything, repeat steps 2–5 before Step 0, because the pull may have changed the local core.
+
+---
+
 ### Step 0a: Pull Upstream Updates (added in core 3.5.0; only when `--check-upstream` flag is passed)
 
 If the admin invoked `@ai:publish-updates` **without** the `--check-upstream` flag, skip this step entirely and proceed to Step 0.
@@ -60,6 +86,7 @@ When `--check-upstream` is present, fetch the latest infrastructure source from 
    - Compare against the directory's `current_version`.
    - If `local_version == directory.current_version`: this entry is already at upstream; no fetch needed.
    - If `local_version` is absent OR `local_version < directory.current_version`: this entry is an upstream-fetch candidate.
+   - **Major upgrades are listed apart (core 3.31.1; Step 0-pre).** For `agent-index-core`, if the candidate's major is higher than the org's major (Step 0-pre step 1), mark it `MAJOR UPGRADE`. `[a]ll` and `--all` never pull it. It's pulled only through `[s]elect`, after the admin gives the Step 0-pre step 4 reply for that major.
 3. Surface the candidates list (or surface "All infrastructure already at upstream — nothing to fetch." and proceed to Step 0):
 
    ```
@@ -67,6 +94,19 @@ When `--check-upstream` is present, fetch the latest infrastructure source from 
 
      agent-index-core           3.4.0 → 3.5.0    https://github.com/.../main.zip
      agent-index-marketplace    2.2.0 → 2.3.0    https://github.com/.../main.zip
+
+   Pull?  [a]ll  [s]elect each  [n]one
+   ```
+
+   With a major upgrade among the candidates, list it apart:
+
+   ```
+   Upstream updates available:
+
+     agent-index-marketplace    2.2.0 → 2.3.0    https://github.com/.../main.zip
+
+   MAJOR UPGRADE (not included in [a]ll; see agent-index-core/upgrade/3-to-4.md):
+     agent-index-core           3.31.1 → 4.1.1
 
    Pull?  [a]ll  [s]elect each  [n]one
    ```
@@ -648,7 +688,9 @@ Never modify collection directories or any file outside the documented write sur
 
 The pre-3.7.4 Constraints section forbade ALL `org-config.json` writes, contradicting the Step 5 writeback added in 3.7.1 and effectively suppressing it. 3.7.4 corrects this with the precisely-scoped surface list above.
 
-Never auto-publish. The admin must confirm every publish action. The `--dry-run` flag exists for admins who want to preview before committing.
+Never auto-publish. The admin must confirm every publish action.
+
+Never publish a core whose major version is higher than the org's without the exact Step 0-pre confirmation (core 3.31.1). Not with `--all`, `--no-sync` or `--dry-run`, and not when the admin's request sounds like it. The `--dry-run` flag exists for admins who want to preview before committing.
 
 ### Edge Cases
 

@@ -1,5 +1,22 @@
 ﻿# Agent-Index Core — Changelog
 
+## [3.31.1] — 2026-11-24 — Credentials stay on the device (bug c1a2)
+
+**PATCH — 3.x maintenance release from `release/3.31`.** Backport of the core part of bug `20261118-68dff8bf-143550-c1a2` (4.x: core#37). Pairs with **agent-index-filesystem-onedrive 2.7.3** (credential-store lock around token refresh). Tested on a Google Drive and a OneDrive 3.x test org, including the 3.28.2 → 3.31.1 upgrade path; Windows checked separately.
+
+### Changed — credentials stay on the device (`.claude/CLAUDE.md.template`, `standards.md` v2.6.1)
+- **Important Constraints rule 1:** a member's saved agent-index sign-in never leaves their device. A session must never read, print, copy or move it, and never offer to.
+- **`needs_device_shell`:** when agent-index's tools can't run in a session (no shell, or the executor can't be found or started), the session stops and gives the member a fixed message **exactly as written, word for word, on every operating system**, including the Windows setup link; it may add its own explanation after it. A shell that is still starting is retried once first.
+- **New `windows-prerequisites.md`:** what a Windows machine needs for Claude to reach the member's Agent-Index folder. Linked from the stop message and `standards.md`; links point at the v3.31.1 tag.
+- **cowork-plugin `start-server.sh`:** prints the same unlinked-session message.
+- **`member-bootstrap` 3.10.1:** links the Windows guide.
+
+### Added — `publish-updates` 3.17.0: cross-major guard
+- New Step 0-pre on every invocation: if the local core's major version is higher than the org's, stop before uploading or writing anything and give the two ways forward (put the local core back on the org's line, or follow the upgrade guide and confirm with the exact reply). Step 0a lists a higher-major core apart and `[a]ll` / `--all` never pull it. Same-major updates are not questioned.
+
+### Fixed — `session-start` 3.1.0
+- Doesn't start re-authentication when the problem isn't a sign-in: `needs_auth: false`, or reason `credential_lock_busy`, `network_error`, `tls_or_proxy_error` or `credential_write_failed`. It says what happened in one line and continues. The same exception is in `CLAUDE.md.template` and `standards.md`.
+
 ## [3.31.0] — 2026-09-27 — Multi-marketplace: unique names instead of mandatory prefixes; two publish-updates fixes
 
 **MINOR — relaxes a 3.30.0 rule; every 3.30.0-valid catalog stays valid.** Pairs with **agent-index-marketplace 2.21.0**.

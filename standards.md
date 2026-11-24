@@ -1,9 +1,9 @@
 # Agent-Index Collection Standards
 ## Marketplace Eligibility Specification
 
-**Version:** 2.6.0
+**Version:** 2.6.1
 **Maintained by:** agent-index
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-11-18
 
 ---
 
@@ -815,7 +815,9 @@ Remote connectivity may be unavailable (expired credentials, exec bundle missing
 
 - If the capability only needs local data: proceed normally
 - If the capability needs remote data and `aifs_auth_status()` returns `authenticated: false`: attempt automatic re-authentication by invoking the `aifs_authenticate` flow inline. If re-authentication succeeds, proceed normally. If it fails, surface a clear notice that remote connectivity is required and suggest `@ai:member-bootstrap` as a manual fallback
+- **Not a sign-in problem (core 3.31.1):** if `aifs_auth_status()` returns `authenticated: false` with `needs_auth: false`, or a `reason` of `credential_lock_busy`, `network_error`, `tls_or_proxy_error` or `credential_write_failed`, don't re-authenticate. Tell the member what failed using the `detail` (for `credential_lock_busy`: another agent-index process is refreshing the sign-in; try again in a moment) and stop the remote part
 - Never halt silently — always inform the member what failed and why
+- **If the executor can't run in this session at all (`needs_device_shell`)**: no shell, or `aifs-exec.sh` can't be found or started (after one retry if the shell reported it was still starting). Stop, and give the member CLAUDE.md § "Bootstrap Protocol"'s link-or-Code-tab message. Never move or use the member's credentials elsewhere (CLAUDE.md § "Important Constraints"). Windows members: `windows-prerequisites.md` (core) is the one-page setup and troubleshooting guide.
 
 ---
 

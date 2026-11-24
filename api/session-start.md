@@ -1,7 +1,7 @@
 ---
 name: session-start
 type: task
-version: 3.0.0
+version: 3.1.0
 collection: agent-index-core
 description: Executes automatically at the start of every Cowork session to load member context, register installed capabilities, and surface system notices before any member interaction.
 stateful: false
@@ -89,7 +89,16 @@ If the file exists, remote connectivity is confirmed. Proceed to Step 3.
 
 > "The remote filesystem is authenticated but the org configuration could not be read. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until connectivity is restored. Say '@ai:member-bootstrap' if you'd like to troubleshoot."
 
-**If `authenticated: false`:** Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
+**If `authenticated: false` and the answer is not a sign-in problem** (core 3.31.1; bug `20261118-68dff8bf-143550-c1a2`): `needs_auth` is `false`, or the `reason` is `credential_lock_busy`, `network_error`, `tls_or_proxy_error` or `credential_write_failed`. Do **not** start re-authentication: signing in again wouldn't help and would interrupt the member. Say what happened in one line, using the adapter's `detail`:
+
+- `credential_lock_busy`: "Another agent-index process on this computer is refreshing your sign-in. Try again in a moment; you don't need to sign in again."
+- `network_error`: "I couldn't reach {Google Drive / OneDrive}: {detail}."
+- `tls_or_proxy_error`: "Your network's proxy or certificate blocked the connection: {detail}."
+- `credential_write_failed`: "I couldn't save your refreshed sign-in on this computer: {detail}."
+
+Then continue to Step 3 with the same queued notice as a failed re-authentication. Any other reason (`expired`, `revoked`, `no_credential`, `refresh_failed`, or none) follows the rule below.
+
+**If `authenticated: false`** (any other reason): Do not halt — the member index was already loaded in Step 1. Automatically invoke the member-bootstrap re-authentication flow (do not ask the member to invoke it manually). Surface the message "Your remote filesystem credentials have expired. Let me help you reconnect." and then run the member-bootstrap re-authentication steps inline. If re-authentication succeeds, remote connectivity is restored for the remainder of the session — proceed to Step 3 normally. If re-authentication fails (member cancels, OAuth errors, or the flow cannot complete), proceed to Step 3 with a notice queued for Step 8:
 
 > "I wasn't able to restore your remote filesystem connection. You can still use your installed skills and tasks this session, but you won't be able to install new capabilities or check for updates until you re-authenticate. Say '@ai:member-bootstrap' to try again."
 

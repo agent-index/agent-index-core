@@ -1,7 +1,7 @@
 ---
 name: member-bootstrap
 type: skill
-version: 3.10.0
+version: 3.10.1
 collection: agent-index-core
 description: Guides a member through authenticating to the org's remote filesystem, verifying connectivity, creating the local member workspace, and registering with the org — the first step for any new member after unpacking the bootstrap zip.
 stateful: true
@@ -18,7 +18,7 @@ external_dependencies:
 
 When a new member unpacks the bootstrap zip and opens Cowork (or Claude Code CLI) pointed at their `~/agent-index/` directory, they need to authenticate to the org's remote filesystem, verify connectivity, create their local workspace, and register themselves with the org. The Member Bootstrap Skill handles this entire flow.
 
-**Runtime environment note:** The on-demand executor works identically in both runtimes. In Claude Code CLI and Cowork, the exec shell wrapper at `mcp-servers/filesystem/aifs-exec.sh` is called directly via bash. This skill detects which environment is active and guides accordingly.
+**Runtime environment note:** The on-demand executor works identically in both runtimes. In Claude Code CLI and Cowork, the exec shell wrapper at `mcp-servers/filesystem/aifs-exec.sh` is called directly via bash. This skill detects which environment is active and guides accordingly. Both need the member's own device shell. If it can't run (`needs_device_shell`, CLAUDE.md § "Bootstrap Protocol"), stop: never sign in, or use stored credentials, from anywhere else. Windows members: `windows-prerequisites.md` (core).
 
 This skill replaces the previous Filesystem Setup Skill. The old skill scanned for local cloud-sync mount points (Google Drive, OneDrive, Dropbox) and verified local directory access. The new model is different: the org's shared files live on a remote filesystem accessed through an on-demand executor, and member files live locally. This skill bridges the two — it gets the member authenticated to the remote side and creates the local workspace structure.
 
